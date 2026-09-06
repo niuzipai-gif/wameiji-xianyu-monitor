@@ -918,16 +918,31 @@ def main(argv: list[str] | None = None) -> int:
             command_client=command_client_from_environment(),
         )
 
-        async def run_worker() -> None:
+        async def run_worker() -> int:
             while True:
-                result = await worker.run_once()
-                print(json.dumps(asdict(result), ensure_ascii=False))
-                if args.once:
-                    return
+                try:
+                    result = await worker.run_once()
+                except Exception as exc:  # noqa: BLE001 - a collector must survive transient local failures
+                    print(
+                        json.dumps(
+                            {
+                                "status": "worker_error",
+                                "error_type": type(exc).__name__,
+                                "error_message": str(exc),
+                            },
+                            ensure_ascii=False,
+                        ),
+                        flush=True,
+                    )
+                    if args.once:
+                        return 1
+                else:
+                    print(json.dumps(asdict(result), ensure_ascii=False), flush=True)
+                    if args.once:
+                        return 0
                 await asyncio.sleep(max(15, args.poll_seconds))
 
-        asyncio.run(run_worker())
-        return 0
+        return asyncio.run(run_worker())
     if args.command == "doctor":
         result = run_doctor(config, db_path)
         print(json.dumps(result, ensure_ascii=False, indent=2))

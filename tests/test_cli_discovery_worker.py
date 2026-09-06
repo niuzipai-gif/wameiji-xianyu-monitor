@@ -51,3 +51,36 @@ def test_discovery_worker_once_uses_local_browser_bindings(tmp_path: Path, monke
     assert calls["run_once"] == 1
     assert calls["worker_kwargs"]["db_path"] == str(db_path)
     assert '"scan_count": 3' in capsys.readouterr().out
+
+
+def test_discovery_worker_once_reports_unexpected_worker_failure(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    async def fetch_wameiji(_keyword: str):
+        return []
+
+    async def fetch_xianyu(_query: str):
+        return []
+
+    class FailingWorker:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def run_once(self) -> WorkerRunResult:
+            raise RuntimeError("temporary sqlite lock")
+
+    monkeypatch.setattr(
+        cli,
+        "build_browser_fetchers",
+        lambda _config, _root: (fetch_wameiji, fetch_xianyu),
+        raising=False,
+    )
+    monkeypatch.setattr(cli, "DiscoveryWorker", FailingWorker, raising=False)
+    monkeypatch.setattr(cli, "command_client_from_environment", lambda: None, raising=False)
+
+    exit_code = cli.main(["--db", str(tmp_path / "selection.db"), "discovery-worker", "--once"])
+
+    assert exit_code == 1
+    output = capsys.readouterr().out
+    assert '"status": "worker_error"' in output
+    assert '"error_type": "RuntimeError"' in output

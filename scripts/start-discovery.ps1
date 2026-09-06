@@ -39,6 +39,7 @@ if (-not [Environment]::GetEnvironmentVariable("XIANYU_PROFILE_DIR", "Process"))
 }
 [Environment]::SetEnvironmentVariable("BROWSER_ENABLED", "true", "Process")
 [Environment]::SetEnvironmentVariable("PYTHONUTF8", "1", "Process")
+[Environment]::SetEnvironmentVariable("PYTHONUNBUFFERED", "1", "Process")
 [Environment]::SetEnvironmentVariable("PYTHONPATH", (Join-Path $ProjectRoot "src"), "Process")
 
 if (-not [System.IO.Path]::IsPathRooted($Database)) {
