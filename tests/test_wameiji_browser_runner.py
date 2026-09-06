@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -37,6 +38,19 @@ def _watch(catalog: str = "SRCL-3520") -> WatchItem:
 # === 常量 ===========================================================
 def test_default_search_url_is_meruki_cn() -> None:
     assert DEFAULT_SEARCH_URL == "https://meruki.cn/search"
+
+
+def test_profile_search_url_uses_live_wameiji_keywords_parameter() -> None:
+    """The live search page consumes `keywords`, not the ignored `keyword`."""
+    adapter = WameijiBrowserAdapterWithRunner(
+        enabled=True, profile_dir="C:/fake/profile"
+    )
+    status = adapter.search_status(_watch("Switch 限定版"))
+
+    assert status.search_entry_url is not None
+    assert parse_qs(urlparse(status.search_entry_url).query) == {
+        "keywords": ["Switch 限定版"]
+    }
 
 
 def test_failure_protection_constants_match_spec() -> None:

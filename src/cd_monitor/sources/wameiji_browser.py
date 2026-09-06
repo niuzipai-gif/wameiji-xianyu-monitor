@@ -36,7 +36,7 @@ class WameijiBrowserAdapter(BrowserHarnessAdapter):
                 "Configure a real Chrome profile and browser tool before reading Wameiji pages. "
                 "Stop on captcha, security checks, login expiry, or any purchase action."
             ),
-            search_entry_url=f"https://meruki.cn/search?keyword={quote_plus(watch_item.catalog_no)}",
+            search_entry_url=f"https://meruki.cn/search?keywords={quote_plus(watch_item.catalog_no)}",
             capture_instruction=(
                 "Open the Wameiji search page in a logged-in visible browser, search the catalog/JAN, "
                 "then provide the visible search result HTML through Evaluate Pasted HTML or evaluate-html."
@@ -732,7 +732,7 @@ class WameijiPlaywrightRunner:
     # ---- 内部 --------------------------------------------------------
     def _search_entry_url(self, watch_item: WatchItem) -> str:
         from urllib.parse import quote_plus
-        return f"{self._search_url}?keyword={quote_plus(watch_item.catalog_no)}"
+        return f"{self._search_url}?keywords={quote_plus(watch_item.catalog_no)}"
 
     def _parse_with_local_parser(self, html: str, watch_item: WatchItem) -> list[MarketItem]:
         """复用本模块顶部的 _WameijiCardParser / _extract_generic_items。
@@ -1008,7 +1008,7 @@ class WameijiBrowserAdapterWithRunner(WameijiBrowserAdapter):
                     status="human_required",
                     error_type=insp.get("error_type") or "state_file_invalid",
                     error_message=insp.get("error_message") or "wameiji state file invalid",
-                    search_entry_url=f"{self._search_url}?keyword={quote_plus(watch_item.catalog_no)}",
+                    search_entry_url=f"{self._search_url}?keywords={quote_plus(watch_item.catalog_no)}",
                     state_file_status=insp["status"],
                     state_file_path=self._state_file,
                     state_cookie_domains=insp.get("cookie_domains") or [],
@@ -1025,7 +1025,7 @@ class WameijiBrowserAdapterWithRunner(WameijiBrowserAdapter):
                     "capture path (cli scan-live-html / capture-live-html --source wameiji). "
                     "sync search_status does not start a browser."
                 ),
-                search_entry_url=f"{self._search_url}?keyword={quote_plus(watch_item.catalog_no)}",
+                search_entry_url=f"{self._search_url}?keywords={quote_plus(watch_item.catalog_no)}",
                 login_state_ready=True,
                 state_file_status="ready",
                 state_file_path=self._state_file,
@@ -1043,7 +1043,7 @@ class WameijiBrowserAdapterWithRunner(WameijiBrowserAdapter):
                 "capture path (cli scan-live-html / capture-live-html --source wameiji). "
                 "sync search_status does not start a browser."
             ),
-            search_entry_url=f"{self._search_url}?keyword={quote_plus(watch_item.catalog_no)}",
+            search_entry_url=f"{self._search_url}?keywords={quote_plus(watch_item.catalog_no)}",
             capture_instruction=(
                 "Run: python -m cd_monitor.cli capture-live-html --source wameiji "
                 "--catalog-no <CATALOG> --output <HTML> --profile-dir <CHROME_USER_DATA_DIR>"

@@ -299,7 +299,7 @@ Markdown 复核报告会包含日本侧来源、价格、链接、图片、可�
 
 - `enabled=false` 默认禁用真实读取。
 - `parse_search_html(...)` 解析用户保存或工具采集到的可见 HTML 快照，支持常见嵌套卡片结构；没有专用 `data-*` 属性时，会尝试从包含品番的普通链接块和价格文本中提取候选。价格文本支持 `¥/￥`、`円/元/日元/日圓/人民币`、`JPY/CNY/RMB` 等常见写法；标题/价格也会读取 `title`、`aria-label`、`alt` 等属性文本，图片支持 `src`、`data-src`、`data-original`、`data-lazy-src`；Wameiji 普通文本会尽量识别 `mercari/rakuma/yahoo/bookoff/surugaya` 等来源站点和 `盤傷/ケース割れ/破損` 等品相片段；`已售/售罄/売り切れ/sold out` 等状态会标记为 `sold_out`，评估器会拒绝明确不可购买的候选；多商品父容器会被跳过，避免重复或错配。
-- `search_status(...)` 在 `BROWSER_ENABLED=true` 但没有真实浏览器执行器时返回 `human_required/not_configured`，并暴露安全的手动搜索入口：Wameiji `https://meruki.cn/search?keyword=<catalog>`，Xianyu `https://www.goofish.com/search?q=<catalog>`。
+- `search_status(...)` 在 `BROWSER_ENABLED=true` 但没有真实浏览器执行器时返回 `human_required/not_configured`，并暴露安全的手动搜索入口：Wameiji `https://meruki.cn/search?keywords=<catalog>`，Xianyu `https://www.goofish.com/search?q=<catalog>`。
 - `XianyuBrowserAdapter` 支持检查 Playwright `storage_state` 文件：路径缺失返回 `state_file_missing`，JSON/结构无效返回 `invalid_state_file`，识别到 goofish/xianyu/taobao/alibaba/tmall 相关 cookie 域名时返回 `login_state_ready=true`、`state_file_status=ready` 和域名列表；不会返回 cookie 值。
 - `xianyu-login-state` 可打开可见浏览器登录页并导出 `storage_state`；该流程需要用户自己扫码/登录，命令不会绕过验证，也不会执行搜索、购买、私信或发布动作。
 - `capture-live-html` 可打开 Wameiji 或 Xianyu/Goofish 搜索页并保存只读 HTML 快照，可通过 `--screenshot-output` 同步保存当前搜索页截图、通过 `--network-output` 保存页面响应摘要；闲鱼侧支持 `--state-file` 或 `--profile-dir` 复用用户登录态，随后用现有 parser 统计条目数；它不会点击商品详情、加购、购买、私信、发布或绕过验证。
