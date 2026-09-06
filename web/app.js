@@ -119,6 +119,15 @@
     return Boolean(await promptForAccessToken());
   }
 
+  // Deferred scripts run while the document is already "interactive", so the
+  // global live-feed bootstrap below needs this configuration before the
+  // DOMContentLoaded listener exposes the rest of the app helpers.
+  window.CD_MONITOR_API = window.CD_MONITOR_API || {};
+  window.CD_MONITOR_API.configuredApiBase = configuredApiBase;
+  window.CD_MONITOR_API.configuredApiToken = configuredApiToken;
+  window.CD_MONITOR_API.isSeparateCollectorApi = isSeparateCollectorApi;
+  window.CD_MONITOR_API.ensureViewerAccessToken = ensureViewerAccessToken;
+
   async function fetchWithAccessRetry(requestFactory) {
     let resp = await requestFactory();
     if (resp.status === 401) {
@@ -1808,11 +1817,6 @@ async function refreshAll() {
       window.renderNotificationsAndAI = function(){ return renderNotificationsAndAI.apply(this, arguments); };
       window.flashToast = flashToast;
       window.refreshAll = refreshAll;
-      window.CD_MONITOR_API = window.CD_MONITOR_API || {};
-      window.CD_MONITOR_API.configuredApiBase = configuredApiBase;
-      window.CD_MONITOR_API.configuredApiToken = configuredApiToken;
-      window.CD_MONITOR_API.isSeparateCollectorApi = isSeparateCollectorApi;
-      window.CD_MONITOR_API.ensureViewerAccessToken = ensureViewerAccessToken;
     } catch(e) { console.warn('kuro bridge failed', e); }
   });
 })();

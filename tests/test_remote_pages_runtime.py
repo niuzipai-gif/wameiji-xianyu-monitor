@@ -19,6 +19,7 @@ def _run_browserless_app_harness(
     run_initial_timeouts: bool = False,
     prompt_value: str = "",
     require_access_token: bool = False,
+    document_ready_state: str = "loading",
 ) -> None:
     """Run ``app.js`` with a minimal browser surface in Node.
 
@@ -45,7 +46,7 @@ const storage = {{
 const timers = [];
 let promptCount = 0;
 const document = {{
-  readyState: "loading",
+  readyState: {document_ready_state!r},
   addEventListener(name, listener) {{ (listeners[name] ||= []).push(listener); }},
   querySelectorAll() {{ return []; }},
   querySelector() {{ return null; }},
@@ -125,6 +126,18 @@ def test_remote_pages_does_not_start_legacy_dashboard_requests() -> None:
         'if (requests.length) throw new Error("legacy API requests: " + requests.join(", "));',
         api_base="https://collector.example",
         page_origin="https://viewer.example/",
+    )
+
+
+def test_deferred_remote_pages_does_not_open_a_pages_websocket() -> None:
+    """The early defer-script path must know that Render is the API origin."""
+
+    _run_browserless_app_harness(
+        'if (websocketUrls.length) throw new Error("unexpected websocket: " + websocketUrls.join(", "));',
+        api_base="https://collector.example",
+        page_origin="https://viewer.example",
+        capture_websocket=True,
+        document_ready_state="interactive",
     )
 
 
