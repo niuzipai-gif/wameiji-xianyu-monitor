@@ -17,6 +17,11 @@ services:
         value: "false"
       - key: CD_DATA_DIR
         value: /tmp/cd_monitor_data
+      # This queue is intentionally separate from CD_DB_PATH: the collector
+      # uploads the latter as a full SQLite replica, while dashboard commands
+      # must stay available until the collector has acknowledged them.
+      - key: CD_COMMAND_DB_PATH
+        value: /tmp/cd_monitor_commands.db
       - key: WEB_ALLOWED_ORIGINS
         sync: false
       - key: WEB_ACCESS_TOKEN

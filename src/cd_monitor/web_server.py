@@ -345,6 +345,19 @@ def _build_handler(
     account_dir: Path | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     static_root = static_dir.resolve()
+    # A hosted replica receives complete SQLite database uploads from the
+    # collector.  Commands originate on the hosted dashboard, so keeping that
+    # small queue in its own database prevents an upload from deleting a
+    # pending command before the collector's next poll.  Local deployments do
+    # not set this environment variable and retain the single-database layout.
+    configured_command_db = os.environ.get("CD_COMMAND_DB_PATH", "").strip()
+    command_db_path = (
+        Path(configured_command_db).expanduser().resolve()
+        if configured_command_db
+        else db_path
+    )
+    if command_db_path != db_path:
+        init_db(command_db_path)
     # Keep scraper sidecars and helper scripts beside the checked-out data
     # directory on Windows while retaining the Docker ``/app/data`` layout.
     # ``CD_DATA_DIR`` is an explicit escape hatch for deployments that mount
@@ -412,7 +425,7 @@ def _build_handler(
                 self._json(
                     {
                         "items": list_collector_commands(
-                            db_path,
+                            command_db_path,
                             statuses=("pending", "accepted", "running"),
                             limit=100,
                         )
@@ -528,7 +541,7 @@ def _build_handler(
                 self._json({"items": _discovery_pool_views(db_path)})
                 return
             if route == "/api/discovery/commands":
-                self._json({"items": list_collector_commands(db_path, limit=100)})
+                self._json({"items": list_collector_commands(command_db_path, limit=100)})
                 return
             if route == "/api/opportunities":
                 parsed_q = urlparse(self.path).query
@@ -852,7 +865,7 @@ def _build_handler(
                 try:
                     self._json(
                         complete_collector_command(
-                            db_path,
+                            command_db_path,
                             command_id,
                             result,
                             status=str(payload.get("status") or "completed"),
@@ -1103,7 +1116,7 @@ def _build_handler(
                 if command_type == "scan_now":
                     dedupe_key = f"scan_now:{pool_id if pool_id is not None else 'all'}"
                 command = create_collector_command(
-                    db_path,
+                    command_db_path,
                     command_type,
                     command_payload,
                     dedupe_key=dedupe_key,
