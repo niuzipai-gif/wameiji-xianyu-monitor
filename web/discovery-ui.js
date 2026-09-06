@@ -317,7 +317,15 @@
   document.addEventListener("DOMContentLoaded", () => {
     // app.js exposes its authenticated API helpers in its own DOM-ready
     // listener. Queue one tick so this module always uses the same Page token.
-    setTimeout(() => {
+    setTimeout(async () => {
+      const api = window.CD_MONITOR_API;
+      if (api && typeof api.ensureViewerAccessToken === "function") {
+        const accessReady = await api.ensureViewerAccessToken();
+        if (!accessReady) {
+          setCommandMessage("需要 Render 访问令牌才能读取选品广场；填写后刷新此页即可继续。", true);
+          return;
+        }
+      }
       bindControls();
       keepBoardKpisVisible();
       refreshBoard();

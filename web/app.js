@@ -83,6 +83,16 @@
     return String(query || saved || runtime.accessToken || "").trim();
   }
 
+  function isSeparateCollectorApi() {
+    const base = configuredApiBase();
+    if (!base) return false;
+    try {
+      return new URL(base, window.location.href).origin !== window.location.origin;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // A Pages visitor can open the fixed URL and enter the Render token once.
   // Keep the prompt shared so the parallel bootstrap requests do not show a
   // dozen dialogs at the same time; the token is stored only in localStorage.
@@ -102,6 +112,11 @@
       return token;
     }).finally(() => { accessPromptPromise = null; });
     return accessPromptPromise;
+  }
+
+  async function ensureViewerAccessToken() {
+    if (!isSeparateCollectorApi() || configuredApiToken()) return true;
+    return Boolean(await promptForAccessToken());
   }
 
   async function fetchWithAccessRetry(requestFactory) {
@@ -1290,7 +1305,7 @@ function buildProductUrl(opp) {
   }
 
   // ---------- main bootstrap ----------
-  setInterval(pollScraperStatus, 30000);
+  if (!isSeparateCollectorApi()) setInterval(pollScraperStatus, 30000);
   async function pollScraperStatus() {
   try {
     const r = await getJson("/api/scraper-status");
@@ -1758,29 +1773,32 @@ async function refreshAll() {
     }
   }
   document.addEventListener("DOMContentLoaded", () => {
+    const remoteViewer = isSeparateCollectorApi();
     bindNav();
-    bindGlobalButtons();
-    bindFeedFilter();
-    bindGlobalSearch();
-    bindModalCloses();
-    bindAdvancedFilter();
-    bindTaskForm();
-    bindEditTaskForm();
-    bindAiGenerateButton();
-    bindAiGenerateForm();
-    bindAiGenerateActions();
-    bindImportForm();
-    bindFilterForm();
-    bindAccountActions();
-    bindTaskFilter();
-    bindLogFilter();
-    bindRankSort();
-    bindAccountFilter();
-    bindPasteLoginState();
-    bindUserOverridesForm();
     applyKuroTheme(state.userSettings?.kuro_theme || localStorage.getItem("kuro_theme"));
-    refreshAll().catch((e) => console.error("refreshAll failed", e));
-    setInterval(() => refreshAll().catch(() => {}), 60_000);
+    if (!remoteViewer) {
+      bindGlobalButtons();
+      bindFeedFilter();
+      bindGlobalSearch();
+      bindModalCloses();
+      bindAdvancedFilter();
+      bindTaskForm();
+      bindEditTaskForm();
+      bindAiGenerateButton();
+      bindAiGenerateForm();
+      bindAiGenerateActions();
+      bindImportForm();
+      bindFilterForm();
+      bindAccountActions();
+      bindTaskFilter();
+      bindLogFilter();
+      bindRankSort();
+      bindAccountFilter();
+      bindPasteLoginState();
+      bindUserOverridesForm();
+      refreshAll().catch((e) => console.error("refreshAll failed", e));
+      setInterval(() => refreshAll().catch(() => {}), 60_000);
+    }
     // kuro_bridge: surface IIFE-private helpers to module-level code
     try {
       window.postJson = postJson;
@@ -1790,6 +1808,11 @@ async function refreshAll() {
       window.renderNotificationsAndAI = function(){ return renderNotificationsAndAI.apply(this, arguments); };
       window.flashToast = flashToast;
       window.refreshAll = refreshAll;
+      window.CD_MONITOR_API = window.CD_MONITOR_API || {};
+      window.CD_MONITOR_API.configuredApiBase = configuredApiBase;
+      window.CD_MONITOR_API.configuredApiToken = configuredApiToken;
+      window.CD_MONITOR_API.isSeparateCollectorApi = isSeparateCollectorApi;
+      window.CD_MONITOR_API.ensureViewerAccessToken = ensureViewerAccessToken;
     } catch(e) { console.warn('kuro bridge failed', e); }
   });
 })();
@@ -2008,13 +2031,17 @@ function bindNewSettingsForms() {
 
 function connectLiveFeed() {
   if (window._kuroLiveFeed && window._kuroLiveFeed.ws && window._kuroLiveFeed.ws.readyState <= 1) return;
-  const wsOrigin = configuredApiBase() || window.location.origin;
+  const api = window.CD_MONITOR_API || {};
+  const apiBase = typeof api.configuredApiBase === "function" ? api.configuredApiBase : () => "";
+  const apiToken = typeof api.configuredApiToken === "function" ? api.configuredApiToken : () => "";
+  const wsOrigin = apiBase() || window.location.origin;
   let wsUrl;
   try {
     const parsed = new URL(wsOrigin, window.location.href);
     parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
     parsed.pathname = "/ws";
-    parsed.search = configuredApiToken() ? "?access_token=" + encodeURIComponent(configuredApiToken()) : "";
+    const token = apiToken();
+    parsed.search = token ? "?access_token=" + encodeURIComponent(token) : "";
     parsed.hash = "";
     wsUrl = parsed.toString();
   } catch (_) {
@@ -2053,10 +2080,12 @@ function connectLiveFeed() {
       const t = msg.type || "";
       if (t === "hello") return;
       if (t.indexOf("watch_action") === 0) {
-        try { refreshAll(); } catch (e) {}
+        try {
+          if (typeof window.refreshAll === "function") window.refreshAll();
+        } catch (e) {}
         const p = msg.payload || {};
-        if (t === "watch_action_terminal") {
-          flashToast("任务 #" + p.watch_id + " · " + (p.action || "") + " → " + (p.status || ""));
+        if (t === "watch_action_terminal" && typeof window.flashToast === "function") {
+          window.flashToast("任务 #" + p.watch_id + " · " + (p.action || "") + " → " + (p.status || ""));
         }
       }
     });
@@ -2066,6 +2095,8 @@ function connectLiveFeed() {
 
 (function _kuroBootstrap() {
   const wire = () => {
+    const api = window.CD_MONITOR_API;
+    if (api && typeof api.isSeparateCollectorApi === "function" && api.isSeparateCollectorApi()) return;
     bindNewSettingsForms();
     renderNotificationsAndAI();
     connectLiveFeed();
@@ -2092,4 +2123,3 @@ function connectLiveFeed() {
   }
 })();
 // openBlacklistEditor_PATCH_V3
-
