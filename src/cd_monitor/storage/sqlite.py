@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
+from uuid import uuid4
 
 from cd_monitor.core.discovery import DiscoveryCandidate, DiscoveryKeyword, DiscoveryPool
 from cd_monitor.core.identifiers import normalize_catalog_no_compact
@@ -1602,14 +1603,19 @@ def create_collector_command(
 ) -> dict[str, object]:
     init_db(db_path)
     serialized = json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
+    # The SQLite row id restarts when Render's free instance is rebuilt.  Give
+    # every command a stable opaque identity so the collector can mirror it
+    # safely across those restarts.
+    remote_command_id = uuid4().hex
     with sqlite3.connect(db_path) as conn:
         try:
             cursor = conn.execute(
                 """
-                INSERT INTO collector_commands (command_type, payload_json, dedupe_key)
-                VALUES (?, ?, ?)
+                INSERT INTO collector_commands (
+                  remote_command_id, command_type, payload_json, dedupe_key
+                ) VALUES (?, ?, ?, ?)
                 """,
-                (command_type, serialized, dedupe_key),
+                (remote_command_id, command_type, serialized, dedupe_key),
             )
             command_id = int(cursor.lastrowid)
         except sqlite3.IntegrityError:
@@ -1677,7 +1683,10 @@ def upsert_remote_collector_command(
     command's identity here prevents a successful acknowledgement from being
     lost during that next copy.
     """
-    remote_id = command.get("id")
+    # New Render commands carry a UUID which remains unique even if Render's
+    # temporary command database is recreated.  Keep the numeric-id fallback
+    # so an already-running older collector can still be mirrored.
+    remote_id = command.get("remote_command_id") or command.get("id")
     if remote_id is None or str(remote_id).strip() == "":
         raise ValueError("remote_command_id_required")
     command_type = str(command.get("command_type") or "").strip()

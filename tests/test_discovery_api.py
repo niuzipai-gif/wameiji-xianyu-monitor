@@ -52,6 +52,8 @@ def test_selection_board_and_remote_command_acknowledgement(tmp_path, monkeypatc
         )
         assert code == 202
         assert command["status"] == "pending"
+        assert isinstance(command["remote_command_id"], str)
+        assert command["remote_command_id"]
         command_id = command["id"]
 
         code, unauthenticated = _request(f"{base_url}/api/discovery/collector/commands")
@@ -64,6 +66,7 @@ def test_selection_board_and_remote_command_acknowledgement(tmp_path, monkeypatc
         )
         assert code == 200
         assert [entry["id"] for entry in queued["items"]] == [command_id]
+        assert queued["items"][0]["remote_command_id"] == command["remote_command_id"]
 
         code, complete = _request(
             f"{base_url}/api/discovery/collector/commands/{command_id}/complete",

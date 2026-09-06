@@ -6,9 +6,11 @@ from pathlib import Path
 from cd_monitor.core.models import MarketItem, XianyuPriceSample
 from cd_monitor.services.discovery_worker import DiscoveryWorker
 from cd_monitor.storage.sqlite import (
+    complete_collector_command,
     init_db,
     list_collector_commands,
     list_discovery_pools,
+    upsert_remote_collector_command,
     update_discovery_pool,
 )
 
@@ -111,3 +113,29 @@ def test_worker_respects_disabled_pool_even_when_commanded(tmp_path: Path) -> No
     assert result.scan_count == 0
     assert called is False
     assert command_client.completions == [(92, "completed", {"runs": 0, "status": "ok"})]
+
+
+def test_remote_command_identity_survives_render_id_reset(tmp_path: Path) -> None:
+    """A Render restart can reuse numeric ids, so local mirroring needs its UUID."""
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    legacy = upsert_remote_collector_command(
+        db_path,
+        {"id": 1, "command_type": "scan_now", "payload": {}, "status": "pending"},
+    )
+    complete_collector_command(db_path, int(legacy["id"]), status="completed")
+
+    restarted_render_command = upsert_remote_collector_command(
+        db_path,
+        {
+            "id": 1,
+            "remote_command_id": "d057d132e3f44d4d88493f2a3e8c01f2",
+            "command_type": "scan_now",
+            "payload": {},
+            "status": "pending",
+        },
+    )
+
+    assert restarted_render_command["id"] != legacy["id"]
+    assert restarted_render_command["remote_command_id"] == "d057d132e3f44d4d88493f2a3e8c01f2"
+    assert restarted_render_command["status"] == "pending"
