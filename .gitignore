@@ -1,6 +1,7 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+.playwright-cli/
 _site/
 src/*.egg-info/
 *.py[cod]
