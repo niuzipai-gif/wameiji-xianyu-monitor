@@ -75,11 +75,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps1
 ### 托管拆分已完成（2026-09-06）
 
 - GitHub 仓库：https://github.com/niuzipai-gif/wameiji-xianyu-monitor
-- GitHub Pages 已开启，首次工作流已成功：https://niuzipai-gif.github.io/wameiji-xianyu-monitor/
-- `render.yaml` 已定义免费 Render API 服务；Render 账号连接和环境变量仍需在网页端做一次性设置。
-- `scripts/publish-replica.py` 与 `POST /api/sync/database` 用于把本机 SQLite 数据源同步到无持久盘的 Render 服务；浏览器 profile、Cookie、原始快照和本机数据库均被忽略。
+- GitHub Pages 已开启，工作流已成功：https://niuzipai-gif.github.io/wameiji-xianyu-monitor/
+- Render Blueprint `wameiji-xianyu-monitor` 已创建，`wameiji-xianyu-api` 已部署并通过 `/api/health` 健康检查：https://wameiji-xianyu-api.onrender.com
+- `scripts/publish-replica.py` 与 `POST /api/sync/database` 已用本机 SQLite 做过一次真实同步；浏览器 profile、Cookie、原始快照和本机数据库均被忽略。
+- 本机 `.env` 已保存 Render 地址和两个令牌；`scripts/start-replica.ps1` 可每 5 分钟持续同步。
 
-剩余交接动作是：用仓库创建 Render Blueprint，填写 `WEB_ALLOWED_ORIGINS`、`WEB_ACCESS_TOKEN`、`CD_SYNC_TOKEN`；再把 GitHub 仓库变量 `CD_MONITOR_API_BASE` 设为 Render 地址并重跑 Pages 工作流。README 的“家里电脑只用前端：GitHub Pages + Render”已写出具体点击顺序。
+家里电脑首次打开 Pages 时，如果 API 显示离线，需要从 Render Environment 复制 `WEB_ACCESS_TOKEN`，给 Pages 地址追加 `?access_token=令牌`；采集电脑需要保持 `scripts/start-replica.ps1` 窗口运行。
 
 1. 恢复实际数据库备份或旧 Docker 数据卷，或先在 `data/local/takeover.db` 建立至少一个真实 watchlist 品番；当前三张核心表都是 0 行。
 2. 在可见 Playwright 浏览器中完成挖煤姬登录，保留 `data/browser_profiles/wameiji`；闲鱼可见 profile 保留在 `data/browser_profiles/goofish`，`data/xianyu_state.json` 作为备用状态文件。登录、扫码、验证码或安全验证必须由用户本人完成。

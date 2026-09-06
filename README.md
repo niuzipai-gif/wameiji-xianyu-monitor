@@ -20,15 +20,15 @@ Render 免费 Web Service 的文件系统会在重启、重新部署或闲置唤
 
 1. 在 Render 用本仓库的 Blueprint 创建 `wameiji-xianyu-api`，选择 Free。填写三个环境变量：`WEB_ALLOWED_ORIGINS=https://niuzipai-gif.github.io`、随机的 `WEB_ACCESS_TOKEN`、随机的 `CD_SYNC_TOKEN`。两个 token 只放 Render 和本机 `.env`，不要写进仓库。
 2. 把 Render 给出的 API 地址填入 GitHub 仓库变量 `CD_MONITOR_API_BASE`，然后手动运行一次 `Deploy frontend to GitHub Pages`。页面地址会是 `https://niuzipai-gif.github.io/<仓库名>/`。
-3. 在采集电脑的项目目录设置本机环境变量并启动发布循环：
+3. 在采集电脑的项目目录启动发布循环（令牌已经写入本机 `.env`，不用再复制）：
 
    ```powershell
-   $env:CD_REPLICA_URL = "https://你的-render-服务.onrender.com"
-   $env:CD_SYNC_TOKEN = "与 Render 完全相同的随机值"
-   .\.venv\Scripts\python.exe .\scripts\publish-replica.py --db data/local/takeover.db --interval-seconds 300
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-replica.ps1
    ```
 
-4. 家里打开 Pages 地址；如果 API 开了访问 token，把地址临时写成 `...?access_token=你的WEB_ACCESS_TOKEN`。页面会自动把 token 带给 Render，确认能看到数据后再清理地址栏即可。
+   这个窗口保持运行，每 5 分钟把 `data/local/takeover.db` 同步到 Render；需要停止时按 `Ctrl+C`。
+
+4. 家里打开 Pages 地址。如果看到“API 离线”，从 Render 服务的 Environment 复制 `WEB_ACCESS_TOKEN`，在 Pages 地址后追加 `?access_token=令牌` 并回车；页面会把令牌保存为会话 Cookie，之后可清理地址栏。
 
 Pages 工作流不保存 token；`web/runtime-config.js` 只保存空配置，前端也支持用 URL `api_base` 或浏览器 `localStorage` 覆盖 API 地址。采集电脑仍按本地启动脚本运行，浏览器登录和验证码处理都只发生在这台电脑。
 
