@@ -1,0 +1,29 @@
+WAMEIJI-XIANYU full handoff package
+Generated: 2026-06-15T10:59:38.6914229+08:00
+Includes runtime data under data/. Treat as sensitive internal material.
+Excluded: cache directories and recursive full_handoff output.
+
+Top-level files:
+- .env.example
+- .gitignore
+- cd_monitor
+- CLAUDE_CODE_TODO.md
+- CODEX_MASTER_PROMPT (1).txt
+- CODEX_MASTER_PROMPT.txt
+- CODEX_PROJECT_SPEC (1).md
+- CODEX_PROJECT_SPEC.md
+- COMMUNITY_RESEARCH.md
+- config.example.yaml
+- data
+- DELIVERY_REPORT.md
+- EXTERNAL_COLLECTOR_CONTRACT.md
+- FULL_HANDOFF_README.md
+- HANDOFF_TO_CLAUDE_CODE.md
+- output_snapshot
+- pyproject.toml
+- README.md
+- scripts
+- src
+- tests
+- tools
+- web

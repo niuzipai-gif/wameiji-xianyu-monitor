@@ -1,0 +1,62 @@
+app:
+  db_path: "data/cd_monitor.db"
+  snapshot_dir: "data/snapshots"
+  screenshot_dir: "data/screenshots"
+
+cost:
+  wameiji_exchange_rate: 0.046
+  default_proxy_fee_jpy: 200
+  default_japan_domestic_shipping_jpy: 0
+  international_shipping_per_cd_cny: 18
+  china_reship_cost_cny: 12
+  packaging_cost_cny: 2
+  after_sale_reserve_cny: 5
+  risk_reserve_min_cny: 8
+  risk_reserve_rate: 0.03
+  annual_capital_rate: 0.08
+
+xianyu:
+  min_valid_price_cny: 10
+  max_valid_price_cny: 2000
+  negotiation_discount: 0.92
+  liquidity_discount_default: 0.90
+  fee_rate_default: 0.006
+  fee_cap_cny: 60
+  sample_limit: 15
+
+alert:
+  strong_profit_min_cny: 35
+  strong_margin_min: 0.35
+  weak_profit_min_cny: 50
+  weak_margin_min: 0.25
+  min_match_confidence_strong: 0.85
+  min_match_confidence_weak: 0.75
+  min_xianyu_samples_strong: 3
+  min_xianyu_samples_weak: 2
+
+browser:
+  enabled: false
+  profile_name: "default"
+  min_delay_seconds: 5
+  max_delay_seconds: 12
+  max_retries_per_action: 2
+  stop_on_captcha: true
+  stop_on_security_check: true
+
+  # 闲鱼/Goofish 真实 Playwright user-data-dir。与 state_file 同时配置时优先用可见 profile。
+  xianyu_profile_dir: ""
+
+  # === Wameiji 真实浏览器读取配置 ===
+  # 真实 Chrome user-data-dir。留空表示不真实读挖煤姬（CLI 仍返回 disabled / human_required）。
+  # 推荐：从 Chrome 浏览器导出独立 profile，专门用于本工具，避免与日常账号混用。
+  wameiji_profile_dir: ""
+  wameiji_search_url: "https://meruki.cn/search"
+  wameiji_headless: false                 # 首次建议有头，便于扫码/确认登录
+  wameiji_max_consecutive_failures: 3     # 连续失败上限（spec §1.2）
+  wameiji_max_retries_per_action: 2       # 单 action 重试上限（spec §1.2）
+  wameiji_page_load_timeout_ms: 30000
+  wameiji_result_timeout_ms: 20000
+
+notify:
+  feishu_webhook_url: ""
+  dingtalk_webhook_url: ""

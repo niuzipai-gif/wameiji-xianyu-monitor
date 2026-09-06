@@ -1,0 +1,14 @@
+[
+  {
+    "source": "mock",
+    "source_site": "mock",
+    "external_item_id": "synthetic-wameiji-001",
+    "catalog_no": "SRCL-3520",
+    "title": "Artist Album SRCL-3520 初回限定 帯付き [synthetic]",
+    "price": 1200,
+    "currency": "JPY",
+    "url": "https://example.invalid/mock/wameiji/001",
+    "availability": "available",
+    "raw_text": "Synthetic offline fixture; source=mock; no real listing or historical price."
+  }
+]

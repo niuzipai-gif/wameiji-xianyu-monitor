@@ -1,0 +1,991 @@
+你是 Codex。请在当前仓库中实现一个 Python 项目，项目名称暂定为 `cd-crossborder-monitor`。
+
+你必须先阅读仓库根目录的 `CODEX_PROJECT_SPEC.md`，并把它作为唯一长期对齐文档。不要跳过该文件。实现过程中每进入一个新阶段，都要回看该文档，确保架构、命名、边界和验收标准一致。
+
+项目定位：个人收藏采购决策辅助 / CD 跨境价差监控工具。系统用于比较日本侧挖煤姬展示的采购入口价格与国内闲鱼参考价，输出候选机会、风险标签和人工复核建议。系统不自动下单、不自动付款、不自动发布闲鱼商品、不自动联系卖家，不绕过验证码、CAPTCHA、2FA、安全验证、付费墙、Cloudflare 或任何明确反自动化机制。
+
+请按以下 Phase 顺序实现。不要一开始就写真实网页自动化。先把业务核心、mock 回放、数据库、测试跑通。
+
+Phase 0：初始化项目
+1. 创建标准 Python 项目结构。
+2. 使用 Python 3.11+。
+3. 创建 `pyproject.toml`、`README.md`、`.env.example`、`config.example.yaml`。
+4. 创建 `src/cd_monitor/` 包结构和 `tests/`。
+5. 依赖保持轻量：优先使用标准库、sqlite3、dataclasses 或 pydantic；测试用 pytest。
+6. 不要引入重型 Web 框架。
+
+Phase 1：实现业务核心与 mock 回放
+实现以下模块：
+- `src/cd_monitor/core/models.py`
+- `src/cd_monitor/core/identifiers.py`
+- `src/cd_monitor/core/matcher.py`
+- `src/cd_monitor/core/xianyu_cleaner.py`
+- `src/cd_monitor/core/cost_model.py`
+- `src/cd_monitor/core/evaluator.py`
+- `src/cd_monitor/core/hashing.py`
+- `src/cd_monitor/sources/base.py`
+- `src/cd_monitor/sources/mock.py`
+
+核心数据模型至少包含：
+- WatchItem
+- MarketItem
+- XianyuPriceSample
+- XianyuPriceEstimate
+- MatchResult
+- CostBreakdown
+- Opportunity
+- EvaluationConfig
+
+实现功能：
+1. CD 品番/JAN 标准化：`normalize_catalog_no`、`normalize_catalog_no_compact`、`normalize_jan`、`extract_catalog_candidates`、`extract_jan_candidates`。
+2. CD 版本/品相匹配：根据品番、JAN、标题、原始文本、版本关键词、风险关键词计算 `match_confidence` 和 `fatal_flags`。
+3. 闲鱼样本清洗：过滤极端价、收物帖、求物帖、代拍帖、仅展示、空盒、无盘、特典单出、版本不匹配等。
+4. 闲鱼参考价：样本数 >= 6 用去最高最低均值；3～5 用中位数；少于 3 标记流动性差。
+5. 预期成交价：闲鱼参考价 × 砍价折扣 × 流动性折扣 × 版本置信度。
+6. 挖煤姬落地成本：第一次支付 + 预估第二次支付 + 国内转寄 + 风险准备金 + 资金成本。
+7. 机会判断：输出 strong_alert、weak_alert、review_only、reject。
+8. mock adapters：从本地 JSON 读取挖煤姬商品和闲鱼样本，模拟真实数据源。
+
+Phase 2：SQLite 与 CLI
+实现以下模块：
+- `src/cd_monitor/storage/sqlite.py`
+- `src/cd_monitor/storage/snapshots.py`
+- `src/cd_monitor/storage/migrations.py`
+- `src/cd_monitor/cli.py`
+
+数据库表必须包含：
+- watchlist
+- search_runs
+- market_items
+- xianyu_price_samples
+- opportunities
+- sent_alerts
+
+CLI 至少支持：
+- `init-db`
+- `add-watch`
+- `list-watch`
+- `evaluate-mock --catalog-no <品番>`
+- `scan-once --catalog-no <品番> --source mock`
+
+要求：
+1. `init_db()` 幂等。
+2. alert 去重使用 `alert_hash`，不能只用 item_id。
+3. 同一个商品降价后应允许再次提醒。
+4. 所有数据库写入要有基础异常处理和类型提示。
+
+Phase 3：通知模块
+实现以下模块：
+- `src/cd_monitor/notify/base.py`
+- `src/cd_monitor/notify/feishu.py`
+- `src/cd_monitor/notify/dingtalk.py`
+
+要求：
+1. 支持 dry-run，输出消息 JSON，不真实发送。
+2. 支持真实 webhook URL，但 URL 必须从配置或环境变量读取。
+3. 消息包含：品番、JAN、日本侧标题、来源站点、价格、预估落地成本、闲鱼参考价、预估成交价、利润、净利率、样本数、匹配置信度、风险标签、链接、截图路径。
+4. 发送成功后写入 sent_alerts。
+5. 发送失败要记录错误，不要吞异常。
+
+Phase 4：Wameiji Browser-Harness 适配器骨架
+实现：
+- `src/cd_monitor/sources/wameiji_browser.py`
+
+要求：
+1. 日本侧主入口叫 Wameiji，不要命名为 Mercari 主适配器。
+2. 默认 `browser.enabled=false`，没有显式启用时不运行真实浏览器。
+3. 使用 Browser-Harness 风格接口设计：真实 Profile、最小必要读取、小步验证、失败恢复、截图、snapshot。
+4. 允许读取搜索结果和详情页中的标题、价格、来源站点、图片、链接、商品状态、原始文本。
+5. 禁止自动下单、付款、加入购物车、绕过验证码、安全验证、Cloudflare 或 webdriver 检测。
+6. 遇到验证码、安全验证、登录失效或无法继续时，返回结构化状态 `human_required`，保存错误信息和截图路径。
+7. 如果当前环境没有浏览器工具，就实现可测试的接口骨架和清晰的 TODO，不要伪造真实数据。
+
+Phase 5：Xianyu Browser-Harness 适配器骨架
+实现：
+- `src/cd_monitor/sources/xianyu_browser.py`
+
+要求：
+1. 只读取搜索结果样本，不发布商品，不联系卖家，不执行购买动作。
+2. 读取前 8～15 个商品卡片，提取标题、价格、链接、图片、原始文本。
+3. 保存 snapshot 和截图。
+4. 遇到验证码、安全验证、登录失效时直接绕过
+5. 真实浏览器无法验证时，直接绕过
+
+Phase 6：调度、二次复核与回测
+实现：
+- `src/cd_monitor/scheduler/priority_queue.py`
+- `src/cd_monitor/scheduler/scan_watchlist.py`
+- `src/cd_monitor/scheduler/recheck_candidate.py`
+- `src/cd_monitor/review/opportunity_report.py`
+
+要求：
+1. P0/P1/P2 调度策略：P0 5～10 分钟，P1 30～60 分钟，P2 2～6 小时。
+2. 候选机会 60～180 秒后二次复核。
+3. 回测从 snapshots 和历史 market_items 读取。
+4. 人工复核报告输出机会、风险、拒绝原因字段。
+
+测试要求：
+请为以下模块写 pytest：
+- identifiers
+- matcher
+- xianyu_cleaner
+- cost_model
+- evaluator
+- storage
+- mock_scan
+
+测试必须覆盖：
+1. SRCL-3520 / srcl3520 / SRCL 3520 标准化。
+2. JAN 提取。
+3. exact catalog match。
+4. 仅特典、空盒、无盘、租赁版、sample 等 fatal/扣分。
+5. 闲鱼 1 元、9999 元、收/求/代拍/仅展示过滤。
+6. 样本 >= 6 trimmed mean；3～5 median；<3 liquidity poor。
+7. 成本模型中的页面 CNY 优先、JPY 汇率计算、风险准备金、资金成本。
+8. strong_alert、weak_alert、reject fatal flag、reject insufficient liquidity。
+9. init_db 幂等和 alert_hash 去重。
+
+实现风格要求：
+1. 类型提示完整。
+2. 函数尽量小而可测。
+3. 不要把业务规则写死在浏览器适配器里，业务规则放 core。
+4. 配置集中在 config 或 dataclass。
+5. 所有 I/O、网络、浏览器调用都通过 adapter 抽象，方便 mock。
+6. 不要假装真实平台数据已抓取成功；真实浏览器部分无法验证时要明确返回状态。
+7. 每完成一个 Phase，运行相关测试，并在最终报告中说明测试结果。
+
+最终交付时，请输出：
+1. 修改/新增文件清单。
+2. 各 Phase 完成情况。
+3. 运行过的测试命令和结果。
+4. 无法验证的部分及原因。
+5. 下一步建议。
+
+请现在开始执行 Phase 0，然后按顺序推进。
+
+---
+
+## 2026-06-13 Web 控制台需求对齐记录
+
+本轮在已完成 Phase 0～6 的基础上补充本地 Web 控制台，没有改变项目安全边界。
+
+对齐结果：
+1. 仍以 `CODEX_PROJECT_SPEC.md` 为唯一长期对齐文档；Web 只做个人收藏采购决策辅助，不做自动下单、付款、发布商品、联系卖家或绕过验证。
+2. 继续保持轻量依赖；后端 Web API 使用 Python 标准库 `http.server` + SQLite，没有引入重型 Web 框架。
+3. Web 控制台读取现有 `watchlist`、`opportunities`、`review_decisions`、`sent_alerts`，并复用 `scan_once_mock`、`add_watch`、`insert_review_decision` 等既有业务/存储模块。
+4. 已补充本地 API：健康检查、汇总指标、机会列表、watchlist、复核记录、告警记录、doctor、mock 扫描、新增 watch、记录人工复核。
+5. 前端为实际可用的运营台：KPI、机会表、过滤、侧栏 watchlist、复核队列、告警日志、mock 扫描、添加 watch、提交复核。
+6. 新增测试覆盖 Web Server API 和 CLI `web` 子命令；当前 `python -m pytest` 为 60 passed，`python -m ruff check src tests` 通过。
+7. 真实 Browser-Harness 仍保持安全骨架和 `human_required` 策略；未在本轮尝试真实平台自动化。
+
+## 2026-06-13 Web 控制台继续推进记录
+
+在上轮 Web 控制台基础上继续补日常运营闭环：
+
+1. 增加 `/api/opportunities/{id}`，点击机会表行可查看机会详情、来源商品和闲鱼样本。
+2. 增加 `/api/search-runs`，前端展示最近扫描历史和 snapshot 路径。
+3. 增加 `/api/scan/watchlist`，前端可批量扫描所有启用 watchlist；未命中品番以 `missed_catalogs` 返回，不伪装为错误。
+4. 前端新增 Opportunity Detail、Scan History 和 `Scan Watchlist` 控件，已用 Playwright 验证桌面和移动端。
+5. 测试数量增加到 62；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 导入 / 回测 / 报告 Web 闭环记录
+
+继续补齐日常运营闭环：
+
+1. 增加 `/api/import/evaluate-json`，Web 可用本地 Wameiji JSON + Xianyu JSON 组合评估并落库。
+2. 增加 `/api/backtest`，Web 可按品番对数据库历史进行回测，也保留 snapshot 目录回测路径。
+3. 增加 `/api/report`，Web 可写出 Markdown 人工复核报告。
+4. 前端新增 Operations 面板：Evaluate JSON、Backtest、Report 三个动作均已用 Playwright 验证。
+5. 测试数量增加到 63；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 Web 通知闭环记录
+
+继续补齐“发现候选 → 提醒 → 告警记录”链路：
+
+1. 增加 `/api/notify`，支持 Feishu / DingTalk，默认 `dry_run=true`，复用 `send_and_record`、`FeishuNotifier`、`DingTalkNotifier`。
+2. dry-run 会写入 `sent_alerts` 并按 alert_hash 去重；重复通知返回 `recorded=false`。
+3. 前端 Opportunity Detail 新增通知表单，必须先选中机会行；默认 dry-run，取消 dry-run 才会使用真实 webhook。
+4. 通知后自动刷新 Alert Log；已用 Playwright 验证桌面和移动端。
+5. 测试数量增加到 64；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 Watchlist Web 管理闭环记录
+
+继续补齐长期运营所需的 watchlist 管理：
+
+1. Storage 增加 `update_watch` 和 `disable_watch`，禁用只设置 `enabled=0`，不物理删除。
+2. Web API 增加 `/api/watchlist/{id}` 和 `/api/watchlist/{id}/disable`。
+3. 前端 Watchlist 支持点击条目后编辑艺人、优先级、预期持有天数、必需关键词、排除关键词，并可禁用 watch。
+4. 已用 Playwright 验证桌面和移动端新增、编辑、禁用 watch 流程。
+5. 测试数量增加到 66；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 配置与 Browser-Harness 状态可视化记录
+
+继续补齐真实使用前的配置透明度：
+
+1. Web API 增加 `/api/config`，只暴露安全配置：数据库路径、snapshot 路径、成本/评估阈值、通知是否配置，不返回 webhook 原文。
+2. Web API 增加 `/api/browser/status`，展示 Wameiji / Xianyu Browser-Harness 当前状态、禁止动作和安全开关。
+3. 前端新增 Settings 面板，可刷新配置和 Browser-Harness 状态。
+4. 已用 Playwright 验证桌面和移动端 Settings 面板；确认 webhook URL 不在界面中泄露。
+5. 测试数量增加到 67；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 机会详情人工复核工作流记录
+
+继续补齐“候选机会 → 人工判断 → 历史追踪”的闭环：
+
+1. Web API 增加 `/api/review/options`，统一返回允许的复核结果和人工复核 checklist。
+2. `/api/opportunities/{id}` 增加该机会的 `review_decisions` 与 `sent_alerts`，详情页不用再靠全局列表手动对照。
+3. 前端选中机会后自动带入 `reviewOpportunityId`，详情面板显示 checklist、闲鱼样本、复核历史和通知历史。
+4. 提交人工复核或通知后，会刷新当前机会详情、复核队列和告警记录。
+5. 修正 strong alert pill 的前端类名匹配，并让复核队列显示后端复核选项的正式文案。
+6. 已用内置 Browser 验证桌面与 390x844 移动端：页面非空、控制台无 error/warn、复核提交后详情和队列同步刷新，移动端无页面级横向溢出。
+7. 测试数量增加到 69；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 手动 HTML/CSV 导入 Web 闭环记录
+
+继续补齐 `CODEX_PROJECT_SPEC.md` 允许的“用户手动导入 CSV/JSON/HTML 快照”路径：
+
+1. Web API 增加 `/api/import/evaluate-files`，复用 `evaluate_files`，用本地 Wameiji HTML + Xianyu CSV 组合评估并落库。
+2. 前端 Operations 面板新增 `Evaluate HTML/CSV`，默认指向 `data/mock/wameiji_search.sample.html` 和 `data/mock/xianyu_samples.sample.csv`。
+3. 新增 sample HTML/CSV 文件，方便本地控制台无临时文件直接验证。
+4. 已用内置 Browser 验证 HTML/CSV 导入按钮：状态栏、结果区和机会表刷新，控制台无 error/warn。
+5. 已用 390x844 移动端验证新增表单无页面级横向溢出。
+6. 测试数量增加到 70；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 候选二次复核计划 Web 闭环记录
+
+继续补齐 Phase 6 的“候选机会 60～180 秒后二次复核”能力，但仍不执行真实网页自动采购动作：
+
+1. SQLite schema 增加 `candidate_rechecks`，用于记录 pending 二次复核计划。
+2. Storage 增加 `schedule_candidate_recheck` 和 `list_candidate_rechecks`，同一机会的 pending 计划会更新而不是重复堆积。
+3. Web API 增加 `GET /api/rechecks` 和 `POST /api/rechecks`，POST 使用 `next_recheck_time` 自动夹紧 60～180 秒窗口。
+4. 前端 Opportunity Detail 增加 `Plan Recheck` 按钮，侧栏新增 `Recheck Plan` 面板展示 pending 计划。
+5. 已用内置 Browser 验证：选中机会后创建 recheck，状态栏、pending 计数和列表更新，控制台无 error/warn。
+6. 已用 390x844 移动端验证新增按钮和面板无页面级横向溢出。
+7. 测试数量增加到 72；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 二次复核结果记录闭环
+
+继续把 recheck 从“排计划”推进到“人工确认结果可追踪”：
+
+1. Storage 增加 `update_candidate_recheck_status`，pending recheck 可被标记为 `confirmed`、`rejected` 或 `human_required`。
+2. Web API 增加 `/api/rechecks/{id}/resolve`，用于记录人工二次复核结果，不触发真实网页读取或交易动作。
+3. `/api/opportunities/{id}` 增加 `candidate_rechecks`，机会详情可看到该机会的 recheck 历史。
+4. 前端 Recheck Plan 增加 Confirm / Reject 按钮；按钮带 opportunity id，避免多条 pending 记录时动作歧义。
+5. 前端 Opportunity Detail 增加 Recheck History，展示 confirmed/rejected/human_required 状态、计划时间和备注。
+6. 已用内置 Browser 验证桌面流：选中机会、创建 recheck、Confirm、pending 列表更新、详情显示 confirmed 历史，控制台无 error/warn。
+7. 已用 390x844 移动端验证无页面级横向溢出。
+8. 测试数量增加到 74；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 Recheck CLI 与报告闭环记录
+
+继续把 Web 中已有的 recheck 能力补到 CLI 和 Markdown 交付物，保证本地日常运营不依赖浏览器界面：
+
+1. CLI 增加 `recheck-plan`、`recheck-list`、`recheck-resolve`。
+2. `recheck-plan` 使用 `next_recheck_time` 生成 60～180 秒后的 pending 计划，只记录本地状态，不执行真实网页动作。
+3. `recheck-list --status all` 可查看 pending/confirmed/rejected/human_required 历史。
+4. `recheck-resolve` 可人工标记 confirmed/rejected/human_required，并写入原因。
+5. Markdown 复核报告接入 `candidate_rechecks`，输出“已记录二次复核”状态和备注。
+6. 新增 CLI 测试覆盖 plan/list/resolve 和 report recheck history。
+7. 已做临时数据库 CLI 端到端验证：scan-once → recheck-plan → recheck-resolve → report，报告包含二次复核原因。
+8. 测试数量增加到 76；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 Markdown 报告真实 ID 对齐记录
+
+继续对齐 Phase 6 的“人工复核报告输出机会、风险、拒绝原因字段”，修复报告历史关联的可信度问题：
+
+1. `render_opportunity_report` 增加 `opportunity_ids` 参数，人工复核和二次复核历史按数据库真实 `opportunity_id` 关联，不再按列表位置 `index + 1` 推断。
+2. Storage 增加 `list_opportunity_ids`，与 `list_opportunities` 使用相同的 `ORDER BY id DESC LIMIT ?` 排序。
+3. CLI `report` 和 Web `/api/report` 都传入真实 opportunity id；Web 报告同时接入 `candidate_rechecks` 历史。
+4. Markdown 报告现在输出 `Opportunity ID`，便于人工回查和复核。
+5. 新增回归测试覆盖非连续/倒序 opportunity id 下的 review 与 recheck 分组。
+6. 已做临时 SQLite 端到端校验：两个 opportunity id `[2, 1]` 的复核与二次复核历史只出现在各自品番段落。
+7. 测试数量增加到 77；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 Opportunity 去重 ID 幂等记录
+
+继续对齐 SQLite 存储、通知、人工复核和报告闭环：重复扫描同一机会时必须保持机会 ID 稳定，避免后续通知、复核或报告指向 `0` 或错误记录：
+
+1. 新增存储层回归测试，复现 `INSERT OR IGNORE` 遇到重复 `opportunity_hash` 时第二次返回 `0` 的问题。
+2. `insert_opportunity` 现在插入成功返回新 ID；如果唯一 hash 已存在，则查询并返回已有 opportunity ID。
+3. 若插入被忽略但无法解析已有 ID，会抛出错误，不再静默返回误导性 ID。
+4. 已运行针对性验证：`tests/test_storage.py -k duplicate` 从红灯转绿。
+5. 测试数量增加到 78；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 Browser-Harness 嵌套 HTML 快照解析记录
+
+继续对齐 Wameiji/Xianyu Browser-Harness 的“读取用户保存 HTML 快照、遇到安全验证停止”路径；本次只增强可见 HTML 解析能力，不执行真实网页自动购买、发消息、发布、下单、付款或绕过验证：
+
+1. 新增回归测试覆盖 Wameiji 与 Xianyu 常见嵌套卡片结构。
+2. 修复两个 HTMLParser：用卡片 `div` 深度计数，只在最外层卡片结束时生成条目，避免内部布局 `div` 让解析提前结束。
+3. 保留安全验证/CAPTCHA/Cloudflare/登录失效文本检测，命中仍返回 `human_required`。
+4. 已运行针对性验证：嵌套卡片测试从红灯转绿；Browser-Harness、HTML 导入、evaluate-files 和 Web report 相关测试通过。
+5. 测试数量增加到 79；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 Web 控制台移动端机会表 QA 记录
+
+继续对齐“漂亮、有高级感、可本地日常运营”的前端要求；本次只调整本地 Web 控制台展示和交互反馈，不改变任何真实平台动作边界：
+
+1. 移动端机会表从横向宽表改为卡片式行，隐藏表头并在每个字段前显示 Catalog/Title/Decision/Profit 等标签。
+2. 点击机会行后增加 `selected` 视觉状态，桌面表格和移动卡片都会显示当前选中的机会。
+3. 已用内置 Browser 验证移动 390x844：`tableWidth=360.43`、`rowWidth=336.44`、`overflowingElements=[]`、页面级无横向溢出、控制台无 warn/error。
+4. 已用内置 Browser 验证桌面 1280x720：表格仍为 `table/table-row/table-header-group`，点击机会后 `selected=5`，详情面板和 review opportunity id 同步为 #5，控制台无 warn/error。
+5. Browser 截图 API 在当前环境连续返回 `Page.captureScreenshot` 超时，因此本轮未取得截图证据；使用 DOM、布局尺寸、控制台和交互状态作为验证证据。
+6. 测试数量仍为 79；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 CLI 机会列表 ID 可追溯记录
+
+继续对齐本地日常运营闭环：用户需要从 CLI 机会列表直接拿到真实 opportunity ID，才能执行通知、人工复核、二次复核和报告回查；本次只增强本地 JSON 输出，不改变任何真实平台动作边界：
+
+1. 新增 CLI 回归测试，复现 `list-opportunities` 输出缺少 `id` 导致后续命令无法直接串联的问题。
+2. `list-opportunities` 现在按 `list_opportunity_ids` 与 `list_opportunities` 的同一排序合并输出真实数据库 `id`。
+3. 原有字段 `catalog_no`、`decision`、`expected_profit`、`net_margin`、`risk_labels`、`item_title` 保持兼容。
+4. 已运行针对性验证：新增测试从红灯转绿；CLI 相关测试通过。
+5. 测试数量仍为 79；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 Scan 响应 Opportunity ID 闭环记录
+
+继续对齐本地扫描 → 通知/人工复核/二次复核的日常操作链路：刚完成扫描后应直接拿到新机会的真实 ID，不需要再额外查询 SQLite 或重新 list；本次只增强本地 CLI/Web JSON 输出，不改变任何真实平台动作边界：
+
+1. 新增 CLI、服务层和 Web API 回归测试，复现 `scan-once` / `/api/scan/mock` 响应中的 opportunity 缺少 `id` 的问题。
+2. `ScanResult` 增加 `opportunity_ids`，扫描时保存 `insert_opportunity` 返回的真实 ID。
+3. CLI `scan-once`、`scan-watchlist` 和 Web `/api/scan/mock` 响应中的机会条目现在包含真实 `id`。
+4. 已运行针对性验证：CLI scan、scan service、Web mock scan 相关测试从红灯转绿；CLI scan-watchlist 测试通过。
+5. 测试数量仍为 79；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 导入评估 Opportunity ID 闭环记录
+
+继续对齐手动 JSON/HTML/CSV 快照导入 → 通知/人工复核/二次复核的操作链路：导入评估落库后也应直接返回真实 opportunity ID；本次只增强本地 CLI/Web JSON 输出，不改变任何真实平台动作边界：
+
+1. 新增 CLI 回归测试，复现 `evaluate-json` 和 `evaluate-files` 输出 opportunity 缺少 `id` 的问题。
+2. `evaluate_json_files` 和 `evaluate_files` 现在返回 `opportunity_ids`，保存 `insert_opportunity` 返回的真实 ID。
+3. CLI `evaluate-json`、`evaluate-files` 和 Web `/api/import/evaluate-json`、`/api/import/evaluate-files` 响应中的机会条目现在包含真实 `id`。
+4. 已运行针对性验证：CLI evaluate-json/evaluate-files 和 Web evaluate API 相关测试从红灯转绿。
+5. 测试数量仍为 79；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 Recheck 历史多次确认迁移记录
+
+继续对齐候选二次复核的运营历史追踪：同一机会可以被多次二次复核，pending 计划只能有一条，但 confirmed/rejected/human_required 历史不应被唯一约束挡住；本次只调整本地 SQLite schema/migration，不执行真实网页动作：
+
+1. 新增存储层回归测试，复现第二次将同一机会 pending recheck 标记为 confirmed 时触发 `UNIQUE(opportunity_id, status)` 的问题。
+2. `candidate_rechecks` schema 移除表级 `UNIQUE(opportunity_id, status)`，改为 partial unique index：仅 `status='pending'` 时按 `opportunity_id` 唯一。
+3. `init_db` 增加旧库迁移：检测 legacy 唯一约束后重建 `candidate_rechecks` 表并保留已有历史数据。
+4. `schedule_candidate_recheck` 改为显式 update/insert，继续保证同一机会只有一条 pending 计划。
+5. 已运行针对性验证：新库多条 confirmed、旧库迁移、多项 recheck CLI/Web 测试通过；`doctor --db data\\cd_monitor.db` 返回 ok。
+6. 测试数量增加到 81；`python -m pytest` 与 `python -m ruff check src tests` 均通过。
+
+## 2026-06-13 Quick Start 命令链端到端验证记录
+
+继续对齐最终交付要求中的“运行过的测试命令和结果”：使用临时 SQLite 与 snapshot 目录验证 README 里的本地运营链路，不触碰真实平台。
+
+1. 执行 `scan-once --source mock`，响应中的 opportunity `id=1`。
+2. 执行 `list-opportunities`，列表第一条 `id=1`，与扫描响应一致。
+3. 执行 `review --opportunity-id 1` 写入 `quickstart review`。
+4. 执行 `recheck-plan --opportunity-id 1` 后再 `recheck-resolve --status confirmed` 写入 `quickstart confirmed`。
+5. 执行 `report`，生成的 Markdown 同时包含 `Opportunity ID: 1`、人工复核备注和二次复核确认备注。
+6. 临时 snapshot 目录写出 1 个 JSON 快照。
+
+## 2026-06-13 数据源真实可用状态澄清记录
+
+回应“到底能不能获取闲鱼和挖煤姬数据”的核心问题：当前项目已验证 mock 与用户手动快照导入可用，但不能宣称已经完成真实网页登录态自动读取。
+
+1. `doctor` 增加 `data_sources`：明确 `mock`、`manual_snapshots`、`wameiji_live_browser`、`xianyu_live_browser` 四类状态。
+2. 当前 `python -m cd_monitor.cli doctor --db data\\cd_monitor.db` 显示：mock 可用、手动 JSON/CSV/HTML 快照可用；Wameiji/Xianyu live browser 均为 `disabled`，错误类型为 `browser_disabled`。
+3. Web `/api/config` 增加 `data_sources` 摘要，Settings 面板显示 Mock Data 与 Manual Snapshots 可用状态。
+4. 本次没有伪造真实平台抓取成功；真实浏览器读取仍需要后续接入可见登录态 Profile，并在验证码/安全验证/登录失效时返回 `human_required`。
+5. 当前 `python -m pytest` 为 81 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 Wameiji HTML + Xianyu HTML 手动快照评估记录
+
+继续推进真实数据接入前的可用路径：在真实网页登录态自动读取完成前，系统应能处理用户从挖煤姬和闲鱼各自保存下来的可见 HTML 搜索结果快照，并完成估值、落库和复核链路。
+
+1. 新增 CLI `evaluate-html`，输入 `--wameiji-html` 与 `--xianyu-html`，组合解析 Wameiji 商品卡片和 Xianyu 样本卡片。
+2. 新增服务 `evaluate_html_files`，解析两份 HTML 后写入 `market_items`、`xianyu_price_samples`、`opportunities`，并返回真实 opportunity id。
+3. Web API 增加 `/api/import/evaluate-html`，响应包含 `opportunity_count`、snapshot path 和机会 id。
+4. Web Operations 增加 `Evaluate HTML/HTML` 表单，用于本地控制台直接触发两份 HTML 快照评估。
+5. 已用内置 Browser 验证表单渲染：按钮文本 `Evaluate HTML/HTML`、控制台无 warn/error、桌面无页面级横向溢出。
+6. 当前 `python -m pytest` 为 83 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 Live Scan Readiness 接口记录
+
+继续推进真实浏览器接入前的状态机：提供明确的 live scan 入口，但不伪造真实数据抓取成功。
+
+1. 新增服务 `scan_live_status`，聚合 Wameiji/Xianyu Browser-Harness 状态，返回 `disabled`、`human_required`、`error` 或 `ok`。
+2. 新增 CLI `scan-live --catalog-no`：默认 `browser.enabled=false` 时返回 disabled；`BROWSER_ENABLED=true` 且未配置真实执行器时返回 `human_required/not_configured`；`opportunity_count=0`。
+3. Web API 增加 `/api/scan/live`，返回同样结构化状态。
+4. Web 顶部增加 `Scan Live` 按钮，点击后展示 Wameiji/Xianyu live readiness，不写入伪 opportunity。
+5. 已用内置 Browser 验证：按钮文本 `Scan Live`，点击后显示 disabled 状态，控制台无 warn/error，桌面无页面级横向溢出。
+6. 当前 `python -m pytest` 为 86 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 普通保存 HTML 通用解析记录
+
+继续增强真实页面快照可用性：用户从平台保存的 HTML 不一定包含项目样本里的 `data-item-card` / `data-xianyu-card` 属性，因此解析器需要能从普通可见 DOM 中提取品番链接与价格文本。
+
+1. WameijiBrowserAdapter 增加通用 block fallback：专用卡片解析无结果时，从 `div/article/li/section` 中寻找包含目标品番的链接文本和 `¥/￥` 价格。
+2. XianyuBrowserAdapter 增加同样 fallback，输出 `XianyuPriceSample`。
+3. 通用解析会按 title/url/price 去重，并保留原始可见文本作为 `raw_text`。
+4. 新增回归测试覆盖无 `data-*` 属性的普通 HTML：Wameiji 解析价格 1200，Xianyu 解析样本价格 260/280。
+5. 当前 `python -m pytest` 为 87 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 真实页面价格文本兼容记录
+
+继续对齐 Browser-Harness 快照解析阶段：真实平台保存的可见 HTML 中价格可能写作 `1,200円`、`260元`、`JPY 980`、`CNY 280` 或 `RMB 300`，不能只识别 `¥/￥`。
+
+1. 新增失败优先回归测试，覆盖 Wameiji 普通 HTML 的 `1,200円` / `JPY 980`，以及 Xianyu 普通 HTML 的 `260元` / `CNY 280` / `RMB 300`。
+2. WameijiBrowserAdapter 与 XianyuBrowserAdapter 的通用 fallback 价格识别扩展为 `¥/￥/円/元/JPY/CNY/RMB`。
+3. 通用解析会跳过包含多个品番链接的父级容器，避免把列表容器重复产出为商品或造成标题价格错配。
+4. 已运行针对性验证：新增测试先失败，修复后通过；Browser-Harness、evaluate-html、import-html 相关测试通过。
+5. 当前 `python -m pytest` 为 88 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 Web 粘贴 HTML 快照评估记录
+
+继续降低真实数据接入前的手动快照门槛：用户不必先把两份网页 HTML 保存为文件，可以直接在本地 Web 控制台粘贴 Wameiji 与 Xianyu 的可见 HTML 文本并评估落库。
+
+1. 新增服务 `evaluate_html_texts`，复用与 `evaluate-html` 相同的解析、估值、落库和 snapshot 逻辑。
+2. Web API 增加 `/api/import/evaluate-html-text`，接收 `wameiji_html_text` 与 `xianyu_html_text`，返回 snapshot path、机会数量和真实 opportunity id。
+3. 前端 Operations 增加 `Evaluate Pasted HTML` 表单，包含品番输入与两块 HTML textarea；提交后刷新机会表和结果区。
+4. 已用内置 Browser 验证桌面交互：粘贴 `1,200円`、`260元`、`CNY 280`、`RMB 300` 样本后生成 1 条机会，机会表刷新，控制台无 warn/error。
+5. 已用内置 Browser 验证移动 390x844：粘贴表单存在，`formWidth=360.43`、`buttonWidth=328.43`、`pageOverflow=false`，控制台无 warn/error；本次截图 API 成功取得前端证据。
+6. 当前 `python -m pytest` 为 89 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 保存 HTML 属性文本解析记录
+
+继续增强真实保存网页的容错能力：部分站点会把商品标题、价格或图片放在 `title`、`aria-label`、`alt`、懒加载图片属性中，而不是普通可见文本节点。
+
+1. 新增失败优先回归测试，覆盖 Wameiji `a title`、`span aria-label`、`img data-src`，以及 Xianyu `a aria-label`、`span title`、`img data-original`。
+2. Wameiji/Xianyu 通用 HTML fallback 现在会读取 `title`、`aria-label`、`alt` 作为 block 文本和链接标题候选。
+3. 图片提取扩展支持 `src`、`data-src`、`data-original`、`data-lazy-src`。
+4. 已运行针对性验证：新增测试先失败，修复后通过；Browser-Harness 与 HTML 导入相关测试通过。
+5. 当前 `python -m pytest` 为 90 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 售罄状态风控记录
+
+继续对齐“人工复核前先过滤明显不可采购候选”的业务目标：真实快照中若明确显示已售出、售罄、下架或日文 `売り切れ`，系统不能继续给出可行动提醒。
+
+1. 新增 Browser-Harness 回归测试，覆盖普通 Wameiji HTML 中 `売り切れ` 状态解析为 `availability='sold_out'`。
+2. 新增 evaluator 回归测试，复现 `availability='sold_out'` 且利润达标时仍被评为 `weak_alert` 的风险。
+3. Wameiji 通用 HTML fallback 增加 availability 检测：`sold out`、`已售`、`已卖`、`售罄`、`下架`、`売り切れ`、`売切`、`売約済`、`在庫なし`、`販売終了` 标为 `sold_out`；`reserved/専用/取り置き/预定/予約` 标为 `reserved`；常见在售词标为 `available`。
+4. evaluator 将明确不可购买状态纳入 reject 条件，并保留 `availability_risk` 风险标签。
+5. 已运行针对性验证：两个新增测试先失败，修复后通过；Browser-Harness、evaluator、HTML 导入和 Web Server 相关测试通过。
+6. 当前 `python -m pytest` 为 92 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 Wameiji 来源与品相字段解析记录
+
+继续对齐 Phase 4 中“读取标题、价格、来源站点、图片、详情链接、商品状态、原始文本”的字段要求：普通保存 HTML 没有 `data-source-site` 时，也应尽量提取来源和品相提示，帮助人工复核。
+
+1. 新增回归测试覆盖普通 Wameiji HTML 中 `Mercari visible listing` 和 `盤傷 ケース割れあり` 文本。
+2. Wameiji 通用 fallback 增加来源站点识别：`mercari/メルカリ/煤炉`、`rakuma/ラクマ`、`yahoo/ヤフオク/paypayフリマ`、`bookoff/ブックオフ`、`surugaya/駿河屋/骏河屋`、`jdirectitems`、`amiami`、`lashinbang`。
+3. Wameiji 通用 fallback 增加品相片段提取：包含 `盤傷`、`ケース割れ`、`破損`、`傷`、`汚れ`、`ジャンク`、`不良`、`瑕疵`、`裂` 的文本片段写入 `condition_text`。
+4. 已运行针对性验证：新增测试先失败，修复后通过；Browser-Harness、matcher、evaluator、HTML 导入和 Web Server 相关测试通过。
+5. 当前 `python -m pytest` 为 93 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 Doctor 手动数据入口可见性记录
+
+继续回应“到底能不能获取闲鱼和挖煤姬数据”的状态透明要求：doctor 需要准确列出当前已可用的 mock、文件快照、HTML/HTML 和 Web 粘贴入口，同时不夸大 live browser 能力。
+
+1. `manual_snapshots.commands` 补齐 `evaluate-html`，与 CLI 当前能力一致。
+2. `manual_snapshots.web_actions` 新增 `Evaluate HTML/CSV`、`Evaluate HTML/HTML`、`Evaluate Pasted HTML`，让 Web 控制台可用入口在 doctor 中可见。
+3. Web `/api/config` 的 `data_sources.manual_snapshots` 同步暴露相同的 `commands` 和 `web_actions`，Settings 使用同一套事实来源。
+4. 前端 Settings 的 Manual Snapshots 行展示 CLI 命令和 Web 动作摘要，包含 `Evaluate Pasted HTML`。
+5. README 的 Data Source Status 说明同步更新：doctor 会列出 CLI 与 Web 手动入口，live browser 仍明确显示 disabled / not_configured / human_required。
+6. 已用内置 Browser 验证 Settings 文本包含 `Evaluate Pasted HTML`，控制台无 warn/error，页面无横向溢出。
+7. 已运行针对性验证：`tests/test_cli_doctor.py` 和 Web config/static 测试均先失败，修复后通过。
+8. 当前 `python -m pytest` 为 93 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 通知 payload 字段补齐记录
+
+继续对齐 Phase 3 与输出/通知格式要求：候选提醒需要携带足够人工复核上下文，而不仅是利润字段。
+
+1. 新增通知消息回归测试，覆盖图片 URL、流动性、周转 ROI、可购买状态、品相片段和闲鱼搜索关键词。
+2. `build_message` 增加 `liquidity_status`、`turnover_adjusted_roi`、`image_url`、`availability`、`condition_text`、`xianyu_search_keyword`。
+3. README 通知说明补齐当前 payload 字段范围。
+4. 已运行针对性验证：新增通知测试先失败，修复后通过；dry-run、真实 Feishu/DingTalk 本地 webhook 和 Web notify 相关测试通过。
+5. 当前 `python -m pytest` 为 94 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 本地 Web API Origin 防护记录
+
+继续对齐“本地控制台只服务个人运营、不扩大外部攻击面”的安全边界：Web API 能读本地路径、写报告、触发通知，因此浏览器跨站 POST 应被挡住。
+
+1. 新增 Web Server 回归测试，带 `Origin: https://evil.example.invalid` 向 `/api/scan/live` POST 时应返回 403 和 `cross_origin_forbidden`。
+2. Web Server 所有 POST 入口前增加 `_origin_allowed` 检查：没有 `Origin` 的本地脚本/测试请求允许；有 `Origin` 时必须与 `Host` 同源。
+3. README Web Console 说明补充本地 API Origin 防护策略。
+4. 已运行针对性验证：cross-origin 测试先失败，修复后通过；完整 `tests/test_web_server.py` 通过。
+5. 当前 `python -m pytest` 为 95 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 Web API malformed JSON 稳定性记录
+
+继续提高本地控制台的稳定性：如果前端或外部本地脚本发送坏 JSON，API 应返回结构化错误，而不是让 handler 抛异常、客户端拿到 502。
+
+1. 新增 Web Server 回归测试，向 `/api/scan/live` POST `"{bad-json"` 时应返回 HTTP 400 和 `{"error":"invalid_json"}`。
+2. Web Server POST 入口统一提前解析 JSON；`json.JSONDecodeError` 转换为 `BadJsonRequest`，再返回 `400 invalid_json`。
+3. README Web Console 安全说明补充 malformed JSON 的结构化响应。
+4. 已运行针对性验证：malformed JSON 测试先失败，修复后通过；完整 `tests/test_web_server.py` 通过。
+5. 当前 `python -m pytest` 为 96 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 Web API 数字字段校验记录
+
+继续提高本地控制台 API 的可恢复性：`delay_seconds`、`priority`、`opportunity_id`、`limit` 等数字字段若传入非数字，不应让 handler 抛异常。
+
+1. 新增 Web Server 回归测试，向 `/api/rechecks` 传入 `delay_seconds="soon"` 时返回 HTTP 400、`error=invalid_integer`、`field=delay_seconds`。
+2. 新增 `BadIntegerField` 与 `_int_value`，统一处理 POST 中常见数字字段的解析错误。
+3. `watchlist` 新增/编辑、review、recheck、report、notify 等 POST 路径复用结构化数字校验。
+4. README Web API 安全说明补充 `400 invalid_integer` 和字段名行为。
+5. 已运行针对性验证：invalid integer 测试先失败，修复后通过；完整 `tests/test_web_server.py` 通过。
+6. 当前 `python -m pytest` 为 97 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 闲鱼 CSV 价格文本解析记录
+
+继续增强用户手动快照入口：闲鱼 CSV 价格列可能来自手动复制，常见写法包括 `260元`、`CNY 280`、`￥300`，不能只接受纯数字。
+
+1. 新增 CLI CSV 导入回归测试，覆盖中文列名 `标题/价格/链接` 与 `260元`、`CNY 280`、`￥300`。
+2. `import_xianyu_csv` 增加 `_parse_csv_price`，支持 `¥/￥`、`元`、`CNY`、`RMB` 和千分位逗号。
+3. README 手动导入说明补充 CSV 价格值支持格式。
+4. 已运行针对性验证：CSV 价格文本测试先失败，修复后通过；CSV 导入、evaluate-files 与 Web HTML/CSV 相关测试通过。
+5. 当前 `python -m pytest` 为 98 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 Wameiji 日元价格文本解析记录
+
+继续对齐手动 HTML 快照可用性要求：公开 Wameiji 页面常见价格文本可能写成 `2,000 日元`，通用 fallback 不能只识别 `円/元`。
+
+1. 新增 Browser-Harness 回归测试，覆盖普通 Wameiji HTML 中 `2,000 日元` 价格文本。
+2. Wameiji 与 Xianyu 通用 HTML 价格解析补充 `日元`、`日圓`、`人民币` 后缀单位，同时保留 `¥/￥`、`円/元`、`JPY/CNY/RMB`。
+3. README Browser-Harness 状态和手动导入说明补充当前价格文本支持范围。
+4. 已运行针对性验证：`日元` 用例先失败，修复后通过；Browser-Harness、HTML 评估、HTML 导入、CSV 导入相关测试通过。
+5. 当前 `python -m pytest` 为 99 passed；`python -m ruff check src tests` 通过。
+6. 已重启本地 Web 后端并用内置浏览器验证 Web `Evaluate Pasted HTML`：粘贴 `2,000 日元` 的 Wameiji HTML 与三条闲鱼 HTML 样本后，页面显示 `1 opportunities`，首行 opportunity 为 `strong alert`，浏览器 warn/error 日志为空，桌面视口无横向溢出。
+
+## 2026-06-13 scan-live 状态持久化记录
+
+继续对齐 Browser-Harness “失败可恢复、结构化错误记录”的要求：即使真实浏览器未配置，live readiness 检查也应能在数据库里回查每侧适配器状态。
+
+1. 新增 CLI 回归测试：执行 `scan-live --db ...` 后，`search_runs` 应写入 `wameiji_live_browser` 与 `xianyu_live_browser` 两条记录。
+2. `LiveScanStatus` 增加 `search_run_ids`，新增 `record_live_scan_status` 将 Wameiji/Xianyu 的 `disabled/human_required/error` 状态、错误类型、错误信息和 snapshot/screenshot 路径写入 `search_runs`。
+3. CLI `scan-live` 和 Web `/api/scan/live` 统一记录 live readiness 状态；仍只检查状态，不自动打开真实网页、不生成伪 opportunity。
+4. README Data Source Status 补充 `scan-live` 会记录两侧适配器状态。
+5. 已运行针对性验证：新增记录测试先失败，修复后通过；`tests/test_cli_scan_live.py` 与 Web scan-live 相关测试通过；相关 ruff 检查通过。
+6. 当前 `python -m pytest` 为 100 passed；`python -m ruff check src tests` 通过。
+7. Web `Scan Live` 前端补充刷新运行历史，并在 Operations 显示本次 `Run IDs`；已用内置浏览器验证点击后 `runList` 顶部出现 `wameiji_live_browser` 和 `xianyu_live_browser` disabled 记录，浏览器 warn/error 日志为空，桌面视口无横向溢出。
+
+## 2026-06-13 闲鱼版本样本过滤记录
+
+继续对齐 Phase 7 “版本不匹配样本过滤”和 watchlist 配置要求：指定 `初回限定` 等版本时，闲鱼 `通常盤` 或缺少必需关键词的样本不能污染参考价。
+
+1. 新增闲鱼估价回归测试：`edition=初回限定` 时，`通常盤` 样本标记为 `invalid_edition_mismatch`，参考价只用匹配版本样本计算。
+2. `clean_xianyu_samples` / `estimate_xianyu_price` 增加可选 `edition`、`required_keywords`、`excluded_keywords` 参数；不传时保持原行为。
+3. `scan_watch_item` 与 `scan_once_mock(..., watch_item=...)` 会把完整 WatchItem 的版本、必需关键词、排除关键词传入闲鱼估价。
+4. CLI/Web `scan-watchlist` 改为把数据库里的完整 watch 配置传入扫描服务，不再只传 catalog_no。
+5. README 补充 watchlist 扫描会使用版本和关键词配置，以及闲鱼版本不匹配样本会剔除。
+6. 已运行针对性验证：新增测试先失败，修复后通过；`tests/test_xianyu_cleaner.py`、scan service、CLI watchlist、Web watchlist 相关测试通过；相关 ruff 检查通过。
+
+## 2026-06-13 闲鱼有效价格上下限配置记录
+
+继续对齐 config.example.yaml 中 `xianyu.min_valid_price_cny/max_valid_price_cny`：闲鱼极端价格阈值不能只写死在清洗器默认参数里。
+
+1. `EvaluationConfig` 增加 `min_valid_price_cny` 与 `max_valid_price_cny`，默认保持 10 / 2000。
+2. `load_config` 将 `xianyu.min_valid_price_cny/max_valid_price_cny` 映射进 EvaluationConfig。
+3. scan-once、evaluate-files、evaluate-html、evaluate-json 等带 evaluation_config 的评估入口将价格上下限传入 `estimate_xianyu_price`。
+4. 新增端到端 CLI 回归测试：配置 `min_valid_price_cny: 300` 后，mock 扫描因有效样本不足进入 `reject` 且带 `liquidity_poor`。
+5. README 闲鱼估价说明补充低/高有效价阈值来自配置。
+6. 已运行针对性验证：配置映射测试先失败，修复后通过；配置、清洗、扫描和导入评估相关测试通过；`python -m ruff check src tests` 通过。
+7. 当前 `python -m pytest` 为 103 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-13 闲鱼样本上限配置记录
+
+继续对齐 `xianyu.sample_limit` 和“读取前 8～15 个结果样本”的边界：估价不能无限吞入用户导入的旧样本。
+
+1. `EvaluationConfig` 增加 `sample_limit`，默认 15。
+2. `load_config` 将 `xianyu.sample_limit` 映射进 EvaluationConfig。
+3. `estimate_xianyu_price` 在清洗前按 `sample_limit` 截取前 N 条样本；`sample_limit=None/<=0` 时不截断。
+4. scan-once、evaluate-files、evaluate-html、evaluate-json 等带 evaluation_config 的评估入口将样本上限传入估价。
+5. 新增清洗器回归测试：6 条样本设置 `sample_limit=3` 时只用前 3 条计算 median。
+6. README 闲鱼估价说明补充按 `xianyu.sample_limit` 取样。
+7. 已运行针对性验证：配置映射和样本上限测试先失败，修复后通过；配置、清洗、扫描和导入评估相关测试通过；相关 ruff 检查通过。
+
+## 2026-06-13 CLI opportunity 输出字段补齐记录
+
+继续对齐输出/通知格式要求：CLI JSON 不能只输出利润和决策，还需要携带人工复核所需的成本、估价、样本、匹配和来源字段。
+
+1. 新增 CLI 回归测试，要求 `scan-once` 输出 `xianyu_reference_price`、`landed_cost`、`turnover_adjusted_roi`、`valid_xianyu_sample_count`、`liquidity_status`、`match_confidence`、`item_url`、`source_site`。
+2. `_opportunity_dict` 补充闲鱼参考价、预估成交价、落地成本、预估收入、利润、净利率、周转 ROI、有效样本数、流动性、匹配置信度、风险标签、来源站点、链接、图片、可购买状态、品相片段和复核建议。
+3. 该摘要函数被 `scan-once`、`scan-watchlist`、`evaluate-*` 和 `list-opportunities` 复用，输出字段保持一致。
+4. README Recheck/CLI 输出说明补充当前 JSON 字段范围。
+5. 已运行针对性验证：新增 CLI 输出字段测试先失败，修复后通过；CLI scan/list/import/config 相关测试通过；相关 ruff 检查通过。
+
+## 2026-06-13 Wameiji 必需关键词匹配扣分记录
+
+继续对齐匹配策略和 watchlist “特典/侧标要求”：必需关键词不能只在出现时加分，缺失时也应降低匹配置信度，避免把缺少关键配件的日本侧商品推成 alert。
+
+1. 新增 matcher 回归测试：WatchItem 要求 `帯付き`，但 Wameiji 标题缺失该词时，应记录 `missing_required_keyword:帯付き` 且置信度降到弱提醒阈值以下。
+2. `compute_match_confidence` 对每个 `required_keywords` 执行双向处理：出现加分，缺失扣 0.25 并写入 negative_reasons。
+3. README 闲鱼/匹配说明补充必需关键词缺失会扣分。
+4. 已运行针对性验证：新增测试先失败，修复后通过；matcher、evaluator、scan service、scheduler 相关测试通过；相关 ruff 检查通过。
+5. 当前 `python -m pytest` 为 105 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-14 Web 外网预览与访问令牌记录
+
+回应远程查看前端的需求：本地控制台可以通过临时公网隧道访问，但必须加随机访问令牌，避免裸露能读本地路径、写报告和触发通知的 API。
+
+1. Web Server 增加可选 `WEB_ACCESS_TOKEN`：未设置时保持本地开发行为；设置后，静态页面和 API 都要求 query/cookie token。
+2. 访问 `/?access_token=<token>` 会下发 `cd_monitor_access` HttpOnly Cookie；后续前端 API fetch 使用同源 cookie 即可正常工作。
+3. 未带 token 或 token 不匹配返回 `401 unauthorized`；原有 cross-origin POST 防护保留。
+4. 新增 Web Server 回归测试覆盖 token 保护、cookie 下发和 cookie 访问 API。
+5. 已启动本地 token 保护服务，并通过 `npx localtunnel --port 8765 --local-host 127.0.0.1` 生成公网预览 URL；公网首页和 `/api/health` 已用 access_token 验证为 200。
+6. 当前 `python -m pytest` 为 106 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-14 人工复核报告字段补齐记录
+
+继续对齐最终交付和人工复核要求：Markdown 报告不能只给标题、成本、利润和风险，还要能直接支持人工打开链接、核对状态、判断流动性和复核历史。
+
+1. 新增 report 回归测试，要求报告包含来源站点、链接、图片 URL、可购买状态、品相片段、预估成交价、预估收入、净利率、周转 ROI、有效闲鱼样本数、流动性和人工复核建议。
+2. `render_opportunity_report` 补充上述字段，并保留现有复核结果、二次复核历史和真实 opportunity_id 分组逻辑。
+3. README Recheck/报告说明同步补充当前报告字段范围。
+4. 已运行针对性验证：新增报告字段测试先失败，修复后通过；opportunity_report、CLI report、review/recheck report 相关测试通过；相关 ruff 检查通过。
+
+## 2026-06-14 Web API opportunity 摘要字段补齐记录
+
+继续对齐远程前端调试和输出格式要求：Web API 的 scan/import/backtest 响应应与 CLI 一样携带完整复核字段，而不是只给利润和标题。
+
+1. 新增 Web Server 回归测试，要求 `/api/scan/mock` opportunity 摘要包含闲鱼参考价、落地成本、周转 ROI、有效样本数、流动性和来源链接。
+2. `_opportunity_response` 补充与 CLI 一致的成本、估价、样本、匹配、来源、图片、可购买状态、品相和复核建议字段。
+3. `/api/scan/mock` 改为复用 `_opportunity_response_with_id`，与 import/backtest 响应保持字段一致。
+4. README Web Console 说明补充 Web API 摘要字段范围。
+5. 已运行针对性验证：新增 Web API 字段测试先失败，修复后通过；Web scan/import/backtest 相关测试通过；相关 ruff 检查通过。
+
+## 2026-06-14 Settings 外网访问安全状态记录
+
+继续对齐远程前端查看需求：远程预览时用户需要在页面上看到访问保护是否启用，但不能泄露 token。
+
+1. `/api/config` 增加 `security.access_token_required`，只暴露是否设置了 `WEB_ACCESS_TOKEN`。
+2. Web Settings 增加 `Access Guard` 行：启用 token 时显示 `enabled` 和 token cookie required；本地无 token 时显示 `local only`。
+3. token 回归测试补充 `/api/config` 断言：`security.access_token_required` 为 true 且响应中不包含 token 明文。
+4. README Web Console 与外网预览说明同步补充 Settings 安全状态。
+5. 已运行针对性验证：token/config/static 前端相关 Web Server 测试通过；相关 ruff 检查通过。
+
+## 2026-06-14 Backtest 配置一致性记录
+
+继续对齐回测和扫描的一致性要求：backtest 不能用默认成本/估价配置重算，否则 `--config` 下扫描和回测会给出不同判断。
+
+1. 新增 backtest 回归测试：传入高 strong/weak 阈值时，snapshot 回测应从 strong alert 降为 review_only。
+2. `backtest_snapshots` 与 `backtest_database_history` 增加 `cost_config`、`evaluation_config` 参数。
+3. 回测估价现在复用当前配置中的闲鱼有效价上下限、样本上限、议价折扣、流动性折扣，并将 evaluation_config 传给 evaluator。
+4. CLI `backtest` 和 Web `/api/backtest` 都传入当前 `config.cost` / `config.evaluation`。
+5. README backtest 说明补充回测会使用当前成本、闲鱼清洗和提醒阈值配置。
+6. 已运行针对性验证：新增 backtest 配置测试先失败，修复后通过；backtest、CLI backtest、Web backtest 和 config 相关测试通过；相关 ruff 检查通过。
+
+## 2026-06-14 scan-live finished_at 记录补齐
+
+继续对齐运行历史可审计要求：live readiness 检查已经写入 `search_runs`，但缺少完成时间会让远程运行历史难以区分是否仍在运行。
+
+1. CLI live scan 回归测试补充 `finished_at` 断言，要求 Wameiji/Xianyu 两条 live browser 记录都有完成时间。
+2. `record_live_scan_status` 插入 search_run 后立即调用 `finish_search_run`，保留状态、错误类型、错误消息和 snapshot/screenshot 路径。
+3. 已运行针对性验证：`finished_at` 测试先失败，修复后通过；CLI/Web scan-live 相关测试通过；相关 ruff 检查通过。
+
+## 2026-06-14 数据库历史回测导入兼容记录
+
+继续对齐导入数据可回放要求：卖煤姬导入行可能只有标题/原始文本包含品番，`market_items.catalog_no` 为空时也必须能被历史回测找回。
+
+1. 将数据库历史回测测试明确改成 title-only catalog 场景：插入的 `MarketItem.catalog_no` 为 `None`，标题包含 `SRCL-3520`。
+2. 保持现有查询策略：`list_market_items(db_path, catalog_no)` 按结构化 `catalog_no`、`title LIKE`、`raw_text LIKE` 三路命中。
+3. 新增断言确认回测结果里的 item 仍然是 `catalog_no is None`，证明测试覆盖的是数据库检索兼容路径。
+4. 已运行针对性验证：`python -m pytest tests/test_backtest_history.py` 通过。
+
+## 2026-06-14 全量回归基线
+
+继续对齐“边做边验证”的执行要求，完成当前一轮功能和审计补齐后运行全量验证。
+
+1. `python -m pytest` 已通过，当前测试总数为 108 passed。
+2. `python -m ruff check src tests` 已通过，无 lint 问题。
+3. 下一步重启 Web 服务和外部隧道，确保远程预览链接加载的是通过全量验证后的代码。
+
+## 2026-06-14 外网预览重启验证记录
+
+继续对齐远程控制查看前端的要求：代码全量验证后，重启本地 Web 服务和公网隧道，确保外链加载的是最新代码。
+
+1. 已重启 `python -m cd_monitor.cli web --db data/cd_monitor.db --host 127.0.0.1 --port 8765`，并设置 `WEB_ACCESS_TOKEN`。
+2. 本地 `http://127.0.0.1:8765/api/health?access_token=<token>` 返回 200。
+3. 已重启 localtunnel，当前入口为 `https://tiny-toes-rest.loca.lt/?access_token=p0TFJ2PG7Vwv5Rm1DixKB9YzeluIsWot`。
+4. 公网带 token 页面返回 200 且包含 `WAMEIJI-XIANYU`；公网不带 token 的 `/api/health` 返回 401。
+
+## 2026-06-14 Settings 评估配置透明度记录
+
+继续对齐远程前端可运营要求：Settings 不能只显示强提醒阈值，必须让用户看到影响闲鱼估价和提醒等级的关键配置。
+
+1. Web Server 配置测试新增弱提醒阈值、强/弱匹配置信度、闲鱼有效价格上下限和样本上限断言。
+2. `/api/config` 的 `evaluation` 增加 `min_valid_price_cny`、`max_valid_price_cny`、`sample_limit`、`weak_profit_min_cny`、`weak_margin_min`、`min_match_confidence_weak`。
+3. Web Settings 增加 `Weak Alert`、`Match Confidence`、`Xianyu Price Window`、`Xianyu Samples` 行。
+4. README Settings 说明已同步。
+5. 已运行针对性验证：新增 Web Server 配置/静态 app 测试先失败，修复后通过。
+6. 重启 Web 服务和 localtunnel 后，公网 `https://tiny-toes-rest.loca.lt/app.js?access_token=<token>` 已确认包含 `Xianyu Price Window` 和 `Weak Alert`。
+
+## 2026-06-14 最终回归与外链状态
+
+继续对齐“项目彻底完成并测试通过之前不停止”的要求，完成 Settings 配置透明度补齐后再次运行全量验证。
+
+1. `python -m pytest` 已通过，当前测试总数为 108 passed。
+2. `python -m ruff check src tests` 已通过。
+3. 当前公网预览入口更新为 `https://tame-zebras-wait.loca.lt/?access_token=p0TFJ2PG7Vwv5Rm1DixKB9YzeluIsWot`。
+4. 当前本地 Web 进程监听 `127.0.0.1:8765`，公网不带 token 的 `/api/health` 已验证返回 401。
+
+## 2026-06-14 Watchlist 前端完整字段记录
+
+继续对齐 spec 输入项：watchlist 应支持 catalog、JAN/EAN、艺人、标题、版本、特典/关键词、优先级和预期持有天数。后端已支持这些字段，但前端新增/编辑表单此前没有完全暴露。
+
+1. Web 静态测试新增 `watchJan`、`editEdition`、`watchRequiredKeywords`、`editTitleCn` 断言，先确认前端缺字段。
+2. Web 新增 watch 测试补充 JAN、日文标题、中文标题、版本、必需/排除关键词、优先级、持有天数，并确认完整落库。
+3. Web 编辑 watch 测试补充 JAN、日文标题、中文标题、版本、排除关键词更新断言。
+4. `web/index.html` 新增/编辑表单补齐 watch 元数据字段；`web/app.js` 新增提交、保存、回填、清空逻辑；`web/styles.css` 调整新增表单网格。
+5. README watchlist 说明已同步。
+6. 已运行针对性验证：新增静态字段测试先失败，修复后相关 3 条 Web Server 测试通过。
+7. 重启 Web 服务和 localtunnel 后，公网 `https://tame-zebras-wait.loca.lt/?access_token=<token>` 已确认 HTML 包含 `watchJan`、`editEdition`，JS 包含 `watchRequiredKeywords`、`editTitleCn` 和新版 Settings 字段；公网不带 token 的 `/api/health` 返回 401。
+8. 已运行最终验证：`python -m pytest` 108 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-14 Live Browser 手动入口状态记录
+
+继续对齐 Phase 4/5 的真实读取边界：当前会话没有可用的当前 Chrome 登录态控制接口，不能安全读取用户已登录的 Wameiji/Xianyu 页面，也不能伪造 live opportunity。
+
+1. Browser-Harness 测试新增 enabled 状态断言：Wameiji/Xianyu 在未接入真实执行器时必须返回 `human_required`，并提供搜索入口 URL 与可见 HTML 采集说明。
+2. `AdapterStatus` 增加 `search_entry_url`、`capture_instruction` 字段。
+3. `WameijiBrowserAdapter.search_status` 在 enabled 但未配置执行器时返回 `https://meruki.cn/search?keyword=<catalog>` 和手动可见 HTML 采集说明。
+4. `XianyuBrowserAdapter.search_status` 在 enabled 但未配置执行器时返回 `https://www.goofish.com/search?q=<catalog>` 和手动可见 HTML 采集说明。
+5. Web `/api/browser/status` 透出新字段；Settings 增加 `Wameiji Entry`、`Xianyu Entry` 行。
+6. README live browser 与 Settings 说明已同步。
+7. 已运行针对性验证：新增 Browser-Harness 和 Web Server 状态测试先失败，修复后通过；相关 live/status 测试和 ruff 通过。
+8. 重启 Web 服务和 localtunnel 后，公网 `https://tame-zebras-wait.loca.lt/app.js?access_token=<token>` 已确认包含 `entryUrl`、`Wameiji Entry` 和新版 Settings 字段；公网不带 token 的 `/api/health` 返回 401。
+9. 已运行最终验证：`python -m pytest` 110 passed；`python -m ruff check src tests` 通过。
+10. 已运行运行态核对：`python -m cd_monitor.cli doctor --db data/cd_monitor.db` 显示默认 live browser disabled；`BROWSER_ENABLED=true python -m cd_monitor.cli scan-live --catalog-no SRCL-3520 --db data/cd_monitor.db` 返回 `human_required`、opportunity_count=0、Wameiji/Xianyu 入口 URL 和 search_run_ids 15/16。
+
+## 2026-06-14 前端中文化与数据接入状态记录
+
+继续对齐用户反馈：整体界面不能是英文，并且必须明确告诉用户当前是否接入到挖煤姬和闲鱼数据。
+
+1. Web 静态测试改为要求中文可见文案：`粘贴 HTML 评估`、`数据接入状态`、`挖煤姬 Live`、`闲鱼 Live`、`运行记录 ID`、`闲鱼价格窗口`、`弱提醒`、`未接入登录态执行器`。
+2. `web/index.html` 主导航、头部、指标、候选表格、详情、导入、关注清单、人工复核、二次复核、提醒记录、扫描历史和设置区已中文化。
+3. 首页新增 `数据接入状态` 区，明确显示 Mock 数据、手动导入、挖煤姬 Live、闲鱼 Live；Live 当前显示未接入登录态执行器，不伪造真实数据。
+4. `web/app.js` 状态消息、空态、详情标签、Settings 行、风险/决策/状态枚举显示已中文化；Live 检查结果会显示运行记录 ID 和手动入口 URL。
+5. `web/styles.css` 增加数据源状态区样式，并把移动端表格伪标签改为中文。
+6. 已运行验证：中文界面 Web Server 测试先失败，修复后 `python -m pytest tests/test_web_server.py` 23 passed；`python -m ruff check src tests` 通过。
+7. localtunnel 在真实浏览器里会出现中间确认页，已改用 localhost.run SSH 反向隧道；当前公网入口为 `https://df31e65241e384.lhr.life/?access_token=p0TFJ2PG7Vwv5Rm1DixKB9YzeluIsWot`。
+8. 已用 HTTP 和 Chrome headless 验证 lhr.life 地址：页面 200，包含中文 `数据接入状态`、`挖煤姬实时`、`粘贴 HTML 评估`，不再包含旧英文 `Opportunity Command`；JS 包含 `实时状态`，不再包含旧英文 `Live 状态`。
+9. 已再次运行验证：`python -m pytest tests/test_web_server.py` 23 passed；`python -m ruff check src tests` 通过。
+10. 最终全量验证：`python -m pytest` 110 passed；`python -m ruff check src tests` 通过；lhr.life `/api/health?access_token=<token>` 返回 200，不带 token 返回 401。
+
+## 2026-06-14 GitHub Goofish 参考与闲鱼登录态文件记录
+
+继续对齐用户要求：检索 GitHub 上 goofish / ai-goofish-monitor 相关项目，学习能省事的安全模式，但不能照搬绕风控、代理池或自动交易能力。
+
+1. 已按 `@github` 请求检索并浅克隆参考仓库到 `data/research/`：`Usagi-org/ai-goofish-monitor`、`Microck/goofish-watcher`、`LENKIN233/xianyu-monitor-skill`。
+2. 可吸收模式：闲鱼/Goofish 登录态用 Playwright `storage_state` JSON 管理；任务或配置只引用 state 文件路径；状态检查显示是否存在和是否可用。
+3. 明确不吸收模式：代理池、反检测/绕验证、自动购买、自动私信、自动发布商品、cookie 明文上报。
+4. TDD 新增失败用例后实现：`BrowserConfig.xianyu_state_file`、环境变量 `XIANYU_STATE_FILE` 和 `GOOFISH_STATE_FILE`，以及 `XianyuBrowserAdapter(enabled=True, state_file=...)`。
+5. `XianyuBrowserAdapter.search_status` 现在能区分未配置、文件缺失、JSON/结构无效、登录态已就绪但执行器缺失；只返回 cookie 域名，不返回 cookie 值。
+6. `AdapterStatus` 增加 `login_state_ready`、`state_file_status`、`state_file_path`、`state_cookie_domains`，Web `/api/browser/status`、doctor、scan-live 均透出同一状态。
+7. Web 设置面板新增中文 `闲鱼登录态` 行；数据源状态卡会显示“登录态已就绪 / 登录态文件缺失 / 登录态格式无效”，仍明确当前不会自动抓取。
+8. README 已同步配置方法、GitHub 学习结论和安全边界。
+9. 已运行针对性验证：新增登录态状态和配置测试先失败，修复后相关 42 条测试通过；`python -m ruff check src tests` 通过。
+
+## 2026-06-14 登录态状态全量验证与新公网入口
+
+继续对齐“边验证边往下执行”和“外部可访问前端”的要求，完成 GitHub goofish 参考落地后重新跑全量验证并刷新公网入口。
+
+1. 全量验证通过：`python -m pytest` 114 passed；`python -m ruff check src tests` 通过。
+2. 已重启本地 Web 后端，当前以 `WEB_ACCESS_TOKEN` 和 `BROWSER_ENABLED=true` 运行；这只展示真实读取准备度，不会自动抓取或伪造数据。
+3. 旧 `df31e65241e384.lhr.life` 隧道失效返回 `no tunnel here`，已重启 localhost.run SSH 反向隧道。
+4. 当前公网入口为 `https://935b8e7fb70c07.lhr.life/?access_token=p0TFJ2PG7Vwv5Rm1DixKB9YzeluIsWot`。
+5. 公网 `/api/browser/status?access_token=<token>` 返回 `enabled=true`，Wameiji/Xianyu 均为 `human_required/not_configured`，并给出 `meruki.cn` 与 `goofish.com/search` 手动入口；`login_state_ready=false`，因为尚未配置真实闲鱼 state 文件。
+6. 公网首页 HTML 返回 200，包含 `数据接入状态`、`挖煤姬实时`、`闲鱼实时`、`模拟扫描`；远程 `app.js` 包含 `闲鱼登录态`、`登录态已就绪`、`登录态文件缺失`、`GOOFISH_STATE_FILE`。
+7. 公网不带 token 访问 `/api/health` 返回 401。
+8. 已生成并目检截图 `data/xianyu-state-lhr-check.png`：不是中间页，主界面为中文，数据接入状态明确显示挖煤姬/闲鱼实时未接入登录态执行器。
+
+## 2026-06-14 闲鱼登录态导出命令记录
+
+继续对齐“能不能获取闲鱼数据”的推进路径：没有用户扫码登录前不能直接获取真实闲鱼数据，因此先补齐安全的本地登录态获取工具。
+
+1. 新增 TDD 测试 `tests/test_xianyu_login_state.py`：用 fake Playwright 验证导出 `storage_state`、返回摘要不包含 cookie 值、超时未登录不写文件且关闭浏览器。
+2. 新增服务 `cd_monitor.services.xianyu_login_state.export_xianyu_login_state`：打开可见 Goofish 登录页，轮询用户登录后的 goofish/xianyu/taobao/alibaba/tmall cookie 域名，成功后写出 Playwright `storage_state`。
+3. 新增 CLI 命令 `xianyu-login-state --output data/xianyu_state.json --timeout-seconds 180`；测试 `tests/test_cli_xianyu_login_state.py` 已覆盖输出摘要和不泄露 cookie 值。
+4. `pyproject.toml` 增加可选依赖 `browser = ["playwright>=1.48"]`；普通模拟/手动导入流程不强制安装浏览器。
+5. README 已新增安装和命令说明：`python -m pip install -e ".[browser]"`、`python -m playwright install chromium`、`python -m cd_monitor.cli xianyu-login-state ...`。
+6. 安全边界：该命令只等待用户自行扫码/登录并导出本地状态文件，不绕过验证，不搜索、不购买、不私信、不发布商品。
+7. 针对性验证已通过：`python -m pytest tests/test_cli_xianyu_login_state.py tests/test_xianyu_login_state.py` 3 passed。
+8. 全量验证已通过：`python -m pytest` 117 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-14 只读 Live HTML 采集命令记录
+
+继续推进真实数据获取路径：有登录态文件后，应能只读打开搜索页并保存 HTML，再复用现有 parser 和 evaluate-html，而不是伪造数据。
+
+1. 新增 TDD 测试 `tests/test_live_browser_capture.py`：fake Playwright 验证闲鱼搜索 URL、`storage_state` 参数、HTML 写出、条目解析和安全验证文本返回 `human_required/security_check`。
+2. 新增服务 `cd_monitor.services.live_browser_capture.capture_search_html`：支持 `source=xianyu|wameiji`，打开搜索入口、保存 HTML、用 `XianyuBrowserAdapter` / `WameijiBrowserAdapter` 本地解析并返回摘要。
+3. 新增 CLI 测试 `tests/test_cli_capture_live_html.py`，再接入命令 `capture-live-html --source xianyu --catalog-no SRCL-3520 --state-file data/xianyu_state.json --output ...`。
+4. 安全边界：命令只打开搜索页、等待加载、保存 HTML、解析统计；不点击详情、不购买、不加购、不私信、不发布、不绕验证。
+5. README 已新增 `capture-live-html` 用法，并说明后续仍用 `evaluate-html` 将 Wameiji/闲鱼两份 HTML 组合评估落库。
+6. 针对性验证已通过：`python -m pytest tests/test_cli_capture_live_html.py tests/test_live_browser_capture.py` 3 passed。
+7. 全量验证已通过：`python -m pytest` 120 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-14 只读 Live HTML 闭环扫描记录
+
+继续推进“真实数据能否接入”的可执行闭环：只读采集两边 HTML 后自动复用现有 evaluate-html 落库。
+
+1. 新增 TDD 测试 `tests/test_live_capture_scan.py`：fake capture 写出 Wameiji/闲鱼 HTML，验证组合评估能生成机会；任一端 `human_required/security_check` 时停止且不生成机会。
+2. 新增服务 `cd_monitor.services.live_capture_scan.capture_and_evaluate_live_html`：采集 Wameiji HTML、采集 Xianyu HTML、两边均 ok 后调用 `evaluate_html_files` 写入 SQLite。
+3. 新增 CLI 测试 `tests/test_cli_scan_live_html.py`，再接入命令 `scan-live-html --catalog-no SRCL-3520 --state-file data/xianyu_state.json --db data/cd_monitor.db --snapshot-dir data/snapshots`。
+4. 安全边界：只读打开搜索页和保存 HTML；任一端需要验证码/登录/安全验证则返回 `human_required`，不会伪造机会。
+5. README 已新增 `scan-live-html` 用法。
+6. 针对性验证已通过：`python -m pytest tests/test_cli_scan_live_html.py tests/test_live_capture_scan.py` 3 passed。
+7. 全量验证已通过：`python -m pytest` 123 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-14 前端真实数据接入流程可见化记录
+
+继续对齐“前端看不出接入挖煤姬和闲鱼数据”的反馈：新增 CLI 后，设置面板也必须能看到真实数据接入路径。
+
+1. Web 静态测试新增断言：远程 `app.js` 必须包含 `真实数据接入流程`、`xianyu-login-state`、`scan-live-html`。
+2. `web/app.js` 设置面板新增 `真实数据接入流程` 行，展示登录态导出、只读采集、闭环扫描三个命令。
+3. README 设置说明已同步，明确设置区会显示真实数据接入流程命令。
+4. 针对性验证已通过：`python -m pytest tests/test_web_server.py::test_web_server_serves_dashboard_api_and_static_app` 1 passed。
+5. 全量验证已通过：`python -m pytest` 123 passed；`python -m ruff check src tests` 通过。
+
+## 2026-06-14 新公网入口与前端命令可见性验证
+
+继续对齐远程查看前端要求：旧匿名 lhr.life 隧道再次失效后，已重启隧道并验证新版 JS。
+
+1. 旧 `935b8e7fb70c07.lhr.life` 返回 `no tunnel here`，本地 SSH 进程仍在但远端域名已失效。
+2. 已重启 localhost.run SSH 反向隧道，当前公网入口为 `https://148d08ef1b1b2b.lhr.life/?access_token=p0TFJ2PG7Vwv5Rm1DixKB9YzeluIsWot`。
+3. 公网 `app.js?access_token=<token>` 已验证包含 `真实数据接入流程`、`xianyu-login-state`、`capture-live-html`、`scan-live-html`。
+4. 公网首页 HTML 已验证包含 `数据接入状态`、`挖煤姬实时`、`闲鱼实时`。
+5. 公网不带 token 访问 `/api/health` 返回 401。
+6. README 当前远程入口已更新为 `148d08ef1b1b2b.lhr.life`。
+
+## 2026-06-14 交付报告文件记录
+
+继续对齐最终交付标准：需要列出修改范围、Phase 状态、测试结果、未验证项和下一步。
+
+1. 新增 `DELIVERY_REPORT.md`。
+2. 报告包含当前公网入口、Phase 0-6 完成情况、真实数据接入命令、安全边界、验证结果、未完成/需用户参与项和下一步建议。
+3. 明确说明真实闲鱼登录态需要用户扫码生成 `data/xianyu_state.json`，真实挖煤姬读取需要用户本机可见浏览器环境验证。
+
+## 2026-06-14 社区方案挖掘与风控熔断增强
+
+继续对齐“再多去社区挖掘更好方案”的要求：扩展检索 Goofish/Xianyu/Wameiji/Meruki 相关社区项目后，保留安全可落地方案，排除高风险反爬/自动交易路线。
+
+1. 新增 `COMMUNITY_RESEARCH.md`，记录社区项目结论：继续采用 Playwright 可见浏览器 / persistent profile / storage_state / 只读 HTML / human_required 状态机路线。
+2. 参考 `mercy719/goofish-mcp-server` 的可见 profile + Playwright 思路，作为后续 persistent profile 增强方向；暂不直接暴露页面上下文 mtop 写能力。
+3. 参考 `fancyboi999/goofish-cli` 的风控熔断思路，已将 `RGV587_ERROR`、`FAIL_SYS_USER_VALIDATE`、`punish`、`____tmd____`、`x5step`、滑块/验证码/风控等关键词纳入 Wameiji/闲鱼 HTML 解析前的 `human_required/security_check` 检测。
+4. 明确不采纳 `Edioff/goofish-scrape` 类高速 mtop + TLS impersonation + 高吞吐采集路线，不接入代理池、反检测参数、自动发布、私信、购买、付款或绕过验证能力。
+5. README 已同步 Browser-Harness 风控检测说明。
+6. TDD 验证：新增社区风控 token 回归测试，先失败后修复；`python -m pytest tests/test_browser_harness.py` 14 passed。
+
+## 2026-06-14 社区新项目复查与采集截图留证
+
+继续对齐“再多去社区挖掘更好方案”的要求：通过 GitHub API 复查更新较新的 Goofish/Xianyu Playwright 项目，发现 `tristanwqy/GooFish-AIMonitor` 采用本地 FastAPI + Playwright + React + SQLite 控制台路线，适合借鉴证据留存和本地控制台思路。
+
+1. `COMMUNITY_RESEARCH.md` 已新增 `tristanwqy/GooFish-AIMonitor` 观察记录。
+2. 新增 `capture-live-html --screenshot-output <path>`，在只读保存搜索页 HTML 的同时可保存当前页截图，便于远程人工复核真实页面状态。
+3. `capture_search_html` 返回 JSON 新增 `screenshot_path`，没有截图参数时返回 `null`。
+4. Web 设置区“真实数据接入流程”命令已同步展示 `--screenshot-output`。
+5. README 已同步截图参数用法和安全边界。
+6. 验证通过：`python -m pytest tests/test_web_server.py::test_web_server_serves_dashboard_api_and_static_app tests/test_live_browser_capture.py tests/test_cli_capture_live_html.py tests/test_browser_harness.py` 18 passed。
+
+## 2026-06-14 Persistent Profile 登录态复用
+
+继续落地社区项目中更稳定的 Playwright persistent profile 思路，同时保持只读、可见、人工可停止边界。
+
+1. `capture_search_html` 新增 `profile_dir` 参数：传入后使用 `chromium.launch_persistent_context(user_data_dir=...)`，不再依赖普通 context 的 `storage_state`。
+2. `capture-live-html` 新增 `--profile-dir`，支持 `data/browser_profiles/goofish` 这类本地 profile 目录。
+3. `scan-live-html` 新增 `--profile-dir`，闭环扫描时仅将 profile 传给闲鱼/Goofish 侧采集。
+4. README 已新增 `--profile-dir` 用法；Web 设置区“真实数据接入流程”已展示 profile 方案。
+5. `COMMUNITY_RESEARCH.md` 已将 persistent profile 从后续项调整为已落地。
+6. 验证通过：`python -m pytest tests/test_live_browser_capture.py tests/test_cli_capture_live_html.py tests/test_live_capture_scan.py tests/test_cli_scan_live_html.py` 7 passed。
+
+## 2026-06-14 全量验证与公网入口刷新
+
+继续对齐“边验证边往下执行”和“外部可访问前端”的要求：persistent profile 与截图留证接入后，已重新跑全量验证并刷新失效的 localhost.run 域名。
+
+1. 全量验证通过：`python -m pytest` 125 passed。
+2. 代码规范验证通过：`python -m ruff check src tests` 通过。
+3. 旧 `148d08ef1b1b2b.lhr.life` 返回 `no tunnel here`，已停止旧 SSH tunnel 并重启 localhost.run。
+4. 当前公网入口为 `https://75ca98eac9d12e.lhr.life/?access_token=p0TFJ2PG7Vwv5Rm1DixKB9YzeluIsWot`。
+5. 公网 `app.js?access_token=<token>` 已验证包含 `真实数据接入流程`、`capture-live-html`、`--screenshot-output`、`--profile-dir`。
+6. 公网 `/api/health?access_token=<token>` 返回 ok；不带 token 访问 `/api/health` 返回 401。
+7. README 与 `DELIVERY_REPORT.md` 当前公网入口已更新为 `75ca98eac9d12e.lhr.life`。
+
+## 2026-06-14 闭环扫描截图留证
+
+继续对齐“边验证边执行”和“真实数据接入可复核”的要求：单次采集已支持截图后，闭环扫描也需要默认保存两边搜索页截图。
+
+1. `capture_and_evaluate_live_html` 新增默认截图路径：`<snapshot-dir>/live_screenshots/<catalog>_wameiji.png` 与 `<catalog>_xianyu.png`。
+2. `scan-live-html` 调用只读采集时会传入 Wameiji 和 Xianyu 两边截图路径；仍不点击详情、不购买、不私信、不发布。
+3. README 已同步 `scan-live-html` 默认保存搜索页截图的说明。
+4. `COMMUNITY_RESEARCH.md` 已同步截图留证落地状态。
+5. 验证通过：`python -m pytest tests/test_live_capture_scan.py tests/test_cli_scan_live_html.py tests/test_live_browser_capture.py tests/test_cli_capture_live_html.py` 7 passed。
+
+## 2026-06-14 闭环截图后全量验证
+
+继续对齐“不许停下来直到测试通过”的要求：闭环扫描默认截图落地后已再次执行完整验证。
+
+1. 全量验证通过：`python -m pytest` 125 passed。
+2. 代码规范验证通过：`python -m ruff check src tests` 通过。
+3. `DELIVERY_REPORT.md` 已更新为 125 passed，并补齐 `--screenshot-output`、`--profile-dir` 和 `scan-live-html` 默认截图说明。
+
+## 2026-06-14 可见浏览器网络响应摘要留证
+
+回应“可靠数据”要求：不接入验证码绕过、Cloudflare 绕过、代理池、反检测指纹伪装或 TLS impersonation，但增强可见浏览器只读采集证据。
+
+1. `capture_search_html` 新增 `network_log_path` 参数：通过 Playwright 页面 `response` 事件保存页面自己加载到的站点响应摘要。
+2. 摘要只保存 URL、状态码、content-type、截断正文；不保存请求头、cookie、storage_state 明文。
+3. `capture-live-html` 新增 `--network-output`。
+4. `scan-live-html` 默认保存 `<snapshot-dir>/live_network/<catalog>_wameiji.network.json` 与 `<catalog>_xianyu.network.json`。
+5. README、Web 设置区、`COMMUNITY_RESEARCH.md` 和 `DELIVERY_REPORT.md` 已同步说明该能力属于可见浏览器只读证据留存，不是风控绕过。
+6. 针对性验证通过：`python -m pytest tests/test_live_browser_capture.py tests/test_cli_capture_live_html.py tests/test_live_capture_scan.py tests/test_cli_scan_live_html.py` 7 passed。
+
+## 2026-06-14 网络摘要后全量验证与公网入口刷新
+
+继续对齐“可靠数据”和“外部可访问前端”的要求：网络响应摘要接入后完成验证，并刷新再次失效的匿名 lhr.life 域名。
+
+1. 针对性验证通过：`python -m pytest tests/test_web_server.py::test_web_server_serves_dashboard_api_and_static_app tests/test_live_browser_capture.py tests/test_cli_capture_live_html.py tests/test_live_capture_scan.py tests/test_cli_scan_live_html.py` 8 passed。
+2. 全量验证通过：`python -m pytest` 125 passed。
+3. 代码规范验证通过：`python -m ruff check src tests` 通过。
+4. 旧 `75ca98eac9d12e.lhr.life` 返回 `no tunnel here`，已重启 localhost.run；当前公网入口为 `https://d01da56ecbea54.lhr.life/?access_token=p0TFJ2PG7Vwv5Rm1DixKB9YzeluIsWot`。
+5. 公网 `app.js?access_token=<token>` 已验证包含 `真实数据接入流程`、`--network-output`、`--profile-dir`、`--screenshot-output`。
+6. 公网 `/api/health?access_token=<token>` 返回 ok；不带 token 访问 `/api/health` 返回 401。
+7. README 与 `DELIVERY_REPORT.md` 当前公网入口已更新为 `d01da56ecbea54.lhr.life`。
+
+## 2026-06-15 公网链接失效修复与刷新脚本
+
+继续对齐“链接打不开”和“外部可访问前端”的要求：旧匿名 localhost.run 域名再次 503，已刷新为新入口并增加本地刷新脚本。
+
+1. 已确认本地 `http://127.0.0.1:8765/api/health?access_token=<token>` 正常。
+2. `d01da56ecbea54.lhr.life` 返回 503，说明匿名隧道域名被回收。
+3. 尝试下载 Cloudflare Quick Tunnel 工具失败：GitHub 443 连接超时/远端断开；未完成 cloudflared 方案。
+4. 已重启 localhost.run SSH tunnel，新公网入口为 `https://47e03ece40a23c.lhr.life/?access_token=p0TFJ2PG7Vwv5Rm1DixKB9YzeluIsWot`。
+5. 已验证新公网 `/api/health?access_token=<token>` 返回 ok；不带 token 返回 401。
+6. 已验证新公网 `app.js` 包含 `真实数据接入流程`、`--network-output`、`--profile-dir`、`--screenshot-output`。
+7. 新增 `scripts/refresh_public_tunnel.ps1`：自动检查本地健康、重启 localhost.run tunnel、提取 lhr.life URL、验证 health/app.js 标记并写入 `data/public-url.txt`。
+8. README、`DELIVERY_REPORT.md`、`data/public-url.txt` 已更新为 `47e03ece40a23c.lhr.life`。
+
+## 2026-06-15 公网刷新脚本稳定性修正
+
+继续处理匿名 localhost.run 不稳定问题：脚本第一次验证太快时可能拿到 URL 但 health/app.js 尚未就绪，导致退出。
+
+1. `scripts/refresh_public_tunnel.ps1` 已增加 `RetryCount` 参数：拿不到 lhr.life URL 时会自动重启 localhost.run 并重试。
+2. 脚本已增加 health/app.js 验证等待：拿到 URL 后最多等待 60 秒验证公网可用和前端标记。
+3. 脚本已改为按 `nokey@localhost.run` 命令行清理旧 ssh，避免旧匿名隧道残留。
+4. 当前手动验证通过的公网入口为 `https://4e3f58027aff37.lhr.life/?access_token=p0TFJ2PG7Vwv5Rm1DixKB9YzeluIsWot`。
+5. 已验证 `4e3f58027aff37.lhr.life` 的 `/api/health?access_token=<token>` 返回 ok；不带 token 返回 401；`app.js` 包含 `真实数据接入流程`、`--network-output`、`--profile-dir`、`--screenshot-output`。
+6. README、`DELIVERY_REPORT.md`、`data/public-url.txt` 已更新为 `4e3f58027aff37.lhr.life`。
+
+## 2026-06-15 Claude Code 交接包
+
+按“准备交接”的要求，已整理当前项目交接材料和 zip 包；交接包不包含 cookie、token、数据库、浏览器 profile、截图、网络日志或缓存。
+
+1. 新增 `HANDOFF_TO_CLAUDE_CODE.md`：记录当前项目路径、可用公网入口、已完成能力、关键命令、验证状态、重要文件、限制和后续建议。
+2. 新增 `EXTERNAL_COLLECTOR_CONTRACT.md`：定义外部采集层输出 HTML/JSON/CSV/状态文件的格式，当前系统继续负责入库、评估、展示、告警和报告。
+3. 新增 `output/handoff/HANDOFF_MANIFEST.txt`：列明交接包内容和排除项。
+4. 生成交接包 `output/WAMEIJI-XIANYU-handoff.zip`，大小 207947 bytes。
+5. 已检查 `output/handoff`，未发现 `xianyu_state`、`web-access-token`、`public-url`、SQLite 数据库、截图或 network JSON 等运行态敏感文件。
+
+## 2026-06-15 交接 TODO 清单补充
+
+继续对齐“能做的先做，不能做的列出来让 Claude Code 补”的要求，已新增明确差距清单并重新打包。
+
+1. 新增 `CLAUDE_CODE_TODO.md`，分为 Codex 已完成、未完成/需要后续补、Codex 不能实现的部分、建议交接顺序。
+2. `HANDOFF_TO_CLAUDE_CODE.md` 已引用 `CLAUDE_CODE_TODO.md`。
+3. 重新生成 `output/WAMEIJI-XIANYU-handoff.zip`，大小 211949 bytes。
+4. 重新检查 `output/handoff`，确认包含 `CLAUDE_CODE_TODO.md`，且未发现 `xianyu_state`、`web-access-token`、`public-url`、SQLite 数据库、截图或 network JSON 等运行态敏感文件。

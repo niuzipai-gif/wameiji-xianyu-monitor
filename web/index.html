@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI 闲鱼猎手 · Kuro Atelier Edition · WAMEIJI-XIANYU</title>
+  <link rel="stylesheet" href="styles/themes.css" />
+  <link rel="stylesheet" href="styles/app.css" />
+  <link rel="stylesheet" href="styles/kuro.css" />
+  <script src="runtime-config.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body class="kuro" data-kuro-theme="rose">
+    <button class="feed-new-pill" data-feed-new-pill type="button"></button>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark"><img src="assets/mascot/kuro_chibi_avatar.png" alt="Kuro 看板娘头像" /></div>
+        <div>
+          <h1>AI 闲鱼猎手</h1>
+          <p>WAMEIJI-XIANYU · Kuro Atelier</p>
+        </div>
+      </div>
+      <div class="nav-label">Navigation</div>
+      <nav class="nav" id="primaryNav">
+        <button class="active" data-page="home">首页机会流</button>
+        <button data-page="ranking">每日推荐榜</button>
+        <button data-page="tasks">任务管理</button>
+        <button data-page="accounts">号池管理</button>
+        <button data-page="logs">运行日志</button>
+        <button data-page="settings">策略设置</button>
+      </nav>
+      <div class="side-card">
+        <b>Design Direction</b>
+        <p>白蓝玻璃质感后台，闲鱼侧使用淡黄色识别，黑红双马尾看板娘只做品牌记忆点。</p>
+      </div>
+      <div class="side-card">
+        <b>Mascot</b>
+        <p>原创黑红哥特洛丽塔情报助手，手持 CD 与价格分析面板。</p>
+      </div>
+      <div class="side-card">
+        <b>操作</b>
+        <p style="display:flex;flex-direction:column;gap:6px;">
+          <button id="sideNewTaskBtn" style="border:0;background:var(--kuro-blue);color:white;padding:8px;border-radius:10px;cursor:pointer;font-weight:700;">＋ 新建监控任务</button>
+          <button id="sideImportBtn" style="border:1px solid var(--kuro-line);background:white;color:var(--kuro-ink);padding:8px;border-radius:10px;cursor:pointer;">导入 HTML / JSON</button>
+          <button id="sideFullScanBtn" style="border:1px solid var(--kuro-line);background:white;color:var(--kuro-ink);padding:8px;border-radius:10px;cursor:pointer;">立即全量扫描</button>
+        </p>
+      </div>
+      <div class="side-card" id="healthCard">
+        <b>API 状态</b>
+        <p id="healthLine">检测中…</p>
+        <p class="quiet" id="lastUpdated">最后更新：--</p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div class="search">
+          <span>⌕</span>
+          <input id="globalSearch" placeholder="搜索商品名、关键词、歌手、专辑、作品名、角色名…" />
+        </div>
+        <button id="advancedFilterBtn">高级筛选</button>
+        <button id="proBtn">Pro 会员</button>
+        <button id="refreshAllBtn">立即刷新</button><button id="newTaskBtn">新建任务</button><button class="ai-gen" id="aiGenerateBtn" title="用 AI 自动生成任务" style="background:linear-gradient(135deg,#7c3aed,#ec4899);color:white;border:0;padding:8px 14px;border-radius:10px;cursor:pointer;font-weight:700;margin-left:6px;">✨ AI 生成任务</button>
+      </div>
+
+      <section id="home" class="page active" data-page="home">
+        <div class="hero">
+          <div class="hero-copy">
+            <div class="eyebrow">Kuro Atelier · Premium Dashboard</div>
+            <h2>智能发现高价值交易机会<br/>用更有设计感的方式做日系 CD 价差监控</h2>
+            <p class="lead">图片优先信息流，闲鱼侧淡黄识别，挖煤姬侧保留淡粉白。看板娘作为品牌视觉点缀，卡片优先展示首图、价格差、利润率和市场样本。</p>
+            <div class="stats">
+              <div class="stat"><small>今日机会</small><strong id="kpiToday">--</strong></div>
+              <div class="stat"><small>预计利润</small><strong id="kpiProfit">--</strong></div>
+              <div class="stat"><small>最高利润</small><strong id="kpiMax">--</strong></div>
+              <div class="stat"><small>命中率</small><strong id="kpiHitRate">--</strong></div>
+            </div>
+          </div>
+          <div class="mascot-stage">
+            <div class="mascot-bubble">
+              <b>Kuro says</b>
+              <p>先看首图，再看版本、特典、腰封和品番。利润很好，但同款置信度低于 80% 的不要急着冲。</p>
+            </div>
+            <img src="assets/mascot/kuro_mascot.png" alt="黑红哥特洛丽塔成年看板娘主视觉" />
+          </div>
+        </div>
+        <div class="section-head">
+          <div>
+            <h3>首页机会流 · 图片优先信息流</h3>
+            <p>左侧闲鱼首图与价格，中间 AI 分析，右侧挖煤姬市场对标。</p>
+          </div>
+          <div class="filters">
+            <button class="pill active" data-feed-filter="all">全部机会</button>
+            <button class="pill" data-feed-filter="match">高匹配度</button>
+            <button class="pill" data-feed-filter="low-risk">低风险</button>
+            <button class="pill" data-feed-refresh data-feed-refresh-btn title="刷新信息流，换一批">↻ 换一批</button>
+            <span class="scraper-status idle" id="scraperStatus" title="后台实时采集状态"><span class="dot"></span><span id="scraperStatusText">采集待机</span></span>
+          </div>
+        </div>
+        <div class="feed" id="homeFeed" data-empty="暂无机会，点击右上角 “新建任务” 开始监控。">
+          <div class="empty-state">正在加载机会数据…</div>
+        </div>
+      </section>
+
+      <section id="ranking" class="page" data-page="ranking">
+        <div class="section-head">
+          <div>
+            <h3>每日推荐榜</h3>
+            <p>综合利润率、置信度与命中率的 Top 机会，按 24h 排序。</p>
+          </div>
+          <div class="filters">
+            <button class="pill active" data-rank-sort="score">机会分优先</button>
+            <button class="pill" data-rank-sort="profit">利润优先</button>
+            <button class="pill" data-rank-sort="confidence">置信度</button>
+          </div>
+        </div>
+        <div class="page-grid">
+          <div class="content-card">
+            <h3>今日指标</h3>
+            <div class="rank-metrics">
+              <div class="mini-stat"><small>扫描任务</small><strong id="rankScans">--</strong></div>
+              <div class="mini-stat"><small>命中机会</small><strong id="rankHits">--</strong></div>
+              <div class="mini-stat"><small>平均利润</small><strong id="rankAvg">--</strong></div>
+              <div class="mini-stat"><small>最高利润</small><strong id="rankTop">--</strong></div>
+            </div>
+            <div class="rank-cards" id="rankCards" aria-label="前三机会卡">
+              <div class="rank-card rank-card-empty" data-rank-empty>暂无机会数据</div>
+            </div>
+            <div class="ranking-table-wrap">
+              <table class="ranking-table" id="rankingTable">
+                <thead><tr><th>排名</th><th>机会</th><th>价格差</th><th>利润率</th><th>置信度</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody><tr><td colspan="6" class="empty-row">正在加载…</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="side-mascot-card">
+            <h3>Kuro Pick</h3>
+            <p>当日最高利润机会会在这里高亮，配市场样本与历史命中。</p>
+            <div id="kuroPick" class="kuro-pick">等待数据…</div>
+            <img src="assets/mascot/kuro_chibi_avatar.png" alt="排行榜看板娘" />
+          </div>
+        </div>
+      </section>
+
+      <section id="tasks" class="page" data-page="tasks">
+        <div class="section-head">
+          <div>
+            <h3>任务管理</h3>
+            <p>监控任务列表，支持新增、暂停、复核与重新扫描。</p>
+          </div>
+          <div class="filters">
+            <button class="pill active" data-task-filter="all">全部</button>
+            <button class="pill" data-task-filter="active">监控中</button>
+            <button class="pill" data-task-filter="paused">已暂停</button>
+            <button class="pill" data-task-filter="error">异常</button>
+          </div>
+        </div>
+        <div class="stat-row">
+          <div class="mini-stat"><small>监控中</small><strong id="tasksActive">--</strong></div>
+          <div class="mini-stat"><small>已暂停</small><strong id="tasksPaused">--</strong></div>
+          <div class="mini-stat"><small>异常</small><strong id="tasksError">--</strong></div>
+          <div class="mini-stat"><small>今日新建</small><strong id="tasksToday">--</strong></div>
+        </div>
+        <div class="task-list" id="taskList" data-empty="暂无任务，点击右上角 “新建任务” 添加。">
+          <div class="empty-state">正在加载任务…</div>
+        </div>
+        <div class="content-card new-task-card">
+          <h3>新建任务</h3>
+          <form id="newTaskForm" class="new-task-form">
+            <label><span>关键词 / 品番</span><input name="keyword" required placeholder="米津玄师 初回限定 / SRCL-3520" /></label>
+            <label><span>艺人</span><input name="artist" placeholder="L'Arc-en-Ciel" /></label>
+            <label><span>JAN</span><input name="jan" placeholder="4988601469821" /></label>
+            <label><span>版本</span><input name="edition" placeholder="初回限定盤" /></label>
+            <label><span>平台</span>
+              <select name="platform">
+                <option value="xianyu">闲鱼</option>
+                <option value="wameiji">挖煤姬</option>
+                <option value="both">双平台</option>
+              </select>
+            </label>
+            <label><span>最低利润率 (%)</span><input name="min_margin" type="number" step="1" value="30" /></label>
+            <label><span>最低价格差 (CNY)</span><input name="min_diff" type="number" step="1" value="1500" /></label>
+            <label><span>优先级 (1-5)</span><input name="priority" type="number" step="1" min="1" max="5" value="3" /></label>
+            <label><span>持有天数</span><input name="holding_days" type="number" step="1" min="1" value="30" /></label>
+            <label><span>通知</span>
+              <select name="notify">
+                <option value="none">不通知</option>
+                <option value="bark">Bark</option>
+                <option value="telegram">Telegram</option>
+                <option value="wecom">企业微信</option>
+                <option value="feishu">飞书</option>
+                <option value="dingtalk">钉钉</option>
+              </select>
+            </label>
+            <label><span>账号策略</span>
+              <select name="account_strategy">
+                <option value="auto">自动 (auto)</option>
+                <option value="fixed">绑定账号 (fixed)</option>
+                <option value="rotate">账号池轮换 (rotate)</option>
+              </select>
+            </label>
+            <label><span>绑定账号</span>
+              <select name="account_state_file" id="newTaskAccountFileSelect">
+                <option value="">系统自动</option>
+              </select>
+            </label>
+            <label><span>决策模式</span>
+              <select name="decision_mode" data-decision-mode-select="new">
+                <option value="ai">AI 判断</option>
+                <option value="keyword">关键词判断</option>
+              </select>
+            </label>
+            <label data-description-only="ai" data-decision-mode-target="new" style="grid-column:span 2;">
+              <span>详细需求 description (AI 模式必填，关键词模式可留空)</span>
+              <textarea name="description" rows="3" placeholder="例如：仅收录初回限定盘、盘面无裂、附写真集；不要租赁版；可信度低于 80% 直接放弃"></textarea>
+            </label>
+            <label><span>自定义 Prompt 模板</span>
+              <input name="ai_prompt_base_file" placeholder="例如 prompts/anime_base.txt (留空用 prompts/base_prompt.txt)" />
+            </label>
+            <label><span>自定义判定标准</span>
+              <input name="ai_prompt_criteria_file" placeholder="例如 prompts/anime_criteria.txt (留空用默认 criteria)" />
+            </label>
+            <button class="primary" type="submit">创建</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="accounts" class="page" data-page="accounts">
+        <div class="section-head">
+          <div>
+            <h3>号池管理</h3>
+            <p>账号调度中心，展示登录状态、工作状态、当前任务和风控风险。</p>
+          </div>
+          <div class="filters">
+            <button class="pill active" data-account-filter="all">全部平台</button>
+            <button class="pill" data-account-filter="xianyu">闲鱼</button>
+            <button class="pill" data-account-filter="wameiji">挖煤姬</button>
+          </div>
+        </div>
+        <div class="stat-row">
+          <div class="mini-stat"><small>在线账号</small><strong id="acctOnline">--</strong></div>
+          <div class="mini-stat"><small>空闲账号</small><strong id="acctIdle">--</strong></div>
+          <div class="mini-stat"><small>运行中</small><strong id="acctRunning">--</strong></div>
+          <div class="mini-stat"><small>异常</small><strong id="acctError">--</strong></div>
+        </div>
+        <div class="split-grid">
+          <div class="content-card">
+            <h3>闲鱼账号池 <span class="quiet" id="xianyuStatusLine">检测中…</span></h3>
+            <div class="lane" id="xianyuAccounts" data-empty="暂无闲鱼账号。请用浏览器扩展 “AI 闲鱼猎手 · 登录态提取” 扫码登录。">
+              <div class="empty-state">正在加载闲鱼账号…</div>
+            </div>
+            <div class="card-actions">
+              <button class="primary" id="xianyuRefreshBtn">刷新登录态</button>
+              <button id="xianyuDeleteBtn" class="danger">清除登录态</button>
+            </div>
+            <details class="paste-area">
+              <summary>粘贴 Chrome 扩展采集的登录态 JSON</summary>
+              <textarea id="xianyuPasteArea" placeholder="在 Chrome 中打开 goofish.com 并使用“AI 闲鱼猎手 · 登录态提取”扩展，复制 JSON 后粘贴到这里"></textarea>
+              <button class="primary" id="xianyuPasteBtn">保存闲鱼登录态</button>
+            </details>
+          </div>
+          <div class="content-card">
+            <h3>挖煤姬账号池 <span class="quiet" id="wameijiStatusLine">检测中…</span></h3>
+            <div class="lane" id="wameijiAccounts" data-empty="暂无挖煤姬账号。请用浏览器扩展 “挖煤姬 · 登录态提取” 扫码登录。">
+              <div class="empty-state">正在加载挖煤姬账号…</div>
+            </div>
+            <div class="card-actions">
+              <button class="primary" id="wameijiRefreshBtn">刷新登录态</button>
+              <button id="wameijiDeleteBtn" class="danger">清除登录态</button>
+            </div>
+            <details class="paste-area">
+              <summary>粘贴 Chrome 扩展采集的登录态 JSON</summary>
+              <textarea id="wameijiPasteArea" placeholder="在 Chrome 中打开 meruki.cn 并使用“挖煤姬 · 登录态提取”扩展，复制 JSON 后粘贴到这里"></textarea>
+              <button class="primary" id="wameijiPasteBtn">保存挖煤姬登录态</button>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section id="logs" class="page" data-page="logs">
+        <div class="section-head">
+          <div>
+            <h3>运行日志</h3>
+            <p>采集、匹配、图片识别、推送和账号异常记录。</p>
+          </div>
+          <div class="filters">
+            <button class="pill active" data-log-filter="all">全部</button>
+            <button class="pill" data-log-filter="task">任务</button>
+            <button class="pill" data-log-filter="account">账号</button>
+            <button class="pill" data-log-filter="alert">提醒</button>
+            <button class="pill" data-log-filter="error">异常</button>
+          </div>
+        </div>
+        <div class="page-grid">
+          <div class="content-card">
+            <h3>最近运行</h3>
+            <div class="log-list" id="logList" data-empty="暂无日志记录。">
+              <div class="empty-state">正在加载日志…</div>
+            </div>
+          </div>
+          <div class="side-mascot-card">
+            <h3>异常提示</h3>
+            <p>红色只用于真正异常，避免整个后台变得太吵。</p>
+            <img src="assets/mascot/kuro_chibi_avatar.png" alt="日志看板娘" />
+          </div>
+        </div>
+      </section>
+
+      <section id="settings" class="page" data-page="settings">
+        <div class="section-head">
+          <div>
+            <h3>策略设置</h3>
+            <p>价格、AI、信息流、后端连接和通知安全统一配置。</p>
+          </div>
+          <div class="filters">
+            <button id="importDataBtn">导入数据</button>
+            <button id="runFullScanBtn">立即全量扫描</button>
+            <button id="testNotifyBtn">通知测试</button>
+            <button id="generateReportBtn">生成报告</button>
+            <button class="primary" id="settingsSaveBtn">保存设置</button>
+          </div>
+        </div>
+        <div class="split-grid">
+          <div class="content-card">
+            <h3>价格策略</h3>
+            <div class="setting-card"><h4>汇率与成本</h4><div class="setting-line" id="settingsFx">读取中…</div></div>
+            <div class="setting-card"><h4>利润阈值</h4><div class="setting-line" id="settingsMargin">读取中…</div></div>
+            <div class="setting-card"><h4>风险扣分</h4><div class="setting-line" id="settingsRisk">读取中…</div></div>
+          </div>
+          <div class="content-card">
+            <h3>AI 与展示策略</h3>
+            <div class="setting-card"><h4>匹配规则</h4><div class="setting-line" id="settingsMatch">读取中…</div></div>
+            <div class="setting-card"><h4>信息流展示</h4><div class="setting-line" id="settingsFeed">读取中…</div></div>
+            <div class="setting-card"><h4>后端连接</h4><div class="setting-line" id="settingsBackend">读取中…</div></div><div class="setting-card"><h4>用户覆盖（保存后写入）</h4><div class="setting-line"><form id="userOverridesForm" class="user-overrides-form"><label><span>主题色</span><select name="kuro_theme"><option value="rose">玫瑰红 (rose)</option><option value="sage">盐草绿 (sage)</option><option value="ink">水墨黑 (ink)</option><option value="sand">沙漉 (sand)</option></select></label><label><span>最低利润率 (%)</span><input type="number" name="min_margin" step="1" min="0" max="100" value="30" /></label><label><span>最低价格差 (CNY)</span><input type="number" name="min_diff" step="50" min="0" value="1500" /></label><button class="primary" type="submit">保存覆盖</button></form><div class="setting-line" id="settingsUserOverrides">未设置</div></div></div>
+          </div>
+        </div>
+        <div class="split-grid">
+          <div class="content-card">
+            <h3>通知渠道（多渠道）</h3>
+            <form id="notificationForm" class="settings-form" autocomplete="off">
+              <label><span>默认渠道</span>
+                <select name="channel">
+                  <option value="none">不通知</option>
+                  <option value="feishu">飞书</option>
+                  <option value="dingtalk">钉钉</option>
+                  <option value="bark">Bark (iOS)</option>
+                  <option value="telegram">Telegram</option>
+                  <option value="wecom">企业微信</option>
+                  <option value="ntfy">ntfy</option>
+                  <option value="gotify">Gotify</option>
+                </select>
+              </label>
+              <label><span>飞书 Webhook</span><input name="feishu_webhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." /></label>
+              <label><span>钉钉 Webhook</span><input name="dingtalk_webhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=..." /></label>
+              <label><span>Bark URL（设备 token 可选）</span><input name="bark_url" placeholder="https://api.day.app/YourDeviceKey" /></label>
+              <label><span>Telegram Bot Token</span><input name="telegram_bot_token" placeholder="123456:ABC..." /></label>
+              <label><span>Telegram Chat ID</span><input name="telegram_chat_id" placeholder="-1001234567890" /></label>
+              <label><span>企业微信 Webhook</span><input name="wecom_webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." /></label>
+              <label><span>ntfy Topic URL</span><input name="ntfy_url" placeholder="https://ntfy.sh/your-topic" /></label>
+              <label><span>Gotify URL + Token</span><input name="gotify_url" placeholder="https://gotify.example.com/token/your-token" /></label>
+              <div class="form-actions" style="grid-column:1/-1;display:flex;gap:8px;align-items:center;">
+                <button class="primary" type="submit">保存通知配置</button>
+                <button type="button" data-notify-test="true">发送测试消息</button>
+                <span id="notifyFeedback" class="quiet" style="margin-left:8px;"></span>
+              </div>
+            </form>
+          </div>
+          <div class="content-card">
+            <h3>AI 提供方（覆盖 .env）</h3>
+            <form id="aiSettingsForm" class="settings-form" autocomplete="off">
+              <label><span>提供方</span>
+                <select name="provider">
+                  <option value="openai">OpenAI 兼容</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </label>
+              <label><span>API Base URL</span><input name="base_url" placeholder="https://api.deepseek.com/v1" /></label>
+              <label><span>模型名</span><input name="model_name" placeholder="deepseek-chat" /></label>
+              <label><span>代理 URL（可选）</span><input name="proxy_url" placeholder="http://127.0.0.1:7890" /></label>
+              <label><span>API Key</span><input name="api_key" type="password" placeholder="填入后会保存到 user_settings 表" /></label>
+              <p class="quiet" id="aiSourceHint" style="grid-column:1/-1;margin:0;">当前来源：检测中…</p>
+              <div class="form-actions" style="grid-column:1/-1;display:flex;gap:8px;align-items:center;">
+                <button class="primary" type="submit">保存 AI 配置</button>
+                <button type="button" data-ai-test="true">连通性测试</button>
+                <span id="aiFeedback" class="quiet" style="margin-left:8px;"></span>
+              </div>
+            </form>
+          </div>
+        </div>
+        <div class="content-card">
+          <h3>系统自检</h3>
+          <pre id="doctorOutput" class="doctor-pre">运行中…</pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+
+<!-- Import data modal -->
+<div id="importModal" class="modal-mask" data-modal="import" hidden>
+  <div class="modal-card" style="max-width:880px;">
+    <header>
+      <h3>导入数据 · 评估 HTML / JSON / CSV</h3>
+      <button class="modal-close" data-modal-close="import">×</button>
+    </header>
+    <div class="modal-body">
+      <form id="importForm" class="new-task-form" style="grid-template-columns: 1fr 1fr 1fr 1fr auto;">
+        <label><span>类型</span>
+          <select name="kind">
+            <option value="html-text">粘贴 HTML</option>
+            <option value="json-files">JSON 文件</option>
+            <option value="files">HTML/CSV 文件</option>
+          </select>
+        </label>
+        <label><span>关键词 (catalog_no)</span><input name="catalog_no" required placeholder="SRCL-3520" /></label>
+        <label><span>JSON 源 (wameiji)</span><textarea name="wameiji_json" rows="3" placeholder='[{"title":"...","price":1200,"currency":"JPY"}]' style="grid-column:span 2;font-size:12px;"></textarea></label>
+        <label><span>JSON 源 (xianyu)</span><textarea name="xianyu_json" rows="3" placeholder='[{"title":"...","price_cny":200}]' style="grid-column:span 2;font-size:12px;"></textarea></label>
+        <label data-import-show="files"><span>Wameiji HTML 文本</span><textarea name="wameiji_html" rows="3" placeholder="粘贴 wameiji 页面 HTML" style="grid-column:span 4;font-size:12px;"></textarea></label>
+        <label data-import-show="files"><span>Xianyu CSV 文本</span><textarea name="xianyu_csv" rows="3" placeholder="粘贴 xianyu 价格 CSV" style="grid-column:span 4;font-size:12px;"></textarea></label>
+        <label data-import-show="html-text"><span>HTML 文本 (可选)</span><textarea name="html_text" rows="3" placeholder="粘贴抓取到的 wameiji HTML 片段" style="grid-column:span 4;font-size:12px;"></textarea></label>
+        <label data-import-show="json-files"><span>JSON 源 (wameiji)</span><textarea name="wameiji_json" rows="3" placeholder='[{"title":"...","price":1200,"currency":"JPY"}]' style="grid-column:span 2;font-size:12px;"></textarea></label>
+        <label data-import-show="json-files"><span>JSON 源 (xianyu)</span><textarea name="xianyu_json" rows="3" placeholder='[{"title":"...","price_cny":200}]' style="grid-column:span 2;font-size:12px;"></textarea></label>
+        <button class="primary" type="submit" style="grid-column:1/-1;justify-self:start;">评估并入库</button>
+      </form>
+      <div id="importResult" class="empty-state" style="margin-top:14px;text-align:left;white-space:pre-wrap;">点击「评估并入库」开始</div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit task modal -->
+<div id="editTaskModal" class="modal-mask" data-modal="edit-task" hidden>
+  <div class="modal-card" style="max-width:640px;">
+    <header>
+      <h3>编辑任务</h3>
+      <button class="modal-close" data-modal-close="edit-task">×</button>
+    </header>
+    <div class="modal-body">
+      <form id="editTaskForm" class="new-task-form">
+        <label><span>关键词 / 品番</span><input name="keyword" required /></label>
+        <label><span>艺人</span><input name="artist" /></label>
+        <label><span>JAN</span><input name="jan" /></label>
+        <label><span>版本</span><input name="edition" /></label>
+        <label><span>最低利润率 (0-1)</span><input name="min_margin" type="number" step="0.05" min="0" max="1" value="0.30" /></label>
+        <label><span>最低价格差 (CNY)</span><input name="min_diff" type="number" step="100" min="0" value="1500" /></label>
+        <label><span>优先级 (1-5)</span><input name="priority" type="number" step="1" min="1" max="5" value="3" /></label>
+        <label><span>持有天数</span><input name="expected_holding_days" type="number" step="1" min="1" value="30" /></label>
+        <label><span>平台</span>
+          <select name="platform">
+            <option value="both">双平台</option>
+            <option value="wameiji">挖煤姬</option>
+            <option value="xianyu">闲鱼</option>
+          </select>
+        </label>
+        <label><span>账号策略</span>
+          <select name="account_strategy">
+            <option value="auto">自动 (auto)</option>
+            <option value="fixed">绑定账号 (fixed)</option>
+            <option value="rotate">账号池轮换 (rotate)</option>
+          </select>
+        </label>
+        <label><span>绑定账号</span>
+          <select name="account_state_file" id="editTaskAccountFileSelect">
+            <option value="">系统自动</option>
+          </select>
+        </label>
+        <label><span>通知渠道</span>
+          <select name="notify_channel">
+            <option value="none">不通知</option>
+            <option value="bark">Bark</option>
+            <option value="telegram">Telegram</option>
+            <option value="wecom">企业微信</option>
+            <option value="feishu">飞书</option>
+            <option value="dingtalk">钉钉</option>
+          </select>
+        </label>
+        <label><span>决策模式</span>
+          <select name="decision_mode" data-decision-mode-select="edit">
+            <option value="ai">AI 判断</option>
+            <option value="keyword">关键词判断</option>
+          </select>
+        </label>
+        <label data-description-only="ai" data-decision-mode-target="edit" style="grid-column:span 2;">
+          <span>详细需求 description (AI 模式必填，关键词模式可留空)</span>
+          <textarea name="description" rows="3" placeholder="例如：仅收录初回限定盘、盘面无裂、附写真集"></textarea>
+        </label>
+        <label><span>自定义 Prompt 模板</span><input name="ai_prompt_base_file" /></label>
+        <label><span>自定义判定标准</span><input name="ai_prompt_criteria_file" /></label>
+        <button class="primary" type="submit" style="grid-column:1/-1;justify-self:start;">保存修改</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Detail modal -->
+<div id="detailModal" class="modal-mask" data-modal="detail" hidden>
+  <div class="modal-card">
+    <header>
+      <h3 id="detailTitle">机会详情</h3>
+      <button class="modal-close" data-modal-close="detail">×</button>
+    </header>
+    <div class="modal-body" id="detailBody">
+      <div class="empty-state">加载中…</div>
+    </div>
+  </div>
+</div>
+
+<!-- Advanced filter modal -->
+<div id="filterModal" class="modal-mask" data-modal="filter" hidden>
+  <div class="modal-card">
+    <header>
+      <h3>高级筛选</h3>
+      <button class="modal-close" data-modal-close="filter">×</button>
+    </header>
+    <div class="modal-body">
+      <form id="advancedFilterForm" class="new-task-form">
+        <label><span>关键词</span><input name="q" placeholder="品番 / 标题关键词" /></label>
+        <label><span>平台</span>
+          <select name="platform">
+            <option value="all">全部</option>
+            <option value="wameiji">挖煤姬</option>
+            <option value="xianyu">闲鱼</option>
+          </select>
+        </label>
+        <label><span>最低利润率</span><input name="min_margin" type="number" step="1" value="30" /></label>
+        <label><span>最低价格差</span><input name="min_diff" type="number" step="1" value="1500" /></label>
+        <label><span>决策</span>
+          <select name="decision">
+            <option value="all">全部</option>
+            <option value="strong_alert">强提醒</option>
+            <option value="weak_alert">弱提醒</option>
+            <option value="skip">跳过</option>
+          </select>
+        </label>
+        <button class="primary" type="submit">应用筛选</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+
+<!-- AI Generate Task modal -->
+<div id="aiGenerateModal" class="modal-mask" data-modal="ai-generate" hidden>
+  <div class="modal-card" style="max-width:720px;">
+    <header>
+      <h3>✨ 通过 AI 生成监控任务</h3>
+      <button class="modal-close" data-modal-close="ai-generate">×</button>
+    </header>
+    <div class="modal-body">
+      <p class="quiet" style="margin:0 0 12px;">填一段自然语言描述，AI 会把它翻译成结构化的判定标准(prompts/{keyword}_criteria.txt)并自动创建监控任务。需要配置 AI 提供方 <code>.env</code> 中的 <code>AI_PROVIDER</code>/<code>MINIMAX_API_KEY</code>。</p>
+      <form id="aiGenerateForm" class="new-task-form">
+        <label><span>任务名 / 艺人</span><input name="task_name" required placeholder="例如 米津玄师 / アイドルマスター" /></label>
+        <label><span>关键词 / 品番 (可选)</span><input name="keyword" placeholder="不填则使用 task_name" /></label>
+        <label><span>决策模式</span>
+          <select name="decision_mode" id="aiGenerateDecisionMode" data-decision-mode-select="ai-generate">
+            <option value="ai">AI 判断（推荐）</option>
+            <option value="keyword">仅关键词判断（不走 AI）</option>
+          </select>
+        </label>
+        <label data-decision-mode-target="ai-generate" data-description-only="ai" style="grid-column:span 2;">
+          <span>详细需求 description <em class="required">*</em></span>
+          <textarea name="description" rows="5" required placeholder="例如：仅收录初回限定盤、盘面无裂、附写真集；排除租赁版与韩版；置信度低于 80% 直接放弃。"></textarea>
+        </label>
+        <label data-decision-mode-target="ai-generate" data-keywords-only="keyword" style="grid-column:span 2;display:none;">
+          <span>关键词（逗号分隔）</span>
+          <input name="required_keywords" placeholder="初回限定盤, 盤面無裂, 写真集付" />
+        </label>
+        <label style="grid-column:span 2;display:flex;gap:12px;align-items:center;">
+          <button class="primary" type="submit" id="aiGenerateSubmitBtn">开始 AI 生成</button>
+          <span class="quiet" style="font-size:12px;">AI 模式约需 30-60 秒，关键词模式秒级。</span>
+        </label>
+      </form>
+      <div id="aiGenerateProgress" class="ai-gen-progress" hidden>
+        <h4>实时进度</h4>
+        <ol class="ai-gen-steps" id="aiGenerateSteps"></ol>
+        <div class="ai-gen-foot" id="aiGenerateFoot"></div>
+        <div class="ai-gen-actions" id="aiGenerateActions" hidden>
+          <button class="primary" id="aiGenerateOpenTaskBtn" type="button">查看新建任务</button>
+          <button id="aiGenerateCloseBtn" type="button">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Blacklist editor modal (P0 #10) -->
+<div id="blacklistModal" class="modal-mask" data-modal="blacklist" hidden>
+  <div class="modal-card" style="max-width:680px;">
+    <header>
+      <h3>结果黑名单关键词 · <span id="blacklistWatchLabel">任务</span></h3>
+      <button class="modal-close" data-modal-close="blacklist">×</button>
+    </header>
+    <div class="modal-body">
+      <p class="quiet">每行一个关键词，命中则隐藏该商品。支持 <code>re:正则</code> 前缀作为正则表达式。</p>
+      <textarea id="blacklistKeywords" rows="10" style="width:100%;font-family:monospace;font-size:13px;" placeholder="例如：
+租赁
+损坏
+re:.*test.*"></textarea>
+      <div class="form-actions" style="margin-top:14px;display:flex;gap:8px;align-items:center;">
+        <button class="primary" type="button" data-blacklist-save>保存黑名单</button>
+        <span id="blacklistUpdated" class="quiet"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Live feed indicator -->
+<div id="liveFeedIndicator" style="position:fixed;right:14px;bottom:14px;background:rgba(28,28,32,.85);color:#fff;padding:8px 14px;border-radius:999px;font-size:12px;display:flex;align-items:center;gap:8px;z-index:9998;box-shadow:0 4px 14px rgba(0,0,0,.2);">
+  <span id="liveFeedStatus" class="status warn">实时连接中…</span>
+  <span class="quiet">WebSocket</span>
+</div>
+</body>
+</html>
+
+</html>

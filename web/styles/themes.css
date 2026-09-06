@@ -1,0 +1,17 @@
+:root {
+  --ink: #171716;
+  --ink-2: #2c2b28;
+  --muted: #706d66;
+  --paper: #f6f1e8;
+  --surface: #fffdf8;
+  --line: #ded6c8;
+  --line-strong: #c9bdad;
+  --teal: #0f7c78;
+  --blue: #285a9f;
+  --copper: #a65d2a;
+  --green: #237548;
+  --red: #a1362f;
+  --shadow: 0 20px 55px rgba(39, 31, 21, 0.12);
+  color-scheme: light;
+}
+

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 260" role="img" aria-labelledby="title desc">
+  <title id="title">Stacked compact disc cases</title>
+  <desc id="desc">A refined illustration of compact disc jewel cases used as dashboard artwork.</desc>
+  <defs>
+    <linearGradient id="caseA" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#fff8ea"/>
+      <stop offset="0.48" stop-color="#cfc5b5"/>
+      <stop offset="1" stop-color="#6c6258"/>
+    </linearGradient>
+    <linearGradient id="caseB" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#f6efe4"/>
+      <stop offset="0.55" stop-color="#8fb7b0"/>
+      <stop offset="1" stop-color="#183c3a"/>
+    </linearGradient>
+    <linearGradient id="disc" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#fffefa"/>
+      <stop offset="0.28" stop-color="#b7d8d4"/>
+      <stop offset="0.52" stop-color="#d9c3a7"/>
+      <stop offset="0.78" stop-color="#7e9fcb"/>
+      <stop offset="1" stop-color="#fff6e5"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#0f0d0b" flood-opacity="0.26"/>
+    </filter>
+  </defs>
+  <rect width="420" height="260" fill="none"/>
+  <g filter="url(#shadow)">
+    <path d="M78 128 260 69l94 54-185 64Z" fill="url(#caseA)" stroke="#f2e5d2" stroke-width="2"/>
+    <path d="M169 187 354 123v38l-185 65Z" fill="#4d463e" opacity=".92"/>
+    <path d="M78 128 169 187v39l-91-60Z" fill="#8f826f"/>
+    <path d="M101 124 260 73l68 40-161 55Z" fill="rgba(255,255,255,.32)" stroke="#ffffff" stroke-opacity=".42"/>
+    <circle cx="206" cy="121" r="44" fill="url(#disc)" stroke="#fff8ec" stroke-width="5"/>
+    <circle cx="206" cy="121" r="14" fill="#2b2824" stroke="#fff6e7" stroke-width="4"/>
+  </g>
+  <g opacity=".94" filter="url(#shadow)">
+    <path d="M48 154 214 101l106 62-168 58Z" fill="url(#caseB)" stroke="#d8ece7" stroke-width="2"/>
+    <path d="M152 221 320 163v23l-168 59Z" fill="#102a29"/>
+    <path d="M48 154 152 221v24L48 177Z" fill="#356461"/>
+    <path d="M75 153 213 109l80 47-141 48Z" fill="rgba(255,255,255,.22)" stroke="#e4fbf7" stroke-opacity=".36"/>
+    <path d="M111 171h82" stroke="#f6efe4" stroke-width="5" stroke-linecap="round" opacity=".72"/>
+    <path d="M111 188h52" stroke="#f6efe4" stroke-width="5" stroke-linecap="round" opacity=".56"/>
+  </g>
+  <g opacity=".88">
+    <path d="M124 58 229 25l62 36-107 37Z" fill="#a65d2a" stroke="#edc39c" stroke-width="2"/>
+    <path d="M184 98 291 61v19l-107 38Z" fill="#653716"/>
+    <path d="M124 58 184 98v20l-60-40Z" fill="#bf7844"/>
+  </g>
+</svg>

@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual env
+.venv
+venv
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Tests
+.pytest_cache/
+.pytest-tmp/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.tox/
+.nox/
+tests/
+test_*.py
+*_test.py
+
+# Logs / data
+*.log
+logs/
+logs-*/*
+
+# Build artifacts
+node_modules/
+
+# Environment (we mount .env explicitly)
+.env
+.env.local
+
+# Misc
+tmp/
+*.tmp
+*.bak
+*.old
+write_test*
+
+# Snapshots are runtime data, but keep .gitkeep
+data/snapshots/.gitkeep

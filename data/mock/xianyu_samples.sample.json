@@ -1,0 +1,51 @@
+[
+  {
+    "catalog_no": "SRCL-3520",
+    "title": "Artist Album SRCL-3520 初回限定 帯付き [synthetic]",
+    "price_cny": 260,
+    "url": "https://example.invalid/mock/xianyu/001",
+    "raw_text": "Synthetic offline fixture; source=mock; no real listing or historical price."
+  },
+  {
+    "catalog_no": "SRCL-3520",
+    "title": "Artist Album SRCL-3520 初回限定 [synthetic]",
+    "price_cny": 280,
+    "url": "https://example.invalid/mock/xianyu/002",
+    "raw_text": "Synthetic offline fixture; source=mock; no real listing or historical price."
+  },
+  {
+    "catalog_no": "SRCL-3520",
+    "title": "Artist Album SRCL-3520 通常盤 [synthetic]",
+    "price_cny": 270,
+    "url": "https://example.invalid/mock/xianyu/003",
+    "raw_text": "Synthetic offline fixture; source=mock; no real listing or historical price."
+  },
+  {
+    "catalog_no": "SRCL-3520",
+    "title": "Artist Album SRCL-3520 1元展示 [synthetic]",
+    "price_cny": 1,
+    "url": "https://example.invalid/mock/xianyu/004",
+    "raw_text": "Synthetic offline fixture; source=mock; extreme-low-price case."
+  },
+  {
+    "catalog_no": "SRCL-3520",
+    "title": "Artist Album SRCL-3520 [synthetic]",
+    "price_cny": 9999,
+    "url": "https://example.invalid/mock/xianyu/005",
+    "raw_text": "Synthetic offline fixture; source=mock; extreme-high-price case."
+  },
+  {
+    "catalog_no": "SRCL-3520",
+    "title": "收 Artist Album SRCL-3520 [synthetic]",
+    "price_cny": 250,
+    "url": "https://example.invalid/mock/xianyu/006",
+    "raw_text": "Synthetic offline fixture; source=mock; wanted-listing noise case."
+  },
+  {
+    "catalog_no": "SRCL-3520",
+    "title": "Artist Album SRCL-3520 空盒 [synthetic]",
+    "price_cny": 200,
+    "url": "https://example.invalid/mock/xianyu/007",
+    "raw_text": "Synthetic offline fixture; source=mock; empty-case noise case."
+  }
+]

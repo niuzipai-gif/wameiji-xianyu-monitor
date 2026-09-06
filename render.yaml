@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: wameiji-xianyu-api
+    runtime: python
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install .
+    startCommand: cd-monitor web --db /tmp/cd_monitor.db --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: CD_MONITOR_SCHEDULER
+        value: "0"
+      - key: BROWSER_ENABLED
+        value: "false"
+      - key: CD_DATA_DIR
+        value: /tmp/cd_monitor_data
+      - key: WEB_ALLOWED_ORIGINS
+        sync: false
+      - key: WEB_ACCESS_TOKEN
+        sync: false
+      - key: CD_SYNC_TOKEN
+        sync: false
