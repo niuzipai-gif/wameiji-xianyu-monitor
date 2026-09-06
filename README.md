@@ -15,7 +15,7 @@
 
 项目已经拆好部署入口：`web/` 是静态前端，`render.yaml` 是 Render Web Service，`.github/workflows/deploy-pages.yml` 会在推送 `main` 后发布 GitHub Pages。真实浏览器 profile、登录态和采集数据库继续留在采集电脑，不上传 GitHub。
 
-Render 免费 Web Service 的文件系统会在重启、重新部署或闲置唤醒时丢失；因此 Render 端只作为远程 API 外壳，采集电脑是唯一数据源。`scripts/publish-replica.py` 会把本地 SQLite 压缩后通过单独的 `CD_SYNC_TOKEN` 推送到 Render，循环运行即可在 Render 重启后恢复数据。免费 Render Postgres 也会在 30 天后到期，所以本方案不依赖它。
+Render 免费 Web Service 的文件系统会在重启、重新部署或闲置唤醒时丢失；因此 Render 端只作为远程 API 外壳，采集电脑是唯一数据源。`scripts/publish-replica.py` 会把本地 SQLite 压缩后通过单独的 `CD_SYNC_TOKEN` 推送到 Render，默认每分钟同步一次，循环运行即可在 Render 重启后恢复数据。免费 Render Postgres 也会在 30 天后到期，所以本方案不依赖它。
 
 ### 日常使用（最简单）
 

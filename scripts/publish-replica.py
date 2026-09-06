@@ -59,7 +59,7 @@ def main() -> int:
     parser.add_argument("--db", default="data/local/takeover.db", help="local SQLite database")
     parser.add_argument("--url", default=os.getenv("CD_REPLICA_URL", ""), help="Render API origin")
     parser.add_argument("--token", default=os.getenv("CD_SYNC_TOKEN", ""), help="sync token")
-    parser.add_argument("--interval-seconds", type=int, default=300, help="repeat interval; 0 means once")
+    parser.add_argument("--interval-seconds", type=int, default=60, help="repeat interval; 0 means once")
     parser.add_argument("--timeout-seconds", type=int, default=60)
     args = parser.parse_args()
     if not args.url.strip() or not args.token.strip():

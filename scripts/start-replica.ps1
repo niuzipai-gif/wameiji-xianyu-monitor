@@ -1,5 +1,5 @@
 param(
-    [int]$IntervalSeconds = 300,
+    [int]$IntervalSeconds = 60,
     [string]$Database = "data/local/takeover.db"
 )
 
