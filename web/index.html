@@ -27,7 +27,7 @@
         <button class="active" data-page="home">自动选品广场</button>
         <button data-page="ranking">利润排行榜</button>
         <button data-page="tasks">单品监控（可选）</button>
-        <button data-page="accounts">号池管理</button>
+        <button data-page="accounts">采集机状态</button>
         <button data-page="logs">运行日志</button>
         <button data-page="settings">策略设置</button>
       </nav>
@@ -241,52 +241,13 @@
       <section id="accounts" class="page" data-page="accounts">
         <div class="section-head">
           <div>
-            <h3>号池管理</h3>
-            <p>账号调度中心，展示登录状态、工作状态、当前任务和风控风险。</p>
-          </div>
-          <div class="filters">
-            <button class="pill active" data-account-filter="all">全部平台</button>
-            <button class="pill" data-account-filter="xianyu">闲鱼</button>
-            <button class="pill" data-account-filter="wameiji">挖煤姬</button>
+            <h3>采集机状态</h3>
+            <p>登录、浏览器资料和原始快照只保存在采集电脑；家用电脑只查看选品结果、调整选品池和下发扫描。</p>
           </div>
         </div>
-        <div class="stat-row">
-          <div class="mini-stat"><small>在线账号</small><strong id="acctOnline">--</strong></div>
-          <div class="mini-stat"><small>空闲账号</small><strong id="acctIdle">--</strong></div>
-          <div class="mini-stat"><small>运行中</small><strong id="acctRunning">--</strong></div>
-          <div class="mini-stat"><small>异常</small><strong id="acctError">--</strong></div>
-        </div>
-        <div class="split-grid">
-          <div class="content-card">
-            <h3>闲鱼账号池 <span class="quiet" id="xianyuStatusLine">检测中…</span></h3>
-            <div class="lane" id="xianyuAccounts" data-empty="暂无闲鱼账号。请用浏览器扩展 “AI 闲鱼猎手 · 登录态提取” 扫码登录。">
-              <div class="empty-state">正在加载闲鱼账号…</div>
-            </div>
-            <div class="card-actions">
-              <button class="primary" id="xianyuRefreshBtn">刷新登录态</button>
-              <button id="xianyuDeleteBtn" class="danger">清除登录态</button>
-            </div>
-            <details class="paste-area">
-              <summary>粘贴 Chrome 扩展采集的登录态 JSON</summary>
-              <textarea id="xianyuPasteArea" placeholder="在 Chrome 中打开 goofish.com 并使用“AI 闲鱼猎手 · 登录态提取”扩展，复制 JSON 后粘贴到这里"></textarea>
-              <button class="primary" id="xianyuPasteBtn">保存闲鱼登录态</button>
-            </details>
-          </div>
-          <div class="content-card">
-            <h3>挖煤姬账号池 <span class="quiet" id="wameijiStatusLine">检测中…</span></h3>
-            <div class="lane" id="wameijiAccounts" data-empty="暂无挖煤姬账号。请用浏览器扩展 “挖煤姬 · 登录态提取” 扫码登录。">
-              <div class="empty-state">正在加载挖煤姬账号…</div>
-            </div>
-            <div class="card-actions">
-              <button class="primary" id="wameijiRefreshBtn">刷新登录态</button>
-              <button id="wameijiDeleteBtn" class="danger">清除登录态</button>
-            </div>
-            <details class="paste-area">
-              <summary>粘贴 Chrome 扩展采集的登录态 JSON</summary>
-              <textarea id="wameijiPasteArea" placeholder="在 Chrome 中打开 meruki.cn 并使用“挖煤姬 · 登录态提取”扩展，复制 JSON 后粘贴到这里"></textarea>
-              <button class="primary" id="wameijiPasteBtn">保存挖煤姬登录态</button>
-            </details>
-          </div>
+        <div class="content-card">
+          <h3>登录资料只保存在采集电脑</h3>
+          <p class="quiet">不需要安装插件，也不需要从家用电脑复制 Cookie 或登录态。若采集出现登录失效或验证码，请在采集电脑重新登录闲鱼或挖煤姬，然后保持启动器运行。</p>
         </div>
       </section>
 
