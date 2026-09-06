@@ -79,6 +79,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps1
 - Render Blueprint `wameiji-xianyu-monitor` 已创建，`wameiji-xianyu-api` 已部署并通过 `/api/health` 健康检查：https://wameiji-xianyu-api.onrender.com
 - `scripts/publish-replica.py` 与 `POST /api/sync/database` 已用本机 SQLite 做过一次真实同步；浏览器 profile、Cookie、原始快照和本机数据库均被忽略。
 - 本机 `.env` 已保存 Render 地址和两个令牌；`scripts/start-replica.ps1` 可每 5 分钟持续同步。
+- 日常启动已简化为双击项目根目录的 `启动采集电脑.cmd`；Pages 首次遇到 401 会弹出令牌输入框并保存在浏览器本地。
 
 家里电脑首次打开 Pages 时，如果 API 显示离线，需要从 Render Environment 复制 `WEB_ACCESS_TOKEN`，给 Pages 地址追加 `?access_token=令牌`；采集电脑需要保持 `scripts/start-replica.ps1` 窗口运行。
 
