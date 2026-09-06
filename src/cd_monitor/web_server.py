@@ -3580,6 +3580,10 @@ def _serve_websocket(handler, db_path) -> None:
         handler.send_response(HTTPStatus.UPGRADE_REQUIRED)
         handler.end_headers()
         return
+    if not handler._origin_allowed():
+        handler.send_response(HTTPStatus.FORBIDDEN)
+        handler.end_headers()
+        return
     if not handler._request_authorized():
         handler.send_response(HTTPStatus.UNAUTHORIZED)
         handler.end_headers()
