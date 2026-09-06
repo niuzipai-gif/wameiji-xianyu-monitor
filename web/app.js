@@ -83,6 +83,36 @@
     return String(query || saved || runtime.accessToken || "").trim();
   }
 
+  // A Pages visitor can open the fixed URL and enter the Render token once.
+  // Keep the prompt shared so the parallel bootstrap requests do not show a
+  // dozen dialogs at the same time; the token is stored only in localStorage.
+  let accessPromptPromise = null;
+  function promptForAccessToken() {
+    const current = configuredApiToken();
+    if (current) return Promise.resolve(current);
+    if (accessPromptPromise) return accessPromptPromise;
+    accessPromptPromise = Promise.resolve(window.prompt(
+      "Render API 需要访问令牌。请从 Render 的 Environment 复制 WEB_ACCESS_TOKEN：",
+      "",
+    )).then((value) => {
+      const token = String(value || "").trim();
+      if (token) {
+        try { window.localStorage.setItem("cd_monitor_access_token", token); } catch (_) {}
+      }
+      return token;
+    }).finally(() => { accessPromptPromise = null; });
+    return accessPromptPromise;
+  }
+
+  async function fetchWithAccessRetry(requestFactory) {
+    let resp = await requestFactory();
+    if (resp.status === 401) {
+      const token = await promptForAccessToken();
+      if (token) resp = await requestFactory();
+    }
+    return resp;
+  }
+
   function apiUrl(path) {
     if (/^https?:\/\//i.test(path)) return path;
     const base = configuredApiBase();
@@ -94,34 +124,34 @@
   }
 
   async function getJson(path) {
-    const resp = await fetch(apiUrl(path), { cache: "no-store", credentials: "include" });
+    const resp = await fetchWithAccessRetry(() => fetch(apiUrl(path), { cache: "no-store", credentials: "include" }));
     if (!resp.ok) throw new Error("GET " + path + " -> " + resp.status);
     return await resp.json();
   }
   async function postJson(path, body) {
-    const resp = await fetch(apiUrl(path), {
+    const resp = await fetchWithAccessRetry(() => fetch(apiUrl(path), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
       credentials: "include",
-    });
+    }));
     const text = await resp.text();
     let data; try { data = text ? JSON.parse(text) : {}; } catch (_) { data = { raw: text }; }
     if (!resp.ok) throw new Error((data && data.error) || ("POST " + path + " -> " + resp.status));
     return data;
   }
   async function deleteReq(path) {
-    const resp = await fetch(apiUrl(path), { method: "DELETE", credentials: "include" });
+    const resp = await fetchWithAccessRetry(() => fetch(apiUrl(path), { method: "DELETE", credentials: "include" }));
     if (!resp.ok) throw new Error("DELETE " + path + " -> " + resp.status);
     return await resp.json().catch(() => ({}));
   }
   async function putJson(path, body) {
-    const resp = await fetch(apiUrl(path), {
+    const resp = await fetchWithAccessRetry(() => fetch(apiUrl(path), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
       credentials: "include",
-    });
+    }));
     const text = await resp.text();
     let data; try { data = text ? JSON.parse(text) : {}; } catch (_) { data = { raw: text }; }
     if (!resp.ok) throw new Error((data && data.error) || ("PUT " + path + " -> " + resp.status));
@@ -2062,5 +2092,4 @@ function connectLiveFeed() {
   }
 })();
 // openBlacklistEditor_PATCH_V3
-
 

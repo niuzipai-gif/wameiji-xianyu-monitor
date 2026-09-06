@@ -16,6 +16,12 @@
 
 Render 免费 Web Service 的文件系统会在重启、重新部署或闲置唤醒时丢失；因此 Render 端只作为远程 API 外壳，采集电脑是唯一数据源。`scripts/publish-replica.py` 会把本地 SQLite 压缩后通过单独的 `CD_SYNC_TOKEN` 推送到 Render，循环运行即可在 Render 重启后恢复数据。免费 Render Postgres 也会在 30 天后到期，所以本方案不依赖它。
 
+### 日常使用（最简单）
+
+1. 当前电脑双击项目根目录的 `启动采集电脑.cmd`。它会自动启动本地后端、数据库同步和本地页面；已经启动时不会重复打开后端。
+2. 家里电脑只打开 <https://niuzipai-gif.github.io/wameiji-xianyu-monitor/>。第一次看到令牌输入框时，从 Render 的 **Environment** 复制 `WEB_ACCESS_TOKEN` 粘贴进去；浏览器会记住它，之后不需要再输入。
+3. 要继续采集时，把一个真实品番/JAN 发给我；当前电脑和家里电脑都不需要安装插件。
+
 首次接管按下面顺序操作：
 
 1. 在 Render 用本仓库的 Blueprint 创建 `wameiji-xianyu-api`，选择 Free。填写三个环境变量：`WEB_ALLOWED_ORIGINS=https://niuzipai-gif.github.io`、随机的 `WEB_ACCESS_TOKEN`、随机的 `CD_SYNC_TOKEN`。两个 token 只放 Render 和本机 `.env`，不要写进仓库。
