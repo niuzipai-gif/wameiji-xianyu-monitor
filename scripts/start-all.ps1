@@ -22,7 +22,7 @@ if (-not (Test-Path -LiteralPath $DiscoveryScript -PathType Leaf)) {
 # Do not open duplicate local servers when the launcher is clicked twice.
 $localListening = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if (-not $localListening) {
-    Start-Process -FilePath "powershell.exe" -WorkingDirectory $ProjectRoot -WindowStyle Normal -ArgumentList @(
+    Start-Process -FilePath "powershell.exe" -WorkingDirectory $ProjectRoot -WindowStyle Hidden -ArgumentList @(
         "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $LocalScript, "-Port", $Port
     )
 }
@@ -32,7 +32,7 @@ if (-not $localListening) {
 $replicaRunning = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -match "publish-replica\.py" }
 if (-not $replicaRunning) {
-    Start-Process -FilePath "powershell.exe" -WorkingDirectory $ProjectRoot -WindowStyle Normal -ArgumentList @(
+    Start-Process -FilePath "powershell.exe" -WorkingDirectory $ProjectRoot -WindowStyle Hidden -ArgumentList @(
         "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ReplicaScript
     )
 }
