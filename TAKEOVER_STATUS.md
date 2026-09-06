@@ -81,12 +81,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps1
 - 本机 `.env` 已保存 Render 地址和两个令牌；`scripts/start-replica.ps1` 可每 5 分钟持续同步。
 - 日常启动已简化为双击项目根目录的 `启动采集电脑.cmd`；Pages 首次遇到 401 会弹出令牌输入框并保存在浏览器本地。
 
-家里电脑首次打开 Pages 时，如果 API 显示离线，需要从 Render Environment 复制 `WEB_ACCESS_TOKEN`，给 Pages 地址追加 `?access_token=令牌`；采集电脑需要保持 `scripts/start-replica.ps1` 窗口运行。
+### 自动选品广场（本次接续）
 
-1. 恢复实际数据库备份或旧 Docker 数据卷，或先在 `data/local/takeover.db` 建立至少一个真实 watchlist 品番；当前三张核心表都是 0 行。
-2. 在可见 Playwright 浏览器中完成挖煤姬登录，保留 `data/browser_profiles/wameiji`；闲鱼可见 profile 保留在 `data/browser_profiles/goofish`，`data/xianyu_state.json` 作为备用状态文件。登录、扫码、验证码或安全验证必须由用户本人完成。
-3. 提供一个优先验证的真实品番/JAN，并确认汇率、挖煤姬费用、国际运费、税费和闲鱼成交折扣等成本参数；否则只能做结构验证，不能判断利润准确性。
-4. 用这一个品番完成 Wameiji + Xianyu 单次真实采集、快照回放和人工匹配确认；命令同时传 `--profile-dir data/browser_profiles/wameiji --xianyu-profile-dir data/browser_profiles/goofish`。这一步通过后再扩展 watchlist 和常驻调度。
-5. 后续检查 WebSocket 断连资源清理和线程池退出。单独生命周期测试已通过，尚未证明断连清理风险在长时间运行下完全消除。
+1. 主流程改为自动发现：从挖煤姬的发现关键词搜 CD 和实体游戏，提取品番/JAN（优先）或稳定商品 ID，再按保守利润、匹配度和闲鱼有效样本门槛排序。具体品番/JAN仅保留为人工复核的高置信证据，不再是启动采集的前置输入。
+2. 本机 `discovery-worker` 每分钟检查到期关键词，并消费 GitHub Pages / Render 发来的“立即扫描”“调整规则”“替换关键词”命令。它只使用本机的挖煤姬和闲鱼登录 profile；浏览器验证、扫码和验证码仍由用户在本机处理。
+3. `scripts/start-all.ps1` 已同时启动本地 UI、数据库同步器和隐藏运行的自动选品工作器。工作器日志保存在 `data/local/discovery-worker.log`；Render 回传命令会镜像到本机数据库，避免下一次同步丢失已完成状态。
+4. 家里的电脑只需打开 Pages，使用“让采集电脑立即扫描”和“选品池设置”。它不需要浏览器插件、登录 profile、付费 API、代理池或云采集服务。
+5. 首次实际巡检时，先确认两边 profile 仍然已登录；若站点返回验证码、登录过期或安全验证，工作器会将该次记录为 `human_required`，停止该次读取，等待本机人工恢复后再继续。
 
 本次没有启动 Docker 默认后台爬虫、发送外部通知、调用真实 AI 或修改平台商品。交接文件中的外部操作建议不等于已完成授权或验证。

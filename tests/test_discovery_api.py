@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import json
+import threading
+import urllib.error
+import urllib.request
+
+from cd_monitor.storage.sqlite import init_db, list_discovery_pools
+from cd_monitor.web_server import create_server
+
+
+def _request(url: str, method: str = "GET", payload: dict | None = None, headers: dict | None = None):
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    merged = dict(headers or {})
+    if body is not None:
+        merged.setdefault("Content-Type", "application/json")
+    request = urllib.request.Request(url, data=body, headers=merged, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
+        finally:
+            exc.close()
+
+
+def test_selection_board_and_remote_command_acknowledgement(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ACCESS_TOKEN", "viewer-secret")
+    monkeypatch.setenv("CD_SYNC_TOKEN", "collector-secret")
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    server = create_server("127.0.0.1", 0, db_path, static_dir="web")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        code, board = _request(f"{base_url}/api/discovery/board?access_token=viewer-secret")
+        assert code == 200
+        assert [pool["slug"] for pool in board["pools"]] == ["cd", "physical-game"]
+        assert board["pools"][0]["keywords"]
+        assert board["pools"][0]["keywords"][0]["keyword"] == "初回限定盤"
+        assert board["opportunities"] == []
+        assert board["summary"]["active_candidates"] == 0
+
+        code, command = _request(
+            f"{base_url}/api/discovery/commands?access_token=viewer-secret",
+            method="POST",
+            payload={"command_type": "scan_now", "pool_id": pool_id},
+        )
+        assert code == 202
+        assert command["status"] == "pending"
+        command_id = command["id"]
+
+        code, unauthenticated = _request(f"{base_url}/api/discovery/collector/commands")
+        assert code == 401
+        assert unauthenticated["error"] == "sync_unauthorized"
+
+        code, queued = _request(
+            f"{base_url}/api/discovery/collector/commands",
+            headers={"X-CD-Sync-Token": "collector-secret"},
+        )
+        assert code == 200
+        assert [entry["id"] for entry in queued["items"]] == [command_id]
+
+        code, complete = _request(
+            f"{base_url}/api/discovery/collector/commands/{command_id}/complete",
+            method="POST",
+            payload={"result": {"runs": 2, "status": "ok"}},
+            headers={"X-CD-Sync-Token": "collector-secret"},
+        )
+        assert code == 200
+        assert complete["status"] == "completed"
+        assert complete["result"]["runs"] == 2
+
+        code, command_list = _request(
+            f"{base_url}/api/discovery/commands?access_token=viewer-secret"
+        )
+        assert code == 200
+        assert command_list["items"][0]["status"] == "completed"
+    finally:
+        server.shutdown()
+        server.server_close()

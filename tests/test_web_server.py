@@ -49,7 +49,7 @@ def test_web_server_serves_dashboard_api_and_static_app(tmp_path) -> None:
         assert "kuro_chibi_avatar.png" in html
         assert "kuro_mascot.png" in html
         # 6 pages wired in sidebar nav
-        assert "首页机会流" in html
+        assert "日系实体选品广场" in html
         assert "每日推荐榜" in html
         assert "任务管理" in html
         assert "号池管理" in html

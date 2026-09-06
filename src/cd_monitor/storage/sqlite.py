@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from cd_monitor.core.discovery import DiscoveryCandidate, DiscoveryKeyword, DiscoveryPool
 from cd_monitor.core.identifiers import normalize_catalog_no_compact
 from cd_monitor.core.models import MarketItem, Opportunity, WatchItem, XianyuPriceSample
 from cd_monitor.storage.migrations import SCHEMA_SQL
@@ -325,6 +326,169 @@ def _migrate_market_items_cover_columns(conn: sqlite3.Connection) -> None:
             pass
 
 
+def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
+    """Create candidate-pool tables while leaving legacy watches untouched."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS discovery_pools (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          slug TEXT NOT NULL UNIQUE,
+          name TEXT NOT NULL,
+          media_type TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          scan_interval_minutes INTEGER NOT NULL DEFAULT 30,
+          keyword_budget INTEGER NOT NULL DEFAULT 2,
+          page_budget INTEGER NOT NULL DEFAULT 1,
+          candidate_budget INTEGER NOT NULL DEFAULT 12,
+          min_profit_cny REAL NOT NULL DEFAULT 35,
+          min_margin REAL NOT NULL DEFAULT 0.25,
+          min_match_confidence REAL NOT NULL DEFAULT 0.75,
+          min_valid_xianyu_samples INTEGER NOT NULL DEFAULT 2,
+          cost_overrides_json TEXT NOT NULL DEFAULT '{}',
+          last_scanned_at TIMESTAMP,
+          next_run_at TIMESTAMP,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS discovery_keywords (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          pool_id INTEGER NOT NULL,
+          keyword TEXT NOT NULL,
+          weight INTEGER NOT NULL DEFAULT 1,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          last_scanned_at TIMESTAMP,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(pool_id, keyword),
+          FOREIGN KEY(pool_id) REFERENCES discovery_pools(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS discovery_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          pool_id INTEGER NOT NULL,
+          keyword_id INTEGER,
+          keyword TEXT,
+          source TEXT NOT NULL,
+          status TEXT NOT NULL,
+          discovered_count INTEGER NOT NULL DEFAULT 0,
+          candidate_count INTEGER NOT NULL DEFAULT 0,
+          evaluated_count INTEGER NOT NULL DEFAULT 0,
+          error_type TEXT,
+          error_message TEXT,
+          screenshot_path TEXT,
+          raw_snapshot_path TEXT,
+          started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          finished_at TIMESTAMP,
+          FOREIGN KEY(pool_id) REFERENCES discovery_pools(id) ON DELETE CASCADE,
+          FOREIGN KEY(keyword_id) REFERENCES discovery_keywords(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS discovery_candidates (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          pool_id INTEGER NOT NULL,
+          media_type TEXT NOT NULL,
+          identity_key TEXT NOT NULL,
+          catalog_no TEXT,
+          jan TEXT,
+          title TEXT NOT NULL,
+          artist TEXT,
+          edition TEXT,
+          source_item_id TEXT,
+          source_url TEXT,
+          source_price REAL NOT NULL DEFAULT 0,
+          source_currency TEXT NOT NULL DEFAULT 'JPY',
+          availability TEXT NOT NULL DEFAULT 'unknown_but_visible',
+          status TEXT NOT NULL DEFAULT 'active',
+          observation_count INTEGER NOT NULL DEFAULT 1,
+          missing_scan_count INTEGER NOT NULL DEFAULT 0,
+          last_xianyu_checked_at TIMESTAMP,
+          raw_text TEXT,
+          first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(pool_id, identity_key),
+          FOREIGN KEY(pool_id) REFERENCES discovery_pools(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS collector_commands (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          remote_command_id TEXT,
+          command_type TEXT NOT NULL,
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          status TEXT NOT NULL DEFAULT 'pending',
+          result_json TEXT,
+          dedupe_key TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          accepted_at TIMESTAMP,
+          completed_at TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_collector_commands_dedupe_pending
+          ON collector_commands(dedupe_key)
+          WHERE dedupe_key IS NOT NULL AND status IN ('pending', 'accepted', 'running');
+        CREATE INDEX IF NOT EXISTS idx_discovery_candidates_pool_status
+          ON discovery_candidates(pool_id, status, last_seen_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_discovery_runs_pool_time
+          ON discovery_runs(pool_id, started_at DESC);
+        """
+    )
+    collector_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(collector_commands)").fetchall()
+    }
+    if "remote_command_id" not in collector_columns:
+        conn.execute("ALTER TABLE collector_commands ADD COLUMN remote_command_id TEXT")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_collector_commands_remote_id "
+        "ON collector_commands(remote_command_id)"
+    )
+    opportunity_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(opportunities)").fetchall()
+    }
+    additions: list[tuple[str, str]] = []
+    if "discovery_candidate_id" not in opportunity_columns:
+        additions.append(("discovery_candidate_id", "INTEGER"))
+    if "media_type" not in opportunity_columns:
+        additions.append(("media_type", "TEXT"))
+    if "identity_key" not in opportunity_columns:
+        additions.append(("identity_key", "TEXT"))
+    if "last_seen_at" not in opportunity_columns:
+        additions.append(("last_seen_at", "TIMESTAMP"))
+    for column, declaration in additions:
+        conn.execute(f"ALTER TABLE opportunities ADD COLUMN {column} {declaration}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_opportunities_discovery_candidate "
+        "ON opportunities(discovery_candidate_id)"
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO discovery_pools (
+          slug, name, media_type, enabled, scan_interval_minutes,
+          keyword_budget, page_budget, candidate_budget
+        ) VALUES
+          ('cd', 'CD 选品池', 'cd', 1, 30, 2, 1, 12),
+          ('physical-game', '实体游戏选品池', 'physical_game', 1, 30, 2, 1, 12)
+        """
+    )
+    conn.executescript(
+        """
+        INSERT OR IGNORE INTO discovery_keywords (pool_id, keyword, weight)
+        SELECT id, '初回限定盤', 3 FROM discovery_pools WHERE slug = 'cd';
+        INSERT OR IGNORE INTO discovery_keywords (pool_id, keyword, weight)
+        SELECT id, '帯付き', 2 FROM discovery_pools WHERE slug = 'cd';
+        INSERT OR IGNORE INTO discovery_keywords (pool_id, keyword, weight)
+        SELECT id, '廃盤', 2 FROM discovery_pools WHERE slug = 'cd';
+        INSERT OR IGNORE INTO discovery_keywords (pool_id, keyword, weight)
+        SELECT id, 'Switch 限定版', 3 FROM discovery_pools WHERE slug = 'physical-game';
+        INSERT OR IGNORE INTO discovery_keywords (pool_id, keyword, weight)
+        SELECT id, 'PS Vita 限定版', 2 FROM discovery_pools WHERE slug = 'physical-game';
+        INSERT OR IGNORE INTO discovery_keywords (pool_id, keyword, weight)
+        SELECT id, '3DS 限定版', 2 FROM discovery_pools WHERE slug = 'physical-game';
+        """
+    )
+
+
 def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -342,6 +506,7 @@ def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
             _migrate_opportunity_p55_columns(conn)
             _migrate_watchlist_filter_columns(conn)
             _migrate_market_items_cover_columns(conn)
+            _migrate_discovery_selection_board(conn)
     finally:
         conn.close()
 
@@ -868,6 +1033,741 @@ def insert_opportunity(db_path: str | Path, opportunity: Opportunity, wameiji_it
             if existing is not None:
                 return int(existing[0])
         raise RuntimeError("Opportunity insert was ignored but no existing id could be resolved")
+
+
+def list_discovery_pools(db_path: str | Path) -> list[DiscoveryPool]:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, slug, name, media_type, enabled, scan_interval_minutes,
+              keyword_budget, page_budget, candidate_budget, min_profit_cny,
+              min_margin, min_match_confidence, min_valid_xianyu_samples,
+              cost_overrides_json, last_scanned_at, next_run_at
+            FROM discovery_pools
+            ORDER BY id ASC
+            """
+        ).fetchall()
+    return [
+        DiscoveryPool(
+            id=int(row["id"]),
+            slug=row["slug"],
+            name=row["name"],
+            media_type=row["media_type"],
+            enabled=bool(row["enabled"]),
+            scan_interval_minutes=int(row["scan_interval_minutes"]),
+            keyword_budget=int(row["keyword_budget"]),
+            page_budget=int(row["page_budget"]),
+            candidate_budget=int(row["candidate_budget"]),
+            min_profit_cny=float(row["min_profit_cny"]),
+            min_margin=float(row["min_margin"]),
+            min_match_confidence=float(row["min_match_confidence"]),
+            min_valid_xianyu_samples=int(row["min_valid_xianyu_samples"]),
+            cost_overrides_json=row["cost_overrides_json"] or "{}",
+            last_scanned_at=row["last_scanned_at"],
+            next_run_at=row["next_run_at"],
+        )
+        for row in rows
+    ]
+
+
+def get_discovery_pool(db_path: str | Path, pool_id: int) -> DiscoveryPool:
+    for pool in list_discovery_pools(db_path):
+        if pool.id == pool_id:
+            return pool
+    raise KeyError(f"Discovery pool not found: {pool_id}")
+
+
+def list_discovery_keywords(
+    db_path: str | Path, pool_id: int | None = None
+) -> list[DiscoveryKeyword]:
+    init_db(db_path)
+    sql = """
+        SELECT id, pool_id, keyword, weight, enabled, last_scanned_at
+        FROM discovery_keywords
+    """
+    params: tuple[object, ...] = ()
+    if pool_id is not None:
+        sql += " WHERE pool_id = ?"
+        params = (pool_id,)
+    sql += " ORDER BY pool_id ASC, weight DESC, id ASC"
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(sql, params).fetchall()
+    return [
+        DiscoveryKeyword(
+            id=int(row["id"]),
+            pool_id=int(row["pool_id"]),
+            keyword=row["keyword"],
+            weight=int(row["weight"]),
+            enabled=bool(row["enabled"]),
+            last_scanned_at=row["last_scanned_at"],
+        )
+        for row in rows
+    ]
+
+
+def upsert_discovery_keyword(
+    db_path: str | Path,
+    *,
+    pool_id: int,
+    keyword: str,
+    weight: int = 1,
+    enabled: bool = True,
+) -> DiscoveryKeyword:
+    normalized = " ".join(str(keyword or "").strip().split())
+    if not normalized:
+        raise ValueError("keyword_required")
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO discovery_keywords (pool_id, keyword, weight, enabled)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(pool_id, keyword) DO UPDATE SET
+              weight = excluded.weight, enabled = excluded.enabled,
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            (pool_id, normalized, max(1, int(weight)), int(enabled)),
+        )
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT id, pool_id, keyword, weight, enabled, last_scanned_at
+            FROM discovery_keywords WHERE pool_id = ? AND keyword = ?
+            """,
+            (pool_id, normalized),
+        ).fetchone()
+    if row is None:
+        raise RuntimeError("Discovery keyword was not persisted")
+    return DiscoveryKeyword(
+        id=int(row["id"]),
+        pool_id=int(row["pool_id"]),
+        keyword=row["keyword"],
+        weight=int(row["weight"]),
+        enabled=bool(row["enabled"]),
+        last_scanned_at=row["last_scanned_at"],
+    )
+
+
+def replace_discovery_keywords(
+    db_path: str | Path,
+    pool_id: int,
+    keywords: list[dict[str, object]],
+) -> list[DiscoveryKeyword]:
+    """Replace a pool's enabled keyword set without deleting its history."""
+    normalized: list[tuple[str, int, bool]] = []
+    seen: set[str] = set()
+    for item in keywords:
+        keyword = " ".join(str(item.get("keyword") or "").strip().split())
+        if not keyword or keyword in seen:
+            continue
+        seen.add(keyword)
+        try:
+            weight = max(1, int(item.get("weight") or 1))
+        except (TypeError, ValueError):
+            weight = 1
+        normalized.append((keyword, weight, bool(item.get("enabled", True))))
+
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE discovery_keywords
+            SET enabled = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE pool_id = ?
+            """,
+            (pool_id,),
+        )
+        for keyword, weight, enabled in normalized:
+            conn.execute(
+                """
+                INSERT INTO discovery_keywords (pool_id, keyword, weight, enabled)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(pool_id, keyword) DO UPDATE SET
+                  weight = excluded.weight,
+                  enabled = excluded.enabled,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (pool_id, keyword, weight, int(enabled)),
+            )
+    return list_discovery_keywords(db_path, pool_id)
+
+
+def list_due_discovery_keywords(db_path: str | Path, pool_id: int) -> list[DiscoveryKeyword]:
+    pool = get_discovery_pool(db_path, pool_id)
+    if not pool.enabled:
+        return []
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, pool_id, keyword, weight, enabled, last_scanned_at
+            FROM discovery_keywords
+            WHERE pool_id = ? AND enabled = 1
+              AND (
+                last_scanned_at IS NULL
+                OR datetime(last_scanned_at, '+' || ? || ' minutes') <= CURRENT_TIMESTAMP
+              )
+            ORDER BY weight DESC, last_scanned_at ASC, id ASC
+            LIMIT ?
+            """,
+            (pool_id, pool.scan_interval_minutes, max(1, pool.keyword_budget)),
+        ).fetchall()
+    return [
+        DiscoveryKeyword(
+            id=int(row["id"]),
+            pool_id=int(row["pool_id"]),
+            keyword=row["keyword"],
+            weight=int(row["weight"]),
+            enabled=bool(row["enabled"]),
+            last_scanned_at=row["last_scanned_at"],
+        )
+        for row in rows
+    ]
+
+
+def mark_discovery_keyword_scanned(db_path: str | Path, keyword_id: int) -> None:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE discovery_keywords
+            SET last_scanned_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (keyword_id,),
+        )
+
+
+def update_discovery_pool(
+    db_path: str | Path, pool_id: int, updates: dict[str, object]
+) -> DiscoveryPool:
+    allowed = {
+        "enabled",
+        "scan_interval_minutes",
+        "keyword_budget",
+        "page_budget",
+        "candidate_budget",
+        "min_profit_cny",
+        "min_margin",
+        "min_match_confidence",
+        "min_valid_xianyu_samples",
+        "cost_overrides_json",
+    }
+    values = {key: value for key, value in updates.items() if key in allowed}
+    if values:
+        init_db(db_path)
+        assignments = ", ".join(f"{key} = ?" for key in values)
+        params = list(values.values()) + [pool_id]
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                f"UPDATE discovery_pools SET {assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                tuple(params),
+            )
+    return get_discovery_pool(db_path, pool_id)
+
+
+def get_discovery_candidate_by_identity(
+    db_path: str | Path, pool_id: int, identity_key: str
+) -> DiscoveryCandidate | None:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
+              artist, edition, source_item_id, source_url, source_price,
+              source_currency, availability, status, observation_count,
+              missing_scan_count, last_xianyu_checked_at, raw_text
+            FROM discovery_candidates
+            WHERE pool_id = ? AND identity_key = ?
+            """,
+            (pool_id, identity_key),
+        ).fetchone()
+    if row is None:
+        return None
+    return _discovery_candidate_from_row(row)
+
+
+def get_discovery_candidate(db_path: str | Path, candidate_id: int) -> DiscoveryCandidate:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
+              artist, edition, source_item_id, source_url, source_price,
+              source_currency, availability, status, observation_count,
+              missing_scan_count, last_xianyu_checked_at, raw_text
+            FROM discovery_candidates WHERE id = ?
+            """,
+            (candidate_id,),
+        ).fetchone()
+    if row is None:
+        raise KeyError(f"Discovery candidate not found: {candidate_id}")
+    return _discovery_candidate_from_row(row)
+
+
+def _discovery_candidate_from_row(row: sqlite3.Row) -> DiscoveryCandidate:
+    return DiscoveryCandidate(
+        id=int(row["id"]),
+        pool_id=int(row["pool_id"]),
+        media_type=row["media_type"],
+        identity_key=row["identity_key"],
+        catalog_no=row["catalog_no"],
+        jan=row["jan"],
+        title=row["title"],
+        artist=row["artist"],
+        edition=row["edition"],
+        source_item_id=row["source_item_id"],
+        source_url=row["source_url"],
+        source_price=float(row["source_price"]),
+        source_currency=row["source_currency"],
+        availability=row["availability"],
+        status=row["status"],
+        observation_count=int(row["observation_count"]),
+        missing_scan_count=int(row["missing_scan_count"]),
+        last_xianyu_checked_at=row["last_xianyu_checked_at"],
+        raw_text=row["raw_text"],
+    )
+
+
+def record_discovery_run(
+    db_path: str | Path,
+    *,
+    pool_id: int,
+    source: str,
+    status: str,
+    keyword: str | None = None,
+    keyword_id: int | None = None,
+    discovered_count: int = 0,
+    candidate_count: int = 0,
+    evaluated_count: int = 0,
+    error_type: str | None = None,
+    error_message: str | None = None,
+    screenshot_path: str | None = None,
+    raw_snapshot_path: str | None = None,
+) -> int:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO discovery_runs (
+              pool_id, keyword_id, keyword, source, status, discovered_count,
+              candidate_count, evaluated_count, error_type, error_message,
+              screenshot_path, raw_snapshot_path, finished_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                pool_id,
+                keyword_id,
+                keyword,
+                source,
+                status,
+                discovered_count,
+                candidate_count,
+                evaluated_count,
+                error_type,
+                error_message,
+                screenshot_path,
+                raw_snapshot_path,
+            ),
+        )
+    return int(cursor.lastrowid)
+
+
+def mark_discovery_candidate_xianyu_checked(db_path: str | Path, candidate_id: int) -> None:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE discovery_candidates
+            SET last_xianyu_checked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (candidate_id,),
+        )
+
+
+def update_discovery_pool_last_scan(db_path: str | Path, pool_id: int) -> None:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE discovery_pools
+            SET last_scanned_at = CURRENT_TIMESTAMP,
+              next_run_at = datetime(CURRENT_TIMESTAMP, '+' || scan_interval_minutes || ' minutes'),
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (pool_id,),
+        )
+
+
+def upsert_discovery_candidate(db_path: str | Path, candidate: DiscoveryCandidate) -> int:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO discovery_candidates (
+              pool_id, media_type, identity_key, catalog_no, jan, title, artist,
+              edition, source_item_id, source_url, source_price, source_currency,
+              availability, status, observation_count, missing_scan_count,
+              last_xianyu_checked_at, raw_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            ON CONFLICT(pool_id, identity_key) DO UPDATE SET
+              media_type = excluded.media_type,
+              catalog_no = COALESCE(excluded.catalog_no, discovery_candidates.catalog_no),
+              jan = COALESCE(excluded.jan, discovery_candidates.jan),
+              title = excluded.title,
+              artist = COALESCE(excluded.artist, discovery_candidates.artist),
+              edition = COALESCE(excluded.edition, discovery_candidates.edition),
+              source_item_id = COALESCE(excluded.source_item_id, discovery_candidates.source_item_id),
+              source_url = COALESCE(excluded.source_url, discovery_candidates.source_url),
+              source_price = excluded.source_price,
+              source_currency = excluded.source_currency,
+              availability = excluded.availability,
+              status = CASE
+                WHEN excluded.availability IN ('sold_out', 'unavailable') THEN 'expired'
+                ELSE 'active'
+              END,
+              observation_count = discovery_candidates.observation_count + 1,
+              missing_scan_count = 0,
+              raw_text = COALESCE(excluded.raw_text, discovery_candidates.raw_text),
+              last_seen_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                candidate.pool_id,
+                candidate.media_type,
+                candidate.identity_key,
+                candidate.catalog_no,
+                candidate.jan,
+                candidate.title,
+                candidate.artist,
+                candidate.edition,
+                candidate.source_item_id,
+                candidate.source_url,
+                candidate.source_price,
+                candidate.source_currency,
+                candidate.availability,
+                candidate.status,
+                candidate.missing_scan_count,
+                candidate.last_xianyu_checked_at,
+                candidate.raw_text,
+            ),
+        )
+        row = conn.execute(
+            "SELECT id FROM discovery_candidates WHERE pool_id = ? AND identity_key = ?",
+            (candidate.pool_id, candidate.identity_key),
+        ).fetchone()
+    if row is None:
+        raise RuntimeError("Discovery candidate insert did not resolve an id")
+    return int(row[0])
+
+
+def insert_discovery_opportunity(
+    db_path: str | Path,
+    opportunity: Opportunity,
+    *,
+    wameiji_item_id: int | None,
+    discovery_candidate_id: int,
+    media_type: str,
+    identity_key: str,
+) -> int:
+    """Persist an evaluated automatic candidate and retain legacy compatibility."""
+    opportunity_id = insert_opportunity(db_path, opportunity, wameiji_item_id=wameiji_item_id)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE opportunities
+            SET discovery_candidate_id = ?, media_type = ?, identity_key = ?,
+              last_seen_at = CURRENT_TIMESTAMP, status = 'active'
+            WHERE id = ?
+            """,
+            (discovery_candidate_id, media_type, identity_key, opportunity_id),
+        )
+    return opportunity_id
+
+
+def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[dict[str, object]]:
+    """Return active automatic opportunities in the user's intended ranking."""
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT
+              o.id, o.expected_profit, o.net_margin, o.turnover_adjusted_roi,
+              o.match_confidence, o.valid_xianyu_sample_count, o.liquidity_status,
+              o.decision, o.xianyu_reference_price, o.expected_sale_price,
+              o.landed_cost, o.last_seen_at,
+              c.id AS candidate_id, c.media_type, c.identity_key,
+              c.title AS candidate_title, c.catalog_no, c.jan, c.edition,
+              c.source_url, c.source_price, c.source_currency,
+              c.availability, c.status AS candidate_status,
+              c.last_seen_at AS candidate_last_seen_at,
+              c.source_price AS purchase_price_jpy,
+              o.xianyu_reference_price AS xianyu_price_cny,
+              o.valid_xianyu_sample_count AS xianyu_sample_rows,
+              m.title AS item_title, m.image_url, COALESCE(m.url, c.source_url) AS url
+            FROM opportunities o
+            JOIN discovery_candidates c ON c.id = o.discovery_candidate_id
+            JOIN discovery_pools p ON p.id = c.pool_id
+            LEFT JOIN market_items m ON m.id = o.wameiji_item_id
+            WHERE c.status = 'active' AND COALESCE(o.status, 'active') = 'active'
+              AND o.decision != 'reject'
+              AND o.expected_profit >= p.min_profit_cny
+              AND o.net_margin >= p.min_margin
+              AND o.match_confidence >= p.min_match_confidence
+              AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
+            ORDER BY o.expected_profit DESC, o.match_confidence DESC,
+              o.valid_xianyu_sample_count DESC, c.last_seen_at DESC, o.id DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def discovery_summary(db_path: str | Path) -> dict[str, object]:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        active_candidates = conn.execute(
+            "SELECT COUNT(*) FROM discovery_candidates WHERE status = 'active'"
+        ).fetchone()[0]
+        active_opportunities = conn.execute(
+            """
+            SELECT COUNT(*) FROM opportunities o
+            JOIN discovery_candidates c ON c.id = o.discovery_candidate_id
+            JOIN discovery_pools p ON p.id = c.pool_id
+            WHERE c.status = 'active' AND COALESCE(o.status, 'active') = 'active'
+              AND o.decision != 'reject'
+              AND o.expected_profit >= p.min_profit_cny
+              AND o.net_margin >= p.min_margin
+              AND o.match_confidence >= p.min_match_confidence
+              AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
+            """
+        ).fetchone()[0]
+        highest_profit = conn.execute(
+            """
+            SELECT MAX(o.expected_profit) FROM opportunities o
+            JOIN discovery_candidates c ON c.id = o.discovery_candidate_id
+            JOIN discovery_pools p ON p.id = c.pool_id
+            WHERE c.status = 'active' AND COALESCE(o.status, 'active') = 'active'
+              AND o.decision != 'reject'
+              AND o.expected_profit >= p.min_profit_cny
+              AND o.net_margin >= p.min_margin
+              AND o.match_confidence >= p.min_match_confidence
+              AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
+            """
+        ).fetchone()[0]
+        last_scan_at = conn.execute(
+            "SELECT MAX(finished_at) FROM discovery_runs WHERE status = 'ok'"
+        ).fetchone()[0]
+    return {
+        "active_candidates": int(active_candidates or 0),
+        "active_opportunities": int(active_opportunities or 0),
+        "highest_expected_profit": float(highest_profit or 0),
+        "last_scan_at": last_scan_at,
+    }
+
+
+def list_discovery_runs(db_path: str | Path, limit: int = 30) -> list[dict[str, object]]:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, pool_id, keyword_id, keyword, source, status,
+              discovered_count, candidate_count, evaluated_count, error_type,
+              error_message, screenshot_path, raw_snapshot_path, started_at, finished_at
+            FROM discovery_runs
+            ORDER BY id DESC LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_collector_command(
+    db_path: str | Path,
+    command_type: str,
+    payload: dict[str, object] | None = None,
+    *,
+    dedupe_key: str | None = None,
+) -> dict[str, object]:
+    init_db(db_path)
+    serialized = json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
+    with sqlite3.connect(db_path) as conn:
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO collector_commands (command_type, payload_json, dedupe_key)
+                VALUES (?, ?, ?)
+                """,
+                (command_type, serialized, dedupe_key),
+            )
+            command_id = int(cursor.lastrowid)
+        except sqlite3.IntegrityError:
+            row = conn.execute(
+                """
+                SELECT id FROM collector_commands
+                WHERE dedupe_key = ? AND status IN ('pending', 'accepted', 'running')
+                ORDER BY id DESC LIMIT 1
+                """,
+                (dedupe_key,),
+            ).fetchone()
+            if row is None:
+                raise
+            command_id = int(row[0])
+    return get_collector_command(db_path, command_id)
+
+
+def get_collector_command(db_path: str | Path, command_id: int) -> dict[str, object]:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT id, remote_command_id, command_type, payload_json, status, result_json, dedupe_key,
+              created_at, accepted_at, completed_at, updated_at
+            FROM collector_commands WHERE id = ?
+            """,
+            (command_id,),
+        ).fetchone()
+    if row is None:
+        raise KeyError(f"Collector command not found: {command_id}")
+    return _collector_command_row(row)
+
+
+def list_collector_commands(
+    db_path: str | Path,
+    *,
+    statuses: tuple[str, ...] | None = None,
+    limit: int = 50,
+) -> list[dict[str, object]]:
+    init_db(db_path)
+    sql = """
+        SELECT id, remote_command_id, command_type, payload_json, status, result_json, dedupe_key,
+          created_at, accepted_at, completed_at, updated_at
+        FROM collector_commands
+    """
+    params: list[object] = []
+    if statuses:
+        sql += " WHERE status IN (" + ", ".join("?" for _ in statuses) + ")"
+        params.extend(statuses)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(max(1, int(limit)))
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(sql, tuple(params)).fetchall()
+    return [_collector_command_row(row) for row in rows]
+
+
+def upsert_remote_collector_command(
+    db_path: str | Path, command: dict[str, object]
+) -> dict[str, object]:
+    """Mirror a Render command into the source database before it is handled.
+
+    The source database is later copied back to Render.  Retaining the remote
+    command's identity here prevents a successful acknowledgement from being
+    lost during that next copy.
+    """
+    remote_id = command.get("id")
+    if remote_id is None or str(remote_id).strip() == "":
+        raise ValueError("remote_command_id_required")
+    command_type = str(command.get("command_type") or "").strip()
+    if not command_type:
+        raise ValueError("command_type_required")
+    payload = command.get("payload")
+    result = command.get("result")
+    status = str(command.get("status") or "pending")
+    if status not in {"pending", "accepted", "running", "completed", "human_required", "failed"}:
+        status = "pending"
+    remote_key = str(remote_id).strip()
+    payload_json = json.dumps(payload if isinstance(payload, dict) else {}, ensure_ascii=False, sort_keys=True)
+    result_json = json.dumps(result if isinstance(result, dict) else {}, ensure_ascii=False, sort_keys=True)
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT id, status FROM collector_commands WHERE remote_command_id = ?",
+            (remote_key,),
+        ).fetchone()
+        if row is None:
+            cursor = conn.execute(
+                """
+                INSERT INTO collector_commands (
+                  remote_command_id, command_type, payload_json, status, result_json, dedupe_key
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (remote_key, command_type, payload_json, status, result_json, f"remote:{remote_key}"),
+            )
+            command_id = int(cursor.lastrowid)
+        else:
+            command_id = int(row[0])
+            # A retrying Render poll must never turn a locally completed
+            # command back into pending before its source DB is replicated.
+            conn.execute(
+                """
+                UPDATE collector_commands
+                SET command_type = ?, payload_json = ?,
+                  status = CASE
+                    WHEN status IN ('completed', 'human_required', 'failed') THEN status
+                    ELSE ?
+                  END,
+                  result_json = CASE
+                    WHEN status IN ('completed', 'human_required', 'failed') THEN result_json
+                    ELSE ?
+                  END,
+                  updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (command_type, payload_json, status, result_json, command_id),
+            )
+    return get_collector_command(db_path, command_id)
+
+
+def complete_collector_command(
+    db_path: str | Path,
+    command_id: int,
+    result: dict[str, object] | None = None,
+    *,
+    status: str = "completed",
+) -> dict[str, object]:
+    if status not in {"accepted", "running", "completed", "human_required", "failed"}:
+        raise ValueError(f"Unsupported collector command status: {status}")
+    init_db(db_path)
+    result_json = json.dumps(result or {}, ensure_ascii=False, sort_keys=True)
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE collector_commands
+            SET status = ?, result_json = ?,
+              accepted_at = CASE WHEN ? IN ('accepted', 'running') THEN CURRENT_TIMESTAMP ELSE accepted_at END,
+              completed_at = CASE WHEN ? IN ('completed', 'human_required', 'failed') THEN CURRENT_TIMESTAMP ELSE completed_at END,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (status, result_json, status, status, command_id),
+        )
+        if cursor.rowcount == 0:
+            raise KeyError(f"Collector command not found: {command_id}")
+    return get_collector_command(db_path, command_id)
+
+
+def _collector_command_row(row: sqlite3.Row) -> dict[str, object]:
+    payload = dict(row)
+    for field in ("payload_json", "result_json"):
+        raw = payload.pop(field, None)
+        try:
+            payload["payload" if field == "payload_json" else "result"] = json.loads(raw or "{}")
+        except (TypeError, json.JSONDecodeError):
+            payload["payload" if field == "payload_json" else "result"] = {}
+    return payload
 
 
 def get_opportunity(db_path: str | Path, opportunity_id: int) -> Opportunity:

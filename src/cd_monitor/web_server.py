@@ -109,9 +109,16 @@ from cd_monitor.storage.sqlite import (
     update_candidate_recheck_status,
     update_watch,
     count_watch_using_catalog,
+    complete_collector_command,
+    create_collector_command,
+    discovery_summary,
     delete_opportunities_for_catalog,
     delete_price_snapshots_for_catalog,
     fetch_watch_min,
+    list_collector_commands,
+    list_discovery_keywords,
+    list_discovery_opportunities,
+    list_discovery_pools,
 )
 
 
@@ -398,6 +405,20 @@ def _build_handler(
             if route == "/api/health":
                 self._json({"ok": True, "database": str(db_path), "static_dir": str(static_root)})
                 return
+            if route == "/api/discovery/collector/commands":
+                if not self._collector_authorized():
+                    self._json({"error": "sync_unauthorized"}, status=HTTPStatus.UNAUTHORIZED)
+                    return
+                self._json(
+                    {
+                        "items": list_collector_commands(
+                            db_path,
+                            statuses=("pending", "accepted", "running"),
+                            limit=100,
+                        )
+                    }
+                )
+                return
             if not self._request_authorized():
                 self._json({"error": "unauthorized"}, status=HTTPStatus.UNAUTHORIZED)
                 return
@@ -493,6 +514,21 @@ def _build_handler(
                 return
             if route == "/api/summary":
                 self._json(_summary(db_path))
+                return
+            if route == "/api/discovery/board":
+                self._json(
+                    {
+                        "summary": discovery_summary(db_path),
+                        "pools": _discovery_pool_views(db_path),
+                        "opportunities": list_discovery_opportunities(db_path, limit=100),
+                    }
+                )
+                return
+            if route == "/api/discovery/pools":
+                self._json({"items": _discovery_pool_views(db_path)})
+                return
+            if route == "/api/discovery/commands":
+                self._json({"items": list_collector_commands(db_path, limit=100)})
                 return
             if route == "/api/opportunities":
                 parsed_q = urlparse(self.path).query
@@ -792,6 +828,39 @@ def _build_handler(
             if route == "/api/sync/database":
                 self._handle_database_sync()
                 return
+            if route.startswith("/api/discovery/collector/commands/"):
+                if not self._collector_authorized():
+                    self._json({"error": "sync_unauthorized"}, status=HTTPStatus.UNAUTHORIZED)
+                    return
+                try:
+                    payload = self._read_json()
+                except BadJsonRequest:
+                    self._json({"error": "invalid_json"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                suffix = "/complete"
+                if not route.endswith(suffix):
+                    self._json({"error": "not_found"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                command_id = _route_int(route.removesuffix(suffix), "/api/discovery/collector/commands/")
+                if command_id is None:
+                    self._json({"error": "not_found"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                result = payload.get("result")
+                if result is not None and not isinstance(result, dict):
+                    self._json({"error": "result_must_be_object"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    self._json(
+                        complete_collector_command(
+                            db_path,
+                            command_id,
+                            result,
+                            status=str(payload.get("status") or "completed"),
+                        )
+                    )
+                except (KeyError, ValueError) as exc:
+                    self._json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+                return
             if not self._request_authorized():
                 self._json({"error": "unauthorized"}, status=HTTPStatus.UNAUTHORIZED)
                 return
@@ -1019,6 +1088,28 @@ def _build_handler(
             return
 
         def _handle_post(self, route: str, payload: dict[str, Any]) -> None:
+            if route == "/api/discovery/commands":
+                command_type = str(payload.get("command_type") or "").strip()
+                if command_type not in {"scan_now", "set_pool", "set_keywords"}:
+                    self._json({"error": "unsupported_command_type"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                command_payload = {
+                    key: value
+                    for key, value in payload.items()
+                    if key != "command_type"
+                }
+                pool_id = command_payload.get("pool_id")
+                dedupe_key = None
+                if command_type == "scan_now":
+                    dedupe_key = f"scan_now:{pool_id if pool_id is not None else 'all'}"
+                command = create_collector_command(
+                    db_path,
+                    command_type,
+                    command_payload,
+                    dedupe_key=dedupe_key,
+                )
+                self._json(command, status=HTTPStatus.ACCEPTED)
+                return
             if route == "/api/accounts" or route.startswith("/api/accounts/"):
                 self._handle_accounts_post(route, payload)
                 return
@@ -2367,6 +2458,11 @@ def _build_handler(
                 for candidate in [query_token, cookie_token]
             )
 
+        def _collector_authorized(self) -> bool:
+            token = os.getenv("CD_SYNC_TOKEN", "").strip()
+            supplied = self.headers.get("X-CD-Sync-Token", "").strip()
+            return bool(token and supplied and compare_digest(supplied, token))
+
         def _json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
 
             data = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
@@ -2454,6 +2550,19 @@ def _get_watch_action_service(db_path: str) -> WatchActionService:
         cache = WatchActionService(db_path=db_path)
         _get_watch_action_service._cache = cache
     return cache
+
+
+def _discovery_pool_views(db_path: str | Path) -> list[dict[str, object]]:
+    """Serialize a pool with its editable keyword list for the remote UI."""
+    views: list[dict[str, object]] = []
+    for pool in list_discovery_pools(db_path):
+        view = asdict(pool)
+        assert pool.id is not None
+        view["keywords"] = [
+            asdict(keyword) for keyword in list_discovery_keywords(db_path, pool.id)
+        ]
+        views.append(view)
+    return views
 
 
 

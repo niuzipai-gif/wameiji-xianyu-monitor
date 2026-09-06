@@ -673,6 +673,35 @@ body.kuro[data-kuro-theme="rose"] { --kuro-rose: #c25b78; --kuro-accent: #e58aa3
 
 .required { color: #ef4444; font-style: normal; margin-left: 4px; }
 
+/* Automatic selection board */
+body.kuro .discovery-feed { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; }
+body.kuro .discovery-card { border: 1px solid var(--kuro-line); border-radius: 18px; background: rgba(255,255,255,.86); padding: 18px; box-shadow: 0 8px 24px rgba(32, 52, 91, .07); display: flex; flex-direction: column; gap: 11px; }
+body.kuro .discovery-card-head, body.kuro .discovery-pool-title, body.kuro .discovery-pool-actions { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+body.kuro .discovery-card h4, body.kuro .discovery-pool h4 { margin: 0; color: var(--kuro-ink); line-height: 1.45; }
+body.kuro .discovery-edition, body.kuro .discovery-pool-title p { color: var(--kuro-muted); font-size: 12px; line-height: 1.5; margin: 0; }
+body.kuro .discovery-confidence { color: #6f3e94; background: #f1e7fb; padding: 4px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+body.kuro .discovery-price-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+body.kuro .discovery-price-row > div { display: grid; gap: 3px; padding: 9px; border-radius: 11px; background: #f7f9fe; }
+body.kuro .discovery-price-row small, body.kuro .discovery-metrics { color: var(--kuro-muted); font-size: 11px; }
+body.kuro .discovery-price-row b { font-size: 15px; color: var(--kuro-ink); }
+body.kuro .discovery-price-row .profit { background: #fff2e4; }
+body.kuro .discovery-price-row .profit b { color: #b75b22; }
+body.kuro .discovery-metrics { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+body.kuro .discovery-source-link { display: inline-flex; justify-content: center; padding: 8px 11px; border-radius: 10px; background: var(--kuro-blue); color: white; text-decoration: none; font-weight: 700; font-size: 13px; }
+body.kuro .discovery-source-link.disabled { background: #e9edf5; color: var(--kuro-muted); }
+body.kuro .discovery-control-card { margin-top: 22px; }
+body.kuro .discovery-pool-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 14px; }
+body.kuro .discovery-pool { border: 1px solid var(--kuro-line); border-radius: 15px; padding: 15px; display: grid; gap: 12px; background: rgba(250,252,255,.84); }
+body.kuro .discovery-pool-actions { justify-content: flex-start; }
+body.kuro .discovery-pool button { border: 1px solid var(--kuro-line); background: white; color: var(--kuro-ink); border-radius: 9px; padding: 7px 10px; cursor: pointer; font-weight: 600; }
+body.kuro .discovery-pool button.primary { background: var(--kuro-blue); color: white; border-color: var(--kuro-blue); }
+body.kuro .discovery-rule-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+body.kuro .discovery-rule-grid label, body.kuro .discovery-keywords { display: grid; gap: 4px; color: var(--kuro-muted); font-size: 12px; }
+body.kuro .discovery-rule-grid input:not([type="checkbox"]), body.kuro .discovery-keywords textarea { border: 1px solid var(--kuro-line); border-radius: 8px; background: white; padding: 7px; color: var(--kuro-ink); font: inherit; }
+body.kuro .discovery-keywords textarea { resize: vertical; }
+body.kuro #discoveryCommandStatus.error { color: #b43f52; }
+@media (max-width: 560px) { body.kuro .discovery-price-row, body.kuro .discovery-rule-grid { grid-template-columns: 1fr; } }
+
 
 .scraper-status {
   display: inline-flex;

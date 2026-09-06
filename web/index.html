@@ -3,12 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI 闲鱼猎手 · Kuro Atelier Edition · WAMEIJI-XIANYU</title>
+  <title>日系实体选品广场 · Kuro Atelier Edition · WAMEIJI-XIANYU</title>
   <link rel="stylesheet" href="styles/themes.css" />
   <link rel="stylesheet" href="styles/app.css" />
   <link rel="stylesheet" href="styles/kuro.css" />
   <script src="runtime-config.js"></script>
   <script src="app.js" defer></script>
+  <script src="discovery-ui.js" defer></script>
 </head>
 <body class="kuro" data-kuro-theme="rose">
     <button class="feed-new-pill" data-feed-new-pill type="button"></button>
@@ -17,15 +18,15 @@
       <div class="brand">
         <div class="mark"><img src="assets/mascot/kuro_chibi_avatar.png" alt="Kuro 看板娘头像" /></div>
         <div>
-          <h1>AI 闲鱼猎手</h1>
+          <h1>日系实体选品广场</h1>
           <p>WAMEIJI-XIANYU · Kuro Atelier</p>
         </div>
       </div>
       <div class="nav-label">Navigation</div>
       <nav class="nav" id="primaryNav">
-        <button class="active" data-page="home">首页机会流</button>
-        <button data-page="ranking">每日推荐榜</button>
-        <button data-page="tasks">任务管理</button>
+        <button class="active" data-page="home">自动选品广场</button>
+        <button data-page="ranking">利润排行榜</button>
+        <button data-page="tasks">单品监控（可选）</button>
         <button data-page="accounts">号池管理</button>
         <button data-page="logs">运行日志</button>
         <button data-page="settings">策略设置</button>
@@ -41,9 +42,9 @@
       <div class="side-card">
         <b>操作</b>
         <p style="display:flex;flex-direction:column;gap:6px;">
-          <button id="sideNewTaskBtn" style="border:0;background:var(--kuro-blue);color:white;padding:8px;border-radius:10px;cursor:pointer;font-weight:700;">＋ 新建监控任务</button>
-          <button id="sideImportBtn" style="border:1px solid var(--kuro-line);background:white;color:var(--kuro-ink);padding:8px;border-radius:10px;cursor:pointer;">导入 HTML / JSON</button>
-          <button id="sideFullScanBtn" style="border:1px solid var(--kuro-line);background:white;color:var(--kuro-ink);padding:8px;border-radius:10px;cursor:pointer;">立即全量扫描</button>
+          <button id="sideScanDiscoveryBtn" style="border:0;background:var(--kuro-blue);color:white;padding:8px;border-radius:10px;cursor:pointer;font-weight:700;">＋ 立即扫描选品池</button>
+          <button id="sidePoolSettingsBtn" style="border:1px solid var(--kuro-line);background:white;color:var(--kuro-ink);padding:8px;border-radius:10px;cursor:pointer;">选品池设置</button>
+          <button id="sideLegacyToolsBtn" style="border:1px solid var(--kuro-line);background:white;color:var(--kuro-ink);padding:8px;border-radius:10px;cursor:pointer;">单品工具（可选）</button>
         </p>
       </div>
       <div class="side-card" id="healthCard">
@@ -59,48 +60,59 @@
           <span>⌕</span>
           <input id="globalSearch" placeholder="搜索商品名、关键词、歌手、专辑、作品名、角色名…" />
         </div>
-        <button id="advancedFilterBtn">高级筛选</button>
-        <button id="proBtn">Pro 会员</button>
-        <button id="refreshAllBtn">立即刷新</button><button id="newTaskBtn">新建任务</button><button class="ai-gen" id="aiGenerateBtn" title="用 AI 自动生成任务" style="background:linear-gradient(135deg,#7c3aed,#ec4899);color:white;border:0;padding:8px 14px;border-radius:10px;cursor:pointer;font-weight:700;margin-left:6px;">✨ AI 生成任务</button>
+        <button id="poolSettingsTopBtn">选品池设置</button>
+        <button id="refreshDiscoveryBoardBtn">刷新结果</button><button id="scanDiscoveryNowBtn">让采集电脑立即扫描</button><button id="legacyTaskBtn">单品监控（可选）</button>
       </div>
 
       <section id="home" class="page active" data-page="home">
         <div class="hero">
           <div class="hero-copy">
             <div class="eyebrow">Kuro Atelier · Premium Dashboard</div>
-            <h2>智能发现高价值交易机会<br/>用更有设计感的方式做日系 CD 价差监控</h2>
-            <p class="lead">图片优先信息流，闲鱼侧淡黄识别，挖煤姬侧保留淡粉白。看板娘作为品牌视觉点缀，卡片优先展示首图、价格差、利润率和市场样本。</p>
+            <h2>自动发现日系 CD 与实体游戏<br/>按可赚净利润从高到低排序</h2>
+            <p class="lead">采集电脑定时从挖煤姬发现商品，再用闲鱼可比样本估价；只有通过成本、利润、匹配度和样本数门槛的候选才会进入这里。</p>
             <div class="stats">
-              <div class="stat"><small>今日机会</small><strong id="kpiToday">--</strong></div>
-              <div class="stat"><small>预计利润</small><strong id="kpiProfit">--</strong></div>
-              <div class="stat"><small>最高利润</small><strong id="kpiMax">--</strong></div>
-              <div class="stat"><small>命中率</small><strong id="kpiHitRate">--</strong></div>
+              <div class="stat"><small>已入池机会</small><strong id="kpiToday">--</strong></div>
+              <div class="stat"><small>最高预估净利</small><strong id="kpiProfit">--</strong></div>
+              <div class="stat"><small>正在监控候选</small><strong id="kpiMax">--</strong></div>
+              <div class="stat"><small>最近扫描</small><strong id="kpiHitRate">--</strong></div>
             </div>
           </div>
           <div class="mascot-stage">
             <div class="mascot-bubble">
               <b>Kuro says</b>
-              <p>先看首图，再看版本、特典、腰封和品番。利润很好，但同款置信度低于 80% 的不要急着冲。</p>
+              <p>这里不需要你先给具体 CD。先让系统发现，再看版本、特典、腰封和品番；匹配度不足的候选不会进入利润榜。</p>
             </div>
             <img src="assets/mascot/kuro_mascot.png" alt="黑红哥特洛丽塔成年看板娘主视觉" />
           </div>
         </div>
         <div class="section-head">
           <div>
-            <h3>首页机会流 · 图片优先信息流</h3>
-            <p>左侧闲鱼首图与价格，中间 AI 分析，右侧挖煤姬市场对标。</p>
+            <h3>自动选品广场 · 利润由高到低</h3>
+            <p>左侧是挖煤姬购入来源，右侧是闲鱼可比样本；净利润已扣除模型中的换汇、运费和平台成本。</p>
           </div>
           <div class="filters">
-            <button class="pill active" data-feed-filter="all">全部机会</button>
-            <button class="pill" data-feed-filter="match">高匹配度</button>
-            <button class="pill" data-feed-filter="low-risk">低风险</button>
-            <button class="pill" data-feed-refresh data-feed-refresh-btn title="刷新信息流，换一批">↻ 换一批</button>
-            <span class="scraper-status idle" id="scraperStatus" title="后台实时采集状态"><span class="dot"></span><span id="scraperStatusText">采集待机</span></span>
+            <button class="pill active" data-discovery-filter="all">全部机会</button>
+            <button class="pill" data-discovery-filter="cd">CD</button>
+            <button class="pill" data-discovery-filter="physical_game">实体游戏</button>
+            <button class="pill" id="discoveryRefreshFeedBtn" title="从 Render 刷新已同步结果">↻ 刷新展示</button>
+            <span class="scraper-status idle" id="discoveryStatus" title="本机采集状态"><span class="dot"></span><span id="discoveryStatusText">等待本机采集</span></span>
           </div>
         </div>
-        <div class="feed" id="homeFeed" data-empty="暂无机会，点击右上角 “新建任务” 开始监控。">
+        <div class="feed" id="homeFeed" data-empty="暂时没有通过门槛的机会。点击「让采集电脑立即扫描」即可开始自动发现。">
           <div class="empty-state">正在加载机会数据…</div>
         </div>
+        <section class="content-card discovery-control-card" id="discoveryPoolSection">
+          <div class="section-head">
+            <div>
+              <h3>选品池设置</h3>
+              <p>这些设置会发给采集电脑执行；保存后无需在家里的电脑安装浏览器插件。</p>
+            </div>
+            <span class="quiet" id="discoveryCommandStatus">等待读取设置…</span>
+          </div>
+          <div id="discoveryPoolControls" class="discovery-pool-grid">
+            <div class="empty-state">正在加载选品池…</div>
+          </div>
+        </section>
       </section>
 
       <section id="ranking" class="page" data-page="ranking">

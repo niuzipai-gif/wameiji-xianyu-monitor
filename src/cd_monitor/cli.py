@@ -32,6 +32,11 @@ from cd_monitor.services.live_capture_scan import capture_and_evaluate_live_html
 from cd_monitor.services.live_browser_capture import capture_search_html
 from cd_monitor.services.live_scan import record_live_scan_status, scan_live_status
 from cd_monitor.services.scan import scan_once_mock
+from cd_monitor.services.discovery_worker import (
+    DiscoveryWorker,
+    build_browser_fetchers,
+    command_client_from_environment,
+)
 from cd_monitor.services.xianyu_login_state import export_xianyu_login_state
 from cd_monitor.sources.mock import MockWameijiAdapter, MockXianyuAdapter
 from cd_monitor.storage.sqlite import (
@@ -289,6 +294,14 @@ def main(argv: list[str] | None = None) -> int:
     evaluate_json_cmd.add_argument("--wameiji-json", required=True)
     evaluate_json_cmd.add_argument("--xianyu-json", required=True)
     evaluate_json_cmd.add_argument("--snapshot-dir", default=None)
+    discovery_worker = sub.add_parser(
+        "discovery-worker",
+        help="Run the local browser-backed automatic selection collector",
+    )
+    discovery_worker.add_argument("--db", dest="command_db", default=None)
+    discovery_worker.add_argument("--snapshot-dir", default=None)
+    discovery_worker.add_argument("--once", action="store_true")
+    discovery_worker.add_argument("--poll-seconds", type=int, default=60)
     doctor = sub.add_parser("doctor")
     doctor.add_argument("--db", dest="command_db", default=None)
     web = sub.add_parser("web")
@@ -891,6 +904,29 @@ def main(argv: list[str] | None = None) -> int:
                 indent=2,
             )
         )
+        return 0
+    if args.command == "discovery-worker":
+        init_db(db_path)
+        snapshot_root = Path(
+            args.snapshot_dir or Path(config.app.snapshot_dir) / "discovery"
+        )
+        fetch_wameiji, fetch_xianyu = build_browser_fetchers(config, snapshot_root)
+        worker = DiscoveryWorker(
+            db_path=db_path,
+            fetch_wameiji=fetch_wameiji,
+            fetch_xianyu=fetch_xianyu,
+            command_client=command_client_from_environment(),
+        )
+
+        async def run_worker() -> None:
+            while True:
+                result = await worker.run_once()
+                print(json.dumps(asdict(result), ensure_ascii=False))
+                if args.once:
+                    return
+                await asyncio.sleep(max(15, args.poll_seconds))
+
+        asyncio.run(run_worker())
         return 0
     if args.command == "doctor":
         result = run_doctor(config, db_path)

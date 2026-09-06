@@ -4,7 +4,11 @@ import re
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, quote_plus, urlparse
 
-from cd_monitor.core.identifiers import normalize_catalog_no_compact
+from cd_monitor.core.identifiers import (
+    extract_catalog_candidates,
+    extract_jan_candidates,
+    normalize_catalog_no_compact,
+)
 from cd_monitor.core.models import AdapterStatus, MarketItem, WatchItem
 from cd_monitor.sources.base import BrowserHarnessAdapter
 
@@ -50,14 +54,14 @@ class WameijiBrowserAdapter(BrowserHarnessAdapter):
         parser.feed(html)
         had_card_items = bool(parser.items)
         if had_card_items:
-            # Search pages can append recommendation/related cards after the
-            # requested result set. Keep only cards whose visible title/text
-            # contains the requested catalog/JAN; otherwise evaluate-html
-            # would manufacture opportunities for unrelated products.
+            # A precise product lookup should reject related cards. Candidate
+            # discovery also searches ordinary keywords such as 初回限定盤, so
+            # use text matching for those rather than treating them as an
+            # ASCII catalog number and dropping every card.
             parser.items = [
                 item
                 for item in parser.items
-                if _catalog_in_text(item.title, watch_item.catalog_no)
+                if _matches_search_query(item.title, watch_item.catalog_no)
             ]
         if not had_card_items and not parser.items:
             parser.items = _extract_generic_items(html, watch_item)
@@ -178,6 +182,18 @@ def _catalog_in_text(text: str, catalog_no: str) -> bool:
     return bool(compact_catalog) and compact_catalog in compact_text
 
 
+def _is_precise_identifier_query(query: str) -> bool:
+    return bool(extract_catalog_candidates(query) or extract_jan_candidates(query))
+
+
+def _matches_search_query(text: str, query: str) -> bool:
+    if _is_precise_identifier_query(query):
+        return _catalog_in_text(text, query)
+    normalized_query = " ".join((query or "").casefold().split())
+    normalized_text = " ".join((text or "").casefold().split())
+    return bool(normalized_query) and normalized_query in normalized_text
+
+
 
 def _detect_condition_from_text(text: str) -> str | None:
     """condense helper for _WameijiCardParser.
@@ -225,20 +241,22 @@ def _detect_fees_hint(text: str) -> str | None:
 def _extract_generic_items(html: str, watch_item: WatchItem) -> list[MarketItem]:
     parser = _GenericBlockParser()
     parser.feed(html)
-    catalog = normalize_catalog_no_compact(watch_item.catalog_no)
+    query = watch_item.catalog_no
+    catalog = normalize_catalog_no_compact(query)
+    precise_query = _is_precise_identifier_query(query)
     items: list[MarketItem] = []
     seen: set[tuple[str, str | None, float]] = set()
     for block in parser.blocks:
         text = " ".join(block["text"])
-        if catalog not in normalize_catalog_no_compact(text):
+        if not _matches_search_query(text, query):
             continue
         links = block["links"]
-        if _has_multiple_catalog_links(links, catalog):
+        if precise_query and _has_multiple_catalog_links(links, catalog):
             continue
         price = _find_price(text)
         if price <= 0:
             continue
-        title = _best_link_text(links, catalog)
+        title = _best_link_text(links, query)
         if not title:
             continue
         url = links[0][0] if links else None
@@ -392,9 +410,9 @@ def _detect_condition_text(parts: list[str]) -> str | None:
     return None
 
 
-def _best_link_text(links: list[tuple[str | None, str]], catalog: str) -> str:
+def _best_link_text(links: list[tuple[str | None, str]], query: str) -> str:
     for _, text in links:
-        if catalog in normalize_catalog_no_compact(text):
+        if _matches_search_query(text, query):
             return text.strip()
     return links[0][1].strip() if links else ""
 

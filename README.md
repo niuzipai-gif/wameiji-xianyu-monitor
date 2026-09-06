@@ -2,13 +2,14 @@
 
 > **2026-09-06 接续入口**：当前实测状态、首批修复、验证证据和待办见 [TAKEOVER_STATUS.md](TAKEOVER_STATUS.md)。Windows 本地启动使用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-local.ps1`。默认使用独立本地库，原生产数据库尚未恢复；挖煤姬和闲鱼可见登录 profile 已完成样例采集验证。`data/mock/` 为明确标识的合成演示样本。下方阶段说明包含历史记录，以本次接续记录为准。
 
-## 给我一个“品番/JAN”是什么意思
+## 当前方向：自动选品广场
 
-这不是让你安装插件，也不是让你对齐煤炉、雅虎或其他平台。它只是告诉采集器“要搜哪一张 CD”。
+项目不再以“先输入一张具体 CD”作为主流程。它会定时用一组发现关键词在**挖煤姬**寻找日系 CD 和实体游戏，再拿**闲鱼**可比样本做保守估价，扣除配置中的换汇、运费和平台成本后，按预估净利润从高到低展示候选。
 
-1. 在挖煤姬商品页、CD 封面/条码或你自己的目录中找一个编号，例如 `SRCL-3520`、`4988001234567`。
-2. 把这个编号发给操作者，或在前端的任务管理里新增品番/JAN。
-3. 当前电脑会用这个编号分别搜索挖煤姬和闲鱼，只读可见结果，保存快照并计算价差；遇到验证码或登录失效会停下来等人工处理。
+- 挖煤姬是采购来源，闲鱼是国内参考价；不直接做煤炉、雅虎或其他平台的对齐。
+- 品番/JAN 仍然是最可靠的匹配证据，但由系统从候选标题、详情和条码中尽量提取；只有未能自动确认的个案才需要人工复核。
+- 采集只在这台“采集电脑”的已登录浏览器 profile 中发生。家里的电脑只打开网页查看结果、调整选品池、下达扫描命令。
+- 不使用付费 API、付费插件、代理池或云采集服务。
 
 ## 家里电脑只用前端：GitHub Pages + Render
 
@@ -18,21 +19,24 @@ Render 免费 Web Service 的文件系统会在重启、重新部署或闲置唤
 
 ### 日常使用（最简单）
 
-1. 当前电脑双击项目根目录的 `启动采集电脑.cmd`。它会自动启动本地后端、数据库同步和本地页面；已经启动时不会重复打开后端。
+1. 采集电脑双击项目根目录的 `启动采集电脑.cmd`。它会自动启动本地后端、数据库同步和自动选品工作器；已运行的进程不会重复启动。
 2. 家里电脑只打开 <https://niuzipai-gif.github.io/wameiji-xianyu-monitor/>。第一次看到令牌输入框时，从 Render 的 **Environment** 复制 `WEB_ACCESS_TOKEN` 粘贴进去；浏览器会记住它，之后不需要再输入。
-3. 要继续采集时，把一个真实品番/JAN 发给我；当前电脑和家里电脑都不需要安装插件。
+3. 在网页顶部点击“让采集电脑立即扫描”。采集电脑会在下一分钟内收到命令；扫描完成后，结果会随下一次数据库同步出现在“自动选品广场”。无需输入具体 CD，也无需在家里的电脑安装插件。
+4. 需要调整方向时，在“选品池设置”中改发现关键词、扫描间隔、每轮候选数、最低利润和最低利润率，点击保存即可。设置会由采集电脑执行。
 
 首次接管按下面顺序操作：
 
 1. 在 Render 用本仓库的 Blueprint 创建 `wameiji-xianyu-api`，选择 Free。填写三个环境变量：`WEB_ALLOWED_ORIGINS=https://niuzipai-gif.github.io`、随机的 `WEB_ACCESS_TOKEN`、随机的 `CD_SYNC_TOKEN`。两个 token 只放 Render 和本机 `.env`，不要写进仓库。
 2. 把 Render 给出的 API 地址填入 GitHub 仓库变量 `CD_MONITOR_API_BASE`，然后手动运行一次 `Deploy frontend to GitHub Pages`。页面地址会是 `https://niuzipai-gif.github.io/<仓库名>/`。
-3. 在采集电脑的项目目录启动发布循环（令牌已经写入本机 `.env`，不用再复制）：
+3. 在采集电脑的项目目录双击 `启动采集电脑.cmd`。它会读取本机 `.env` 中的 Render 地址和令牌，并同时启动发布循环与自动选品工作器；登录 profile、Cookie、原始快照和本地数据库都不会上传 GitHub。
+
+   如需单独排查自动选品工作器，可运行：
 
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-replica.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-discovery.ps1
    ```
 
-   这个窗口保持运行，每 5 分钟把 `data/local/takeover.db` 同步到 Render；需要停止时按 `Ctrl+C`。
+   工作器日志在 `data/local/discovery-worker.log`；遇到验证码、登录过期或网站安全页时会记录为需要本机人工处理，不会伪造机会。
 
 4. 家里打开 Pages 地址。如果看到“API 离线”，从 Render 服务的 Environment 复制 `WEB_ACCESS_TOKEN`，在 Pages 地址后追加 `?access_token=令牌` 并回车；页面会把令牌保存为会话 Cookie，之后可清理地址栏。
 

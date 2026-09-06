@@ -7,7 +7,11 @@ from pathlib import Path
 import re
 from urllib.parse import quote_plus
 
-from cd_monitor.core.identifiers import normalize_catalog_no_compact
+from cd_monitor.core.identifiers import (
+    extract_catalog_candidates,
+    extract_jan_candidates,
+    normalize_catalog_no_compact,
+)
 from cd_monitor.core.models import AdapterStatus, WatchItem
 from cd_monitor.core.models import XianyuPriceSample
 from cd_monitor.sources.base import BrowserHarnessAdapter
@@ -83,7 +87,7 @@ class XianyuBrowserAdapter(BrowserHarnessAdapter):
             parser.items = [
                 item
                 for item in parser.items
-                if _catalog_in_text(item.title, watch_item.catalog_no)
+                if _matches_search_query(item.title, watch_item.catalog_no)
             ]
         if not had_card_items and not parser.items:
             parser.items = _extract_generic_samples(html, watch_item)
@@ -246,23 +250,37 @@ def _catalog_in_text(text: str, catalog_no: str) -> bool:
     return bool(compact_catalog) and compact_catalog in compact_text
 
 
+def _is_precise_identifier_query(query: str) -> bool:
+    return bool(extract_catalog_candidates(query) or extract_jan_candidates(query))
+
+
+def _matches_search_query(text: str, query: str) -> bool:
+    if _is_precise_identifier_query(query):
+        return _catalog_in_text(text, query)
+    normalized_query = " ".join((query or "").casefold().split())
+    normalized_text = " ".join((text or "").casefold().split())
+    return bool(normalized_query) and normalized_query in normalized_text
+
+
 def _extract_generic_samples(html: str, watch_item: WatchItem) -> list[XianyuPriceSample]:
     parser = _GenericBlockParser()
     parser.feed(html)
-    catalog = normalize_catalog_no_compact(watch_item.catalog_no)
+    query = watch_item.catalog_no
+    catalog = normalize_catalog_no_compact(query)
+    precise_query = _is_precise_identifier_query(query)
     samples: list[XianyuPriceSample] = []
     seen: set[tuple[str, str | None, float]] = set()
     for block in parser.blocks:
         text = " ".join(block["text"])
-        if catalog not in normalize_catalog_no_compact(text):
+        if not _matches_search_query(text, query):
             continue
         links = block["links"]
-        if _has_multiple_catalog_links(links, catalog):
+        if precise_query and _has_multiple_catalog_links(links, catalog):
             continue
         price = _find_price(text)
         if price <= 0:
             continue
-        title = _best_link_text(links, catalog)
+        title = _best_link_text(links, query)
         if not title:
             continue
         url = links[0][0] if links else None
@@ -297,9 +315,9 @@ def _find_price(text: str) -> float:
     return 0.0
 
 
-def _best_link_text(links: list[tuple[str | None, str]], catalog: str) -> str:
+def _best_link_text(links: list[tuple[str | None, str]], query: str) -> str:
     for _, text in links:
-        if catalog in normalize_catalog_no_compact(text):
+        if _matches_search_query(text, query):
             return text.strip()
     return links[0][1].strip() if links else ""
 
