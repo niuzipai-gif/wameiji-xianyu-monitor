@@ -391,6 +391,13 @@ def _build_handler(
             if route == "/ws" and "websocket" in str(self.headers.get("Upgrade", "")).lower():
                 _serve_websocket(self, db_path)
                 return
+            # Render's health probe cannot attach the user access token. Keep
+            # this endpoint deliberately unauthenticated and return no data
+            # beyond process/database liveness; all other API routes remain
+            # protected by WEB_ACCESS_TOKEN below.
+            if route == "/api/health":
+                self._json({"ok": True, "database": str(db_path), "static_dir": str(static_root)})
+                return
             if not self._request_authorized():
                 self._json({"error": "unauthorized"}, status=HTTPStatus.UNAUTHORIZED)
                 return
@@ -422,9 +429,6 @@ def _build_handler(
                 except Exception:
                     pass
                 self._json(_payload)
-                return
-            if route == "/api/health":
-                self._json({"ok": True, "database": str(db_path), "static_dir": str(static_root)})
                 return
             if route in ("/api/scrape/status", "/api/scraper-status"):
                 _route = route  # marker
