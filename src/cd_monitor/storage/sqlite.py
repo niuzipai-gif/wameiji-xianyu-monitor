@@ -328,18 +328,22 @@ def _migrate_market_items_cover_columns(conn: sqlite3.Connection) -> None:
 def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as conn:
-        conn.executescript(SCHEMA_SQL)
-        _migrate_candidate_rechecks_pending_unique(conn)
-        _migrate_watchlist_settings(conn)
-        _migrate_user_settings(conn)
-        _migrate_price_snapshots(conn)
-        _migrate_failure_records(conn)
-        _migrate_accounts(conn)
-        _migrate_result_blacklist_rules(conn)
-        _migrate_opportunity_p55_columns(conn)
-        _migrate_watchlist_filter_columns(conn)
-    _migrate_market_items_cover_columns(conn)
+    conn = sqlite3.connect(path)
+    try:
+        with conn:
+            conn.executescript(SCHEMA_SQL)
+            _migrate_candidate_rechecks_pending_unique(conn)
+            _migrate_watchlist_settings(conn)
+            _migrate_user_settings(conn)
+            _migrate_price_snapshots(conn)
+            _migrate_failure_records(conn)
+            _migrate_accounts(conn)
+            _migrate_result_blacklist_rules(conn)
+            _migrate_opportunity_p55_columns(conn)
+            _migrate_watchlist_filter_columns(conn)
+            _migrate_market_items_cover_columns(conn)
+    finally:
+        conn.close()
 
 
 def _migrate_candidate_rechecks_pending_unique(conn: sqlite3.Connection) -> None:

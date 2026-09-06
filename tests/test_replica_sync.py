@@ -34,21 +34,30 @@ def test_database_replica_requires_token_and_replaces_sqlite(tmp_path, monkeypat
                 {"Content-Encoding": "gzip", "Content-Type": "application/octet-stream"},
             )
         except urllib.error.HTTPError as exc:
-            assert exc.code == 401
-            assert json.loads(exc.read().decode("utf-8"))["error"] == "sync_unauthorized"
+            try:
+                assert exc.code == 401
+                assert json.loads(exc.read().decode("utf-8"))["error"] == "sync_unauthorized"
+            finally:
+                exc.close()
         else:
             raise AssertionError("replica endpoint accepted a missing token")
 
-        with _post(
-            f"{base}/api/sync/database",
-            body,
-            {
-                "Content-Encoding": "gzip",
-                "Content-Type": "application/octet-stream",
-                "X-CD-Sync-Token": "replica-secret",
-            },
-        ) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        try:
+            with _post(
+                f"{base}/api/sync/database",
+                body,
+                {
+                    "Content-Encoding": "gzip",
+                    "Content-Type": "application/octet-stream",
+                    "X-CD-Sync-Token": "replica-secret",
+                },
+            ) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            try:
+                raise AssertionError(exc.read().decode("utf-8")) from exc
+            finally:
+                exc.close()
         assert payload["ok"] is True
         with sqlite3.connect(remote) as conn:
             assert conn.execute("SELECT value FROM marker").fetchone()[0] == "published"

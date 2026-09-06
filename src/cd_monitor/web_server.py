@@ -865,12 +865,19 @@ def _build_handler(
                     conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
                 finally:
                     conn.close()
-                os.replace(tmp, db_path)
-                for sidecar in (Path(str(db_path) + "-wal"), Path(str(db_path) + "-shm")):
-                    try:
-                        sidecar.unlink(missing_ok=True)
-                    except OSError:
-                        pass
+                # Copy through SQLite's backup API instead of replacing the
+                # target file.  Windows can keep a short-lived handle to the
+                # service database; backup works with that open handle and
+                # keeps readers from seeing a half-written file.
+                source_conn = sqlite3.connect(tmp, timeout=10)
+                target_conn = sqlite3.connect(db_path, timeout=10)
+                try:
+                    source_conn.backup(target_conn, pages=100, sleep=0.1)
+                    target_conn.commit()
+                finally:
+                    source_conn.close()
+                    target_conn.close()
+                tmp.unlink(missing_ok=True)
             except (OSError, sqlite3.Error) as exc:
                 try:
                     tmp.unlink(missing_ok=True)
