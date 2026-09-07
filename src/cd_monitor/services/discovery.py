@@ -156,8 +156,8 @@ async def scan_discovery_keyword(
     cooldown_until = get_discovery_source_cooldown(db_path, "xianyu")
     xianyu_blocked = cooldown_until is not None
     if xianyu_blocked:
-        # Keep ingesting fresh Wameiji candidates during a challenge, but do
-        # not reopen Xianyu from another pool until its cooldown has elapsed.
+        # Wameiji detail verification remains useful during a Xianyu challenge;
+        # only the Xianyu lookup is paused until its cooldown has elapsed.
         record_discovery_run(
             db_path,
             pool_id=pool_id,
@@ -194,8 +194,6 @@ async def scan_discovery_keyword(
     ):
         if candidate.availability in _NOT_PURCHASABLE_AVAILABILITY:
             continue
-        if xianyu_blocked:
-            continue
         needs_detail = (
             previous is None
             or not previous.detail_verified
@@ -203,10 +201,7 @@ async def scan_discovery_keyword(
         )
         if not needs_detail:
             continue
-        if (
-            detail_query_count >= pool.candidate_budget
-            or xianyu_query_count >= pool.candidate_budget
-        ):
+        if detail_query_count >= pool.candidate_budget:
             continue
         detail_query_count += 1
         try:
@@ -245,9 +240,13 @@ async def scan_discovery_keyword(
         _, candidate_id = detail_persisted[0]
         if candidate.availability in _NOT_PURCHASABLE_AVAILABILITY:
             continue
+        if xianyu_blocked:
+            continue
 
         query = _xianyu_query(candidate)
         if not query:
+            continue
+        if xianyu_query_count >= pool.candidate_budget:
             continue
         xianyu_query_count += 1
         try:

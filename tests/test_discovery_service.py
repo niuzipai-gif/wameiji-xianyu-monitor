@@ -903,7 +903,7 @@ def test_discovery_stops_the_remaining_xianyu_lookups_after_a_security_check(
     assert xianyu_queries == ["Artist One Blue Skies"]
 
 
-def test_security_check_cools_down_future_xianyu_lookups_but_keeps_discovery(
+def test_security_check_cools_down_xianyu_but_still_verifies_wameiji_details(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "selection.db"
@@ -969,11 +969,15 @@ def test_security_check_cools_down_future_xianyu_lookups_but_keeps_discovery(
     assert get_discovery_source_cooldown(db_path, "xianyu") is not None
     assert second_result.status == "ok"
     assert second_result.candidate_count == 1
+    assert second_result.detail_query_count == 1
     assert second_result.xianyu_query_count == second_result.evaluated_count == 0
     assert xianyu_queries == ["Artist One Blue Skies"]
-    assert detail_urls == ["security-cooldown-first"]
+    assert detail_urls == ["security-cooldown-first", "security-cooldown-second"]
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT count(*) FROM discovery_candidates").fetchone()[0] == 2
+        assert conn.execute(
+            "SELECT count(*) FROM discovery_candidates WHERE detail_verified = 1"
+        ).fetchone()[0] == 2
 
 
 def test_pool_profit_threshold_filters_existing_evaluations_without_a_new_source_lookup(
