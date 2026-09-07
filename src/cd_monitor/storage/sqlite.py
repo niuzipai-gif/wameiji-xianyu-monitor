@@ -1221,14 +1221,20 @@ def list_due_discovery_keywords(db_path: str | Path, pool_id: int) -> list[Disco
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT id, pool_id, keyword, weight, enabled, last_scanned_at
-            FROM discovery_keywords
-            WHERE pool_id = ? AND enabled = 1
+            SELECT k.id, k.pool_id, k.keyword, k.weight, k.enabled, k.last_scanned_at
+            FROM discovery_keywords AS k
+            JOIN discovery_pools AS p ON p.id = k.pool_id
+            WHERE k.pool_id = ? AND k.enabled = 1 AND p.enabled = 1
               AND (
-                last_scanned_at IS NULL
-                OR datetime(last_scanned_at, '+' || ? || ' minutes') <= CURRENT_TIMESTAMP
+                p.last_scanned_at IS NULL
+                OR datetime(p.last_scanned_at, '+' || p.scan_interval_minutes || ' minutes')
+                   <= CURRENT_TIMESTAMP
               )
-            ORDER BY weight DESC, last_scanned_at ASC, id ASC
+              AND (
+                k.last_scanned_at IS NULL
+                OR datetime(k.last_scanned_at, '+' || ? || ' minutes') <= CURRENT_TIMESTAMP
+              )
+            ORDER BY k.weight DESC, k.last_scanned_at ASC, k.id ASC
             LIMIT ?
             """,
             (pool_id, pool.scan_interval_minutes, max(1, pool.keyword_budget)),
@@ -1493,31 +1499,19 @@ def set_discovery_source_cooldown(
 
 
 def _refresh_discovery_pool_next_run(conn: sqlite3.Connection, pool_id: int) -> None:
-    """Mirror the earliest enabled-keyword deadline onto the pool for the UI."""
+    """Mirror the pool-wide rate limit onto the next-run timestamp for the UI."""
 
     conn.execute(
         """
         UPDATE discovery_pools
         SET next_run_at = CASE
-          WHEN EXISTS(
-            SELECT 1
-            FROM discovery_keywords
-            WHERE pool_id = ? AND enabled = 1 AND last_scanned_at IS NULL
-          ) THEN CURRENT_TIMESTAMP
-          ELSE COALESCE(
-            (
-              SELECT MIN(datetime(k.last_scanned_at, '+' || p.scan_interval_minutes || ' minutes'))
-              FROM discovery_keywords AS k
-              JOIN discovery_pools AS p ON p.id = k.pool_id
-              WHERE k.pool_id = ? AND k.enabled = 1 AND k.last_scanned_at IS NOT NULL
-            ),
-            datetime(CURRENT_TIMESTAMP, '+' || scan_interval_minutes || ' minutes')
-          )
+          WHEN last_scanned_at IS NULL THEN CURRENT_TIMESTAMP
+          ELSE datetime(last_scanned_at, '+' || scan_interval_minutes || ' minutes')
         END,
         updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (pool_id, pool_id, pool_id),
+        (pool_id,),
     )
 
 

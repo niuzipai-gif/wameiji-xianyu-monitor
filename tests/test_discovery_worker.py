@@ -148,7 +148,9 @@ def test_worker_uses_detail_fetcher_before_it_queries_xianyu(tmp_path: Path) -> 
     assert calls == ["search", "detail", "xianyu:SRCL-3520"]
 
 
-def test_scheduled_worker_limits_due_keywords_to_the_pool_budget(tmp_path: Path) -> None:
+def test_scheduled_worker_waits_for_pool_interval_before_rotating_due_keywords(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "selection.db"
     init_db(db_path)
     cd_pool, game_pool = list_discovery_pools(db_path)
@@ -173,8 +175,10 @@ def test_scheduled_worker_limits_due_keywords_to_the_pool_budget(tmp_path: Path)
     )
 
     result = asyncio.run(worker.run_once())
+    second_result = asyncio.run(worker.run_once())
 
     assert result.scan_count == 1
+    assert second_result.scan_count == 0
     assert len(searched_keywords) == 1
 
 

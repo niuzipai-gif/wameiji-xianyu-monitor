@@ -171,7 +171,7 @@ def test_replacing_pool_keywords_disables_stale_default_terms(tmp_path: Path) ->
     assert any(item.keyword == "初回限定盤" and not item.enabled for item in keywords)
 
 
-def test_pool_next_run_tracks_the_earliest_due_keyword(tmp_path: Path) -> None:
+def test_pool_next_run_tracks_its_last_scan_interval(tmp_path: Path) -> None:
     db_path = tmp_path / "selection.db"
     init_db(db_path)
     pool_id = list_discovery_pools(db_path)[0].id
@@ -197,10 +197,19 @@ def test_pool_next_run_tracks_the_earliest_due_keyword(tmp_path: Path) -> None:
 
     update_discovery_pool_last_scan(db_path, pool_id)
 
-    assert list_discovery_pools(db_path)[0].next_run_at == "2026-09-07 00:25:00"
+    with sqlite3.connect(db_path) as conn:
+        expected = conn.execute(
+            """
+            SELECT datetime(last_scanned_at, '+' || scan_interval_minutes || ' minutes')
+            FROM discovery_pools
+            WHERE id = ?
+            """,
+            (pool_id,),
+        ).fetchone()[0]
+    assert list_discovery_pools(db_path)[0].next_run_at == expected
 
 
-def test_marking_a_keyword_scanned_refreshes_its_pool_next_run(tmp_path: Path) -> None:
+def test_marking_a_keyword_scanned_preserves_the_pool_rate_limit(tmp_path: Path) -> None:
     db_path = tmp_path / "selection.db"
     init_db(db_path)
     pool_id = list_discovery_pools(db_path)[0].id
@@ -235,10 +244,9 @@ def test_marking_a_keyword_scanned_refreshes_its_pool_next_run(tmp_path: Path) -
     with sqlite3.connect(db_path) as conn:
         expected = conn.execute(
             """
-            SELECT MIN(datetime(k.last_scanned_at, '+' || p.scan_interval_minutes || ' minutes'))
-            FROM discovery_keywords AS k
-            JOIN discovery_pools AS p ON p.id = k.pool_id
-            WHERE k.pool_id = ? AND k.enabled = 1
+            SELECT datetime(last_scanned_at, '+' || scan_interval_minutes || ' minutes')
+            FROM discovery_pools
+            WHERE id = ?
             """,
             (pool_id,),
         ).fetchone()[0]
