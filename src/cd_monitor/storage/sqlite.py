@@ -186,6 +186,68 @@ def _migrate_duplicate_source_candidates(conn: sqlite3.Connection) -> None:
             )
 
 
+def _migrate_duplicate_source_url_candidates(conn: sqlite3.Connection) -> None:
+    """Retire rows that describe the same Wameiji detail URL.
+
+    A historical parser could derive a different identity from search-card
+    text before a later read retained the source listing id.  The URL is the
+    shared primary evidence in that case.  Keep both rows for audit, but make
+    only the best-evidenced row eligible for future queues and the board.
+    """
+
+    duplicate_urls = conn.execute(
+        """
+        SELECT pool_id, LOWER(TRIM(source_url)) AS source_url
+        FROM discovery_candidates
+        WHERE COALESCE(TRIM(source_url), '') != ''
+        GROUP BY pool_id, LOWER(TRIM(source_url))
+        HAVING COUNT(*) > 1
+        """
+    ).fetchall()
+    for pool_id, source_url in duplicate_urls:
+        rows = conn.execute(
+            """
+            SELECT id, identity_key, detail_verified, status, last_xianyu_checked_at
+            FROM discovery_candidates
+            WHERE pool_id = ? AND LOWER(TRIM(source_url)) = ?
+            """,
+            (pool_id, source_url),
+        ).fetchall()
+        canonical = max(
+            rows,
+            key=lambda row: (
+                int(bool(row[2])),
+                int(str(row[1] or "").startswith("source:")),
+                int(str(row[3] or "") == "active"),
+                int(row[4] is not None),
+                int(row[0]),
+            ),
+        )
+        canonical_id = int(canonical[0])
+        for row in rows:
+            duplicate_id = int(row[0])
+            if duplicate_id == canonical_id:
+                continue
+            conn.execute(
+                """
+                UPDATE opportunities
+                SET status = 'expired'
+                WHERE discovery_candidate_id = ?
+                  AND COALESCE(status, 'active') = 'active'
+                """,
+                (duplicate_id,),
+            )
+            conn.execute(
+                """
+                UPDATE discovery_candidates
+                SET status = 'ignored', pipeline_stage = 'rejected',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (duplicate_id,),
+            )
+
+
 def _migrate_price_snapshots(conn: sqlite3.Connection) -> None:
     """Per-scan price snapshots. P5.1+ with P5.5 per-catalog semantics.
 
@@ -457,6 +519,10 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
           keyword_budget INTEGER NOT NULL DEFAULT 2,
           page_budget INTEGER NOT NULL DEFAULT 1,
           candidate_budget INTEGER NOT NULL DEFAULT 2,
+          search_card_budget INTEGER NOT NULL DEFAULT 60,
+          detail_budget INTEGER NOT NULL DEFAULT 4,
+          xianyu_query_budget INTEGER NOT NULL DEFAULT 3,
+          queue_high_watermark INTEGER NOT NULL DEFAULT 40,
           min_profit_cny REAL NOT NULL DEFAULT 35,
           min_margin REAL NOT NULL DEFAULT 0.25,
           min_match_confidence REAL NOT NULL DEFAULT 0.75,
@@ -464,6 +530,8 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
           cost_overrides_json TEXT NOT NULL DEFAULT '{}',
           last_scanned_at TIMESTAMP,
           next_run_at TIMESTAMP,
+          capture_state TEXT NOT NULL DEFAULT 'active',
+          pause_reason TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -490,7 +558,12 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
           status TEXT NOT NULL,
           discovered_count INTEGER NOT NULL DEFAULT 0,
           candidate_count INTEGER NOT NULL DEFAULT 0,
+          detail_query_count INTEGER NOT NULL DEFAULT 0,
+          detail_verified_count INTEGER NOT NULL DEFAULT 0,
+          detail_rejected_count INTEGER NOT NULL DEFAULT 0,
           evaluated_count INTEGER NOT NULL DEFAULT 0,
+          xianyu_query_count INTEGER NOT NULL DEFAULT 0,
+          resale_sampled_count INTEGER NOT NULL DEFAULT 0,
           error_type TEXT,
           error_message TEXT,
           screenshot_path TEXT,
@@ -529,6 +602,12 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
           last_xianyu_checked_at TIMESTAMP,
           raw_text TEXT,
           detail_verified INTEGER NOT NULL DEFAULT 0,
+          pipeline_stage TEXT NOT NULL DEFAULT 'search_discovered',
+          product_key TEXT,
+          detail_attempt_count INTEGER NOT NULL DEFAULT 0,
+          last_detail_attempt_at TIMESTAMP,
+          last_detail_error TEXT,
+          detail_verified_at TIMESTAMP,
           first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -677,6 +756,86 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_detail_first_discovery(conn: sqlite3.Connection) -> None:
+    """Upgrade selection storage for persistent detail-first collection.
+
+    Search cards remain historical observations, but only source-detail rows
+    can enter the resale queue.  All additions are nullable/defaulted so a
+    pre-existing local collector database remains readable throughout the
+    migration.
+    """
+
+    pool_columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(discovery_pools)").fetchall()
+    }
+    for name, declaration in (
+        ("search_card_budget", "INTEGER NOT NULL DEFAULT 60"),
+        ("detail_budget", "INTEGER NOT NULL DEFAULT 4"),
+        ("xianyu_query_budget", "INTEGER NOT NULL DEFAULT 3"),
+        ("queue_high_watermark", "INTEGER NOT NULL DEFAULT 40"),
+        ("capture_state", "TEXT NOT NULL DEFAULT 'active'"),
+        ("pause_reason", "TEXT"),
+    ):
+        if name not in pool_columns:
+            conn.execute(f"ALTER TABLE discovery_pools ADD COLUMN {name} {declaration}")
+
+    candidate_columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(discovery_candidates)").fetchall()
+    }
+    for name, declaration in (
+        ("pipeline_stage", "TEXT NOT NULL DEFAULT 'search_discovered'"),
+        ("product_key", "TEXT"),
+        ("detail_attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_detail_attempt_at", "TIMESTAMP"),
+        ("last_detail_error", "TEXT"),
+        ("detail_verified_at", "TIMESTAMP"),
+    ):
+        if name not in candidate_columns:
+            conn.execute(f"ALTER TABLE discovery_candidates ADD COLUMN {name} {declaration}")
+
+    run_columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(discovery_runs)").fetchall()
+    }
+    for name, declaration in (
+        ("detail_query_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("detail_verified_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("detail_rejected_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("xianyu_query_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("resale_sampled_count", "INTEGER NOT NULL DEFAULT 0"),
+    ):
+        if name not in run_columns:
+            conn.execute(f"ALTER TABLE discovery_runs ADD COLUMN {name} {declaration}")
+
+    conn.execute(
+        """
+        UPDATE discovery_candidates
+        SET pipeline_stage = CASE
+          WHEN status = 'ignored' THEN 'rejected'
+          WHEN detail_verified = 1 AND last_xianyu_checked_at IS NOT NULL THEN 'evaluated'
+          WHEN detail_verified = 1 THEN 'resale_queued'
+          WHEN status = 'active' THEN 'detail_queued'
+          ELSE 'blocked'
+        END,
+        detail_verified_at = CASE
+          WHEN detail_verified = 1 THEN COALESCE(detail_verified_at, last_seen_at)
+          ELSE detail_verified_at
+        END
+        WHERE pipeline_stage IS NULL
+           OR TRIM(pipeline_stage) = ''
+           OR (pipeline_stage = 'search_discovered' AND detail_verified = 1)
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_discovery_candidates_detail_queue "
+        "ON discovery_candidates(pool_id, status, detail_verified, first_seen_at, id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_discovery_candidates_product_queue "
+        "ON discovery_candidates(pool_id, product_key, last_xianyu_checked_at, id)"
+    )
+
+
 def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -696,7 +855,9 @@ def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
             _migrate_market_items_cover_columns(conn)
             _migrate_market_item_detail_fee_columns(conn)
             _migrate_discovery_selection_board(conn)
+            _migrate_detail_first_discovery(conn)
             _migrate_duplicate_source_candidates(conn)
+            _migrate_duplicate_source_url_candidates(conn)
             _migrate_title_only_xianyu_rechecks(conn)
     finally:
         conn.close()
@@ -1237,9 +1398,11 @@ def list_discovery_pools(db_path: str | Path) -> list[DiscoveryPool]:
         rows = conn.execute(
             """
             SELECT id, slug, name, media_type, enabled, scan_interval_minutes,
-              keyword_budget, page_budget, candidate_budget, min_profit_cny,
+              keyword_budget, page_budget, candidate_budget, search_card_budget,
+              detail_budget, xianyu_query_budget, queue_high_watermark, min_profit_cny,
               min_margin, min_match_confidence, min_valid_xianyu_samples,
-              cost_overrides_json, last_scanned_at, next_run_at
+              cost_overrides_json, last_scanned_at, next_run_at, capture_state,
+              pause_reason
             FROM discovery_pools
             ORDER BY id ASC
             """
@@ -1255,6 +1418,10 @@ def list_discovery_pools(db_path: str | Path) -> list[DiscoveryPool]:
             keyword_budget=int(row["keyword_budget"]),
             page_budget=int(row["page_budget"]),
             candidate_budget=int(row["candidate_budget"]),
+            search_card_budget=int(row["search_card_budget"]),
+            detail_budget=int(row["detail_budget"]),
+            xianyu_query_budget=int(row["xianyu_query_budget"]),
+            queue_high_watermark=int(row["queue_high_watermark"]),
             min_profit_cny=float(row["min_profit_cny"]),
             min_margin=float(row["min_margin"]),
             min_match_confidence=float(row["min_match_confidence"]),
@@ -1262,6 +1429,8 @@ def list_discovery_pools(db_path: str | Path) -> list[DiscoveryPool]:
             cost_overrides_json=row["cost_overrides_json"] or "{}",
             last_scanned_at=row["last_scanned_at"],
             next_run_at=row["next_run_at"],
+            capture_state=row["capture_state"] or "active",
+            pause_reason=row["pause_reason"],
         )
         for row in rows
     ]
@@ -1499,7 +1668,9 @@ def get_discovery_candidate(db_path: str | Path, candidate_id: int) -> Discovery
             SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
               artist, edition, source_item_id, source_url, source_price,
               source_currency, availability, status, observation_count,
-              missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified
+              missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified,
+              pipeline_stage, product_key, detail_attempt_count,
+              last_detail_attempt_at, last_detail_error, detail_verified_at
             FROM discovery_candidates WHERE id = ?
             """,
             (candidate_id,),
@@ -1507,6 +1678,43 @@ def get_discovery_candidate(db_path: str | Path, candidate_id: int) -> Discovery
     if row is None:
         raise KeyError(f"Discovery candidate not found: {candidate_id}")
     return _discovery_candidate_from_row(row)
+
+
+def list_discovery_detail_queue(
+    db_path: str | Path, pool_id: int, *, limit: int
+) -> list[DiscoveryCandidate]:
+    """Return outstanding source links independently of the latest search page.
+
+    The service applies product-specific ranking before opening browser pages;
+    this storage query deliberately preserves oldest-first queue fairness so a
+    later search result cannot starve an earlier detail candidate.
+    """
+
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
+              artist, edition, source_item_id, source_url, source_price,
+              source_currency, availability, status, observation_count,
+              missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified,
+              pipeline_stage, product_key, detail_attempt_count,
+              last_detail_attempt_at, last_detail_error, detail_verified_at
+            FROM discovery_candidates
+            WHERE pool_id = ?
+              AND status = 'active'
+              AND detail_verified = 0
+              AND COALESCE(TRIM(source_url), '') != ''
+              AND COALESCE(pipeline_stage, 'search_discovered') IN (
+                'search_discovered', 'detail_queued'
+              )
+            ORDER BY datetime(first_seen_at) ASC, id ASC
+            LIMIT ?
+            """,
+            (pool_id, max(0, int(limit))),
+        ).fetchall()
+    return [_discovery_candidate_from_row(row) for row in rows]
 
 
 def _discovery_candidate_from_row(row: sqlite3.Row) -> DiscoveryCandidate:
@@ -1531,6 +1739,12 @@ def _discovery_candidate_from_row(row: sqlite3.Row) -> DiscoveryCandidate:
         last_xianyu_checked_at=row["last_xianyu_checked_at"],
         raw_text=row["raw_text"],
         detail_verified=bool(row["detail_verified"]),
+        pipeline_stage=row["pipeline_stage"] or "search_discovered",
+        product_key=row["product_key"],
+        detail_attempt_count=int(row["detail_attempt_count"]),
+        last_detail_attempt_at=row["last_detail_attempt_at"],
+        last_detail_error=row["last_detail_error"],
+        detail_verified_at=row["detail_verified_at"],
     )
 
 
@@ -1542,7 +1756,9 @@ def _select_discovery_candidate_by_identity(
         SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
           artist, edition, source_item_id, source_url, source_price,
           source_currency, availability, status, observation_count,
-          missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified
+          missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified,
+          pipeline_stage, product_key, detail_attempt_count,
+          last_detail_attempt_at, last_detail_error, detail_verified_at
         FROM discovery_candidates
         WHERE pool_id = ? AND identity_key = ?
         """,

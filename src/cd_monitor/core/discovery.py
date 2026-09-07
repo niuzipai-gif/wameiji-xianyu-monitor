@@ -17,6 +17,10 @@ class DiscoveryPool:
     keyword_budget: int = 2
     page_budget: int = 1
     candidate_budget: int = 2
+    search_card_budget: int = 60
+    detail_budget: int = 4
+    xianyu_query_budget: int = 3
+    queue_high_watermark: int = 40
     min_profit_cny: float = 35.0
     min_margin: float = 0.25
     min_match_confidence: float = 0.75
@@ -24,6 +28,8 @@ class DiscoveryPool:
     cost_overrides_json: str = "{}"
     last_scanned_at: str | None = None
     next_run_at: str | None = None
+    capture_state: str = "active"
+    pause_reason: str | None = None
 
 
 @dataclass(slots=True)
@@ -58,6 +64,12 @@ class DiscoveryCandidate:
     last_xianyu_checked_at: str | None = None
     raw_text: str | None = None
     detail_verified: bool = False
+    pipeline_stage: str = "search_discovered"
+    product_key: str | None = None
+    detail_attempt_count: int = 0
+    last_detail_attempt_at: str | None = None
+    last_detail_error: str | None = None
+    detail_verified_at: str | None = None
 
 
 @dataclass(slots=True)
@@ -70,7 +82,12 @@ class DiscoveryRun:
     keyword: str | None = None
     discovered_count: int = 0
     candidate_count: int = 0
+    detail_query_count: int = 0
+    detail_verified_count: int = 0
+    detail_rejected_count: int = 0
     evaluated_count: int = 0
+    xianyu_query_count: int = 0
+    resale_sampled_count: int = 0
     error_type: str | None = None
     error_message: str | None = None
     screenshot_path: str | None = None

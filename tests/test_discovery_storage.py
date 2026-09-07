@@ -9,6 +9,7 @@ from cd_monitor.storage.sqlite import (
     init_db,
     insert_discovery_opportunity,
     insert_market_items,
+    list_discovery_detail_queue,
     list_discovery_keywords,
     list_discovery_opportunities,
     list_discovery_pools,
@@ -35,6 +36,100 @@ def test_init_db_seeds_cd_and_physical_game_pools(tmp_path: Path) -> None:
     assert all(pool.enabled for pool in pools)
     assert all(pool.scan_interval_minutes == 30 for pool in pools)
     assert all(pool.candidate_budget == 2 for pool in pools)
+
+
+def test_detail_queue_keeps_an_older_unverified_listing_after_later_ingest(
+    tmp_path: Path,
+) -> None:
+    """A later search page cannot make an earlier detail debt disappear."""
+
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    assert pool.id is not None
+    first_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:older-detail-debt",
+            title="Artist Album CD 初回限定盤",
+            source_item_id="older-detail-debt",
+            source_url="/mall/mercari/detail/older-detail-debt",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+        ),
+    )
+    upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:newer-detail-debt",
+            title="Artist Album CD 初回限定盤",
+            source_item_id="newer-detail-debt",
+            source_url="/mall/mercari/detail/newer-detail-debt",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+        ),
+    )
+
+    queued = list_discovery_detail_queue(db_path, pool.id, limit=1)
+
+    assert [candidate.id for candidate in queued] == [first_id]
+
+
+def test_init_db_retires_duplicate_source_urls_without_erasing_history(
+    tmp_path: Path,
+) -> None:
+    """Legacy identity mistakes cannot leave two active rows for one listing."""
+
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    assert pool.id is not None
+    duplicate_url = "/mall/mercari/detail/same-listing"
+    legacy_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="catalog:LEGACY001",
+            title="Legacy title",
+            source_item_id="legacy-identity",
+            source_url=duplicate_url,
+            source_price=1500,
+            source_currency="JPY",
+            availability="available",
+        ),
+    )
+    canonical_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:real-source-id",
+            title="Verified title CD",
+            source_item_id="real-source-id",
+            source_url=duplicate_url,
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+
+    init_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, status FROM discovery_candidates "
+            "WHERE source_url = ? ORDER BY id",
+            (duplicate_url,),
+        ).fetchall()
+    assert rows == [(legacy_id, "ignored"), (canonical_id, "active")]
 
 
 def test_init_db_rebuilds_stale_pool_next_run_for_the_pool_rate_limit(
