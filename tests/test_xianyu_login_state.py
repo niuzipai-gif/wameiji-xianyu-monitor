@@ -11,7 +11,7 @@ def test_export_xianyu_login_state_writes_playwright_storage_state_without_retur
     fake_playwright = _FakePlaywright(
         cookies=[
             {
-                "name": "cookie2",
+                "name": "tracknick",
                 "value": "SECRET-COOKIE",
                 "domain": ".goofish.com",
                 "path": "/",
@@ -43,6 +43,32 @@ def test_export_xianyu_login_state_writes_playwright_storage_state_without_retur
 def test_export_xianyu_login_state_times_out_without_auth_cookie(tmp_path) -> None:
     output = tmp_path / "xianyu_state.json"
     fake_playwright = _FakePlaywright(cookies=[])
+
+    with pytest.raises(LoginStateExportError, match="No Goofish/Xianyu login cookies"):
+        asyncio.run(
+            export_xianyu_login_state(
+                output,
+                timeout_seconds=0,
+                poll_interval_seconds=0,
+                playwright_factory=lambda: fake_playwright,
+            )
+        )
+
+    assert not output.exists()
+    assert fake_playwright.chromium.browser.closed is True
+
+
+def test_export_xianyu_login_state_rejects_anonymous_cookie_bundle(tmp_path) -> None:
+    """Anonymous Goofish pages set these cookies before a user signs in."""
+    output = tmp_path / "xianyu_state.json"
+    fake_playwright = _FakePlaywright(
+        cookies=[
+            {"name": "cookie2", "value": "anonymous", "domain": ".goofish.com"},
+            {"name": "_m_h5_tk", "value": "anonymous", "domain": ".goofish.com"},
+            {"name": "_m_h5_tk_enc", "value": "anonymous", "domain": ".goofish.com"},
+            {"name": "tfstk", "value": "anonymous", "domain": ".goofish.com"},
+        ]
+    )
 
     with pytest.raises(LoginStateExportError, match="No Goofish/Xianyu login cookies"):
         asyncio.run(
@@ -133,7 +159,7 @@ def _sample_xianyu_snapshot() -> dict:
         "headers": {"user-agent": "Mozilla/5.0"},
         "cookies": [
             {
-                "name": "cookie2",
+                "name": "tracknick",
                 "value": "SECRET-COOKIE",
                 "domain": ".goofish.com",
                 "path": "/",
@@ -183,7 +209,7 @@ def test_load_xianyu_login_state_roundtrip(tmp_path) -> None:
     output = tmp_path / "xianyu_state.json"
     save_xianyu_login_state(snapshot, output)
     state = load_xianyu_login_state(output)
-    assert state["cookies"][0]["name"] == "cookie2"
+    assert state["cookies"][0]["name"] == "tracknick"
     assert state["cookies"][0]["value"] == "SECRET-COOKIE"
     assert any(o["origin"] == "https://www.goofish.com" for o in state["origins"])
 
@@ -232,6 +258,20 @@ def test_inspect_xianyu_login_state_invalid_domain(tmp_path) -> None:
     insp = inspect_xianyu_login_state(p)
     assert insp["status"] == "invalid"
     assert "goofish" in insp["error_message"].lower() or "xianyu" in insp["error_message"].lower()
+
+
+def test_inspect_xianyu_login_state_rejects_anonymous_cookie_bundle(tmp_path) -> None:
+    p = tmp_path / "anonymous.json"
+    p.write_text(_json.dumps({"cookies": [
+        {"name": "cookie2", "value": "anonymous", "domain": ".goofish.com"},
+        {"name": "_m_h5_tk", "value": "anonymous", "domain": ".goofish.com"},
+        {"name": "_m_h5_tk_enc", "value": "anonymous", "domain": ".goofish.com"},
+    ], "origins": []}), encoding="utf-8")
+
+    insp = inspect_xianyu_login_state(p)
+
+    assert insp["status"] == "invalid"
+    assert insp["error_type"] == "invalid_state_file"
 
 
 def test_inspect_xianyu_login_state_not_configured() -> None:

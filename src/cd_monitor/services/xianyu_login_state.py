@@ -8,12 +8,13 @@ from typing import Any, Callable
 
 DEFAULT_LOGIN_URL = "https://www.goofish.com"
 _AUTH_DOMAINS = ("goofish.com", "xianyu", "taobao.com", "alibaba.com", "tmall.com")
-# `tfstk` and similar cookies are issued to anonymous visitors as well. Wait
-# for a login-session cookie so the interactive exporter cannot report success
-# immediately on an unauthenticated Goofish page.
-_AUTH_COOKIE_NAMES = {
-    "cookie2", "_m_h5_tk", "_m_h5_tk_enc", "unb", "lgc", "tracknick",
-    "cookie17", "skt", "sgcookie", "isg", "uc1", "uc3", "uc4",
+# Goofish writes visitor/session cookies such as ``cookie2``, ``t``,
+# ``_m_h5_tk`` and ``_m_h5_tk_enc`` before a person signs in.  They can open a
+# login modal just as the unsigned page does, so they must never make an
+# exporter report a usable collector login.  Require a cookie that carries an
+# account identity instead.
+_AUTH_IDENTITY_COOKIE_NAMES = {
+    "lgc", "tracknick", "cookie17", "skt", "sgcookie", "uc1", "uc3", "uc4",
 }
 
 
@@ -114,26 +115,18 @@ def _has_auth_domain(
     *,
     allow_generic_session: bool = False,
 ) -> bool:
-    if any(_is_authenticated_cookie(cookie) for cookie in cookies):
-        return True
-    # Extension-imported states historically accepted any non-empty cookie on
-    # a Goofish domain. Keep that compatibility only for the explicit wrapper
-    # path; the interactive exporter remains strict so an anonymous tfstk
-    # cookie cannot be mistaken for a logged-in session.
-    return allow_generic_session and any(
-        _is_auth_domain(str(cookie.get("domain", "")))
-        and str(cookie.get("name", "")).strip()
-        and str(cookie.get("value", "")).strip()
-        for cookie in cookies
-        if isinstance(cookie, dict)
-    )
+    # ``allow_generic_session`` remains in the signature for callers using an
+    # older extension-import path.  Generic Goofish cookies are not proof of a
+    # signed-in account, so both paths now require an account identity marker.
+    _ = allow_generic_session
+    return any(_is_authenticated_cookie(cookie) for cookie in cookies)
 
 
 def _is_authenticated_cookie(cookie: dict[str, Any]) -> bool:
     if not isinstance(cookie, dict) or not _is_auth_domain(str(cookie.get("domain", ""))):
         return False
     name = str(cookie.get("name", "")).strip().lower()
-    return name in _AUTH_COOKIE_NAMES
+    return name in _AUTH_IDENTITY_COOKIE_NAMES
 
 
 def _cookie_domains(cookies: list[dict[str, Any]]) -> list[str]:
