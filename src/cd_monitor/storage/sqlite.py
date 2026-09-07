@@ -525,6 +525,23 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
            )
         """
     )
+    # Older detail parsing read the entire document. Every Wameiji page footer
+    # includes "All Rights Reserved", which was incorrectly stored as a
+    # product-level reservation. Re-open only those affected records so they
+    # receive a fresh, component-scoped detail check before any Xianyu lookup.
+    conn.execute(
+        """
+        UPDATE discovery_candidates
+        SET availability = 'unknown_but_visible',
+            status = 'active',
+            detail_verified = 0,
+            last_xianyu_checked_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE detail_verified = 1
+          AND availability = 'reserved'
+          AND raw_text LIKE '%All Rights Reserved%'
+        """
+    )
 
 
 def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:

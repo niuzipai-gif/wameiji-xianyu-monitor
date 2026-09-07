@@ -165,6 +165,96 @@ def test_parse_detail_html_does_not_promote_page_metadata_as_a_product_title() -
     assert status.error_type == "detail_parse_failed"
 
 
+def test_parse_detail_html_scopes_price_and_availability_to_the_product() -> None:
+    """Footer copy and recommended cards must not change a live product's state."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card",
+        price=500,
+        currency="JPY",
+        external_item_id="scoped-detail",
+        url="/mall/rakuma/detail/scoped-detail",
+    )
+    detail_html = """
+    <div class="rakuma-detail">
+      <div class="main">
+        <h1 class="name">Target Album 预约特典 CD</h1>
+        <div class="sku-item">
+          <div class="price-box price-box-total">
+            <p class="price-com">980 <span class="unit">日元</span></p>
+          </div>
+        </div>
+        <div class="operation">
+          <button class="cart">加入购物车</button>
+          <button class="buy-now">立即购买</button>
+        </div>
+        <a class="other-item">
+          <div class="main-info"><p class="price-com">8,200 日元</p></div>
+        </a>
+      </div>
+    </div>
+    <footer>Copyright 2015-2026. All Rights Reserved. 预约商品</footer>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    item = status.items[0]
+    assert item.title == "Target Album 预约特典 CD"
+    assert item.price == 980
+    assert item.availability == "available"
+    assert "All Rights Reserved" not in item.raw_text
+    assert "8,200" not in item.raw_text
+
+
+def test_parse_detail_html_respects_an_explicit_sold_marker() -> None:
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card",
+        price=500,
+        currency="JPY",
+        external_item_id="sold-detail",
+        url="/mall/mercari/detail/sold-detail",
+    )
+    detail_html = """
+    <main class="goods-detail">
+      <img class="sold" src="/images/sold.png">
+      <h1 class="goods-name">Sold Album CD</h1>
+      <p class="price-com">1,280 日元</p>
+    </main>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert status.items[0].availability == "sold_out"
+
+
+def test_parse_detail_html_recognizes_paypay_primary_container() -> None:
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card",
+        price=500,
+        currency="JPY",
+        external_item_id="paypay-detail",
+        url="/mall/paypay/detail/paypay-detail",
+    )
+    detail_html = """
+    <div class="paypay"><div class="paypay-page"><div class="main">
+      <div class="goods"><div class="name-box"><h1 class="name">PayPay Game</h1></div></div>
+      <div class="price-box price-box-total"><p class="price-com">7,000 日元</p></div>
+      <div class="operation"><button class="buy-now">立即购买</button></div>
+    </div></div></div>
+    <footer>All Rights Reserved</footer>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert status.items[0].price == 7000
+    assert status.items[0].availability == "available"
+
+
 def test_parse_detail_html_does_not_copy_catalog_from_the_search_card() -> None:
     search_item = MarketItem(
         source="wameiji",

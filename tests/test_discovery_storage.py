@@ -60,6 +60,38 @@ def test_init_db_rebuilds_stale_pool_next_run_for_the_pool_rate_limit(
     assert list_discovery_pools(db_path)[0].next_run_at == "2026-09-07 00:25:00"
 
 
+def test_init_db_invalidates_legacy_footer_based_reservations(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    candidate_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:legacy-footer-state",
+            title="Legacy CD",
+            source_item_id="legacy-footer-state",
+            source_price=980,
+            source_currency="JPY",
+            availability="reserved",
+            status="expired",
+            raw_text="Product evidence Copyright All Rights Reserved",
+            detail_verified=True,
+        ),
+    )
+
+    init_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT availability, status, detail_verified, last_xianyu_checked_at "
+            "FROM discovery_candidates WHERE id = ?",
+            (candidate_id,),
+        ).fetchone()
+    assert row == ("unknown_but_visible", "active", 0, None)
+
+
 def test_identity_key_prefers_source_listing_then_catalog_jan_then_title() -> None:
     assert build_identity_key(
         catalog_no=" SRCL-3520 ",

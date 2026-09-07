@@ -197,20 +197,70 @@ class _WameijiCardParser(HTMLParser):
 
 
 class _WameijiDetailParser(HTMLParser):
-    """Extract title, price and visible evidence from the rendered detail DOM."""
+    """Extract evidence from the product area, rather than the entire page.
+
+    Wameiji detail pages also render a footer (``All Rights Reserved``) and
+    recommendation cards.  Treating every text node or every ``price-com``
+    node as product evidence turns that footer into a false reservation and
+    can concatenate several unrelated prices.  A detail record is trustworthy
+    only when its title, price and stock signal come from the primary detail
+    component.
+    """
 
     _TITLE_CLASSES = {"goods-name", "goods-title", "item-title", "product-title"}
-    _PRICE_CLASSES = {"price-com", "goods-price", "goods-price-value", "price"}
+    _DETAIL_ROOT_CLASSES = {
+        "goods-detail",
+        "product-detail",
+        "item-detail",
+        "mercari-detail",
+        "rakuma-detail",
+        "paypay-detail",
+        "yahoo-detail",
+        "yahoo-auction-detail",
+        "surugaya-detail",
+        "bookoff-detail",
+        "market-detail",
+        "paypay",
+    }
+    _EXCLUDED_CLASSES = {
+        "other-item",
+        "related-item",
+        "recommend-item",
+        "recommendation-item",
+        "similar-item",
+    }
     _IGNORED_TAGS = {"noscript", "script", "style", "svg", "template"}
+    _PURCHASE_ACTION_CLASSES = {"buy-now", "cart", "add-to-cart", "purchase"}
+    _AVAILABLE_TEXT_TOKENS = (
+        "available",
+        "贩売中",
+        "在庫あり",
+        "可购买",
+        "可購入",
+        "出品中",
+        "在售",
+        "在库",
+    )
 
     def __init__(self) -> None:
         super().__init__()
         self.text_parts: list[str] = []
         self._title_parts: list[str] = []
         self._price_parts: list[str] = []
-        self._title_tags: list[str] = []
-        self._price_tags: list[str] = []
+        self._tag_stack: list[set[str]] = []
         self._ignored_depth = 0
+        self._scope_depth: int | None = None
+        self._scope_seen = False
+        self._excluded_depth: int | None = None
+        self._title_depth: int | None = None
+        self._price_capture_parts: dict[int, list[str]] = {}
+        self._price_capture_priority: dict[int, int] = {}
+        self._price_candidates: list[tuple[int, int, str]] = []
+        self._price_sequence = 0
+        self._status_capture_parts: dict[int, list[str]] = {}
+        self._status_parts: list[str] = []
+        self._availability_signals: list[str] = []
+        self._has_purchase_action = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in self._IGNORED_TAGS:
@@ -218,42 +268,131 @@ class _WameijiDetailParser(HTMLParser):
             return
         if self._ignored_depth:
             return
+
         attr = dict(attrs)
         classes = set(str(attr.get("class") or "").split())
-        if tag == "h1" or classes.intersection(self._TITLE_CLASSES):
-            self._title_tags.append(tag)
-        if classes.intersection(self._PRICE_CLASSES):
-            self._price_tags.append(tag)
+        if tag not in _VOID_TAGS:
+            self._tag_stack.append(classes)
+
+        if not self._scope_seen and classes.intersection(self._DETAIL_ROOT_CLASSES):
+            self._scope_seen = True
+            self._scope_depth = len(self._tag_stack)
+        if not self._in_scope():
+            return
+        if self._excluded_depth is not None:
+            return
+        if classes.intersection(self._EXCLUDED_CLASSES) or any(
+            "recommend" in class_name or "related" in class_name
+            for class_name in classes
+        ):
+            if tag not in _VOID_TAGS:
+                self._excluded_depth = len(self._tag_stack)
+            return
+
+        depth = len(self._tag_stack)
+        if tag == "h1" or (
+            not self._title_parts and classes.intersection(self._TITLE_CLASSES)
+        ):
+            if self._title_depth is None:
+                self._title_depth = depth
+
+        if "price-com" in classes or "goods-price-value" in classes or "data-price" in attr:
+            self._price_capture_parts[depth] = []
+            self._price_capture_priority[depth] = (
+                0 if any("price-box-total" in parent for parent in self._tag_stack) else 1
+            )
+
+        class_text = " ".join(classes).lower()
+        if any(token in class_text for token in ("sold", "unavailable", "out-of-stock")):
+            self._availability_signals.append("sold out")
+        elif "reserved" in class_text:
+            self._availability_signals.append("reserved")
+
+        if tag in {"button", "a"} and classes.intersection(self._PURCHASE_ACTION_CLASSES):
+            disabled = (
+                "disabled" in attr
+                or str(attr.get("aria-disabled") or "").lower() == "true"
+                or "disabled" in classes
+            )
+            if disabled:
+                self._availability_signals.append("sold out")
+            else:
+                self._has_purchase_action = True
+
+        if any(
+            token in class_text
+            for token in ("availability", "stock", "sale-status", "sell-status")
+        ):
+            self._status_capture_parts[depth] = []
 
     def handle_data(self, data: str) -> None:
-        if self._ignored_depth:
+        if self._ignored_depth or not self._in_scope() or self._excluded_depth is not None:
             return
         value = data.strip()
         if not value:
             return
         self.text_parts.append(value)
-        if self._title_tags:
+        if self._title_depth is not None:
             self._title_parts.append(value)
-        if self._price_tags:
-            self._price_parts.append(value)
+        for parts in self._price_capture_parts.values():
+            parts.append(value)
+        for parts in self._status_capture_parts.values():
+            parts.append(value)
 
     def handle_endtag(self, tag: str) -> None:
         if tag in self._IGNORED_TAGS and self._ignored_depth:
             self._ignored_depth -= 1
             return
-        if self._ignored_depth:
+        if self._ignored_depth or tag in _VOID_TAGS or not self._tag_stack:
             return
-        if self._title_tags and tag == self._title_tags[-1]:
-            self._title_tags.pop()
-        if self._price_tags and tag == self._price_tags[-1]:
-            self._price_tags.pop()
+
+        depth = len(self._tag_stack)
+        if self._title_depth == depth:
+            self._title_depth = None
+        if depth in self._price_capture_parts:
+            text = " ".join(self._price_capture_parts.pop(depth)).strip()
+            priority = self._price_capture_priority.pop(depth)
+            if text:
+                self._price_candidates.append((priority, self._price_sequence, text))
+                self._price_sequence += 1
+        if depth in self._status_capture_parts:
+            self._status_parts.extend(self._status_capture_parts.pop(depth))
+
+        self._tag_stack.pop()
+        if self._excluded_depth is not None and len(self._tag_stack) < self._excluded_depth:
+            self._excluded_depth = None
+        if self._scope_depth is not None and len(self._tag_stack) < self._scope_depth:
+            self._scope_depth = None
+
+    def _in_scope(self) -> bool:
+        return self._scope_depth is not None and len(self._tag_stack) >= self._scope_depth
+
+    def price(self) -> float:
+        for _, _, text in sorted(self._price_candidates):
+            price = _parse_price(text)
+            if price > 0:
+                self._price_parts = text.split()
+                return price
+        return 0.0
+
+    def availability(self) -> str:
+        explicit_status = " ".join(self._availability_signals + self._status_parts)
+        explicit_availability = _detect_availability(explicit_status)
+        if explicit_availability != "unknown_but_visible":
+            return explicit_availability
+        scoped_text = " ".join(self.text_parts).lower()
+        if self._has_purchase_action or any(
+            token in scoped_text for token in self._AVAILABLE_TEXT_TOKENS
+        ):
+            return "available"
+        return "unknown_but_visible"
 
 
 def _detail_item_from_parser(
     parser: _WameijiDetailParser, search_item: MarketItem
 ) -> MarketItem | None:
     title = " ".join(parser._title_parts).strip()
-    price = _parse_price(" ".join(parser._price_parts))
+    price = parser.price()
     raw_text = " ".join(parser.text_parts)
     if not title or price <= 0:
         return None
@@ -273,7 +412,7 @@ def _detail_item_from_parser(
         price_cny_display=search_item.price_cny_display,
         url=search_item.url,
         image_url=search_item.image_url,
-        availability=_detect_availability(raw_text),
+        availability=parser.availability(),
         condition_text=_detect_condition_from_text(raw_text),
         fees_hint=_detect_fees_hint(raw_text),
         raw_text=raw_text,
