@@ -114,7 +114,8 @@ browser:
 ```powershell
 $env:BROWSER_ENABLED = "true"
 $env:XIANYU_STATE_FILE = "data/xianyu_state.json"
-# 优先使用可见登录档案（可与 state_file 同时保留作备份）：
+# 只有在这个专用档案中已经完成登录时，才设置它；否则不要与新导出的
+# state_file 一起设置，因为持久档案会优先且可能仍是未登录状态：
 $env:XIANYU_PROFILE_DIR = "data/browser_profiles/goofish"
 # 或兼容 goofish 命名：
 $env:GOOFISH_STATE_FILE = "data/xianyu_state.json"
@@ -136,7 +137,7 @@ $env:GOOFISH_STATE_FILE = "data/xianyu_state.json"
 拿到登录态文件后，可以只读采集搜索页 HTML 快照，并用现有解析器统计条目：
 
 ```powershell
-.\.venv\Scripts\python.exe -m cd_monitor.cli capture-live-html --source xianyu --catalog-no SRCL-3520 --xianyu-profile-dir data/browser_profiles/goofish --state-file data/xianyu_state.json --output data/snapshots/xianyu_SRCL-3520.html --screenshot-output data/screenshots/xianyu_SRCL-3520.png --network-output data/snapshots/xianyu_SRCL-3520.network.json
+.\.venv\Scripts\python.exe -m cd_monitor.cli capture-live-html --source xianyu --catalog-no SRCL-3520 --state-file data/xianyu_state.json --output data/snapshots/xianyu_SRCL-3520.html --screenshot-output data/screenshots/xianyu_SRCL-3520.png --network-output data/snapshots/xianyu_SRCL-3520.network.json
 .\.venv\Scripts\python.exe -m cd_monitor.cli capture-live-html --source wameiji --catalog-no SRCL-3520 --profile-dir data/browser_profiles/wameiji --output data/snapshots/wameiji_SRCL-3520.html --screenshot-output data/screenshots/wameiji_SRCL-3520.png --network-output data/snapshots/wameiji_SRCL-3520.network.json
 ```
 
@@ -151,7 +152,7 @@ $env:GOOFISH_STATE_FILE = "data/xianyu_state.json"
 也可以用只读闭环命令一次完成“两边采集 HTML + 组合评估落库”：
 
 ```powershell
-.\.venv\Scripts\python.exe -m cd_monitor.cli scan-live-html --catalog-no SRCL-3520 --profile-dir data/browser_profiles/wameiji --xianyu-profile-dir data/browser_profiles/goofish --state-file data/xianyu_state.json --db data/cd_monitor.db --snapshot-dir data/snapshots
+.\.venv\Scripts\python.exe -m cd_monitor.cli scan-live-html --catalog-no SRCL-3520 --profile-dir data/browser_profiles/wameiji --state-file data/xianyu_state.json --db data/cd_monitor.db --snapshot-dir data/snapshots
 ```
 
 `scan-live-html` 会先采集 Wameiji，再采集 Xianyu/Goofish，并默认在 `<snapshot-dir>/live_screenshots/` 保存两边搜索页截图、在 `<snapshot-dir>/live_network/` 保存两边页面网络响应摘要；任一端返回 `human_required` 时会停止，不生成机会、不伪造数据。两边均成功解析后才调用现有 `evaluate-html` 流程写入 SQLite。

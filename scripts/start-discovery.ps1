@@ -32,10 +32,17 @@ if (-not [Environment]::GetEnvironmentVariable("WAMEIJI_PROFILE_DIR", "Process")
         "WAMEIJI_PROFILE_DIR", (Join-Path $ProjectRoot "data\browser_profiles\wameiji"), "Process"
     )
 }
-if (-not [Environment]::GetEnvironmentVariable("XIANYU_PROFILE_DIR", "Process")) {
-    [Environment]::SetEnvironmentVariable(
-        "XIANYU_PROFILE_DIR", (Join-Path $ProjectRoot "data\browser_profiles\goofish"), "Process"
-    )
+# The interactive Xianyu login command exports an isolated storage state.  Do
+# not silently replace it with the default empty persistent profile: when both
+# are present, the browser capture correctly prioritizes the profile and would
+# reopen an unsigned-in Goofish window.  A user who intentionally maintains a
+# dedicated persistent profile can still set XIANYU_PROFILE_DIR in .env.
+$ExistingXianyuState = [Environment]::GetEnvironmentVariable("XIANYU_STATE_FILE", "Process")
+if (-not $ExistingXianyuState -and -not [Environment]::GetEnvironmentVariable("GOOFISH_STATE_FILE", "Process")) {
+    $DefaultXianyuState = Join-Path $ProjectRoot "data\xianyu_state.json"
+    if (Test-Path -LiteralPath $DefaultXianyuState -PathType Leaf) {
+        [Environment]::SetEnvironmentVariable("XIANYU_STATE_FILE", $DefaultXianyuState, "Process")
+    }
 }
 [Environment]::SetEnvironmentVariable("BROWSER_ENABLED", "true", "Process")
 [Environment]::SetEnvironmentVariable("PYTHONUTF8", "1", "Process")
