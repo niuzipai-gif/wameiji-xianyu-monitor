@@ -83,6 +83,30 @@
       );
       return;
     }
+    const resaleReady = Number(summary.resale_ready_candidates) || 0;
+    const freshDetails = Number(summary.fresh_source_details) || 0;
+    const staleDetails = Number(summary.stale_source_details) || 0;
+    if (resaleReady > 0) {
+      setDiscoveryStatus(
+        "已核验 " + resaleReady + " 条挖煤姬详情 · 等待闲鱼价格样本",
+        "idle",
+      );
+      return;
+    }
+    if (freshDetails > 0) {
+      setDiscoveryStatus(
+        "已核验 " + freshDetails + " 条挖煤姬详情 · 等待下一轮闲鱼比价",
+        "idle",
+      );
+      return;
+    }
+    if (staleDetails > 0) {
+      setDiscoveryStatus(
+        staleDetails + " 条挖煤姬详情等待重新核验 · 当前不显示利润卡",
+        "idle",
+      );
+      return;
+    }
     if (summary.last_scan_at) {
       setDiscoveryStatus("已同步 · " + timeLabel(summary.last_scan_at), "running");
       return;
@@ -133,6 +157,10 @@
   function renderKpis(summary) {
     const items = Array.isArray(view.board && view.board.opportunities) ? view.board.opportunities : [];
     const activeCandidates = Number(summary.active_candidates) || 0;
+    const freshSourceDetails = Number(summary.fresh_source_details);
+    const comparisonCandidates = Number.isFinite(freshSourceDetails)
+      ? freshSourceDetails
+      : activeCandidates;
     const totalExpectedProfit = Number(summary.total_expected_profit);
     const expectedProfit = Number.isFinite(totalExpectedProfit)
       ? totalExpectedProfit
@@ -141,8 +169,8 @@
     const highestProfit = Number.isFinite(highestExpectedProfit)
       ? highestExpectedProfit
       : items.reduce((maximum, item) => Math.max(maximum, Number(item.expected_profit) || 0), 0);
-    const hitRate = activeCandidates > 0
-      ? Math.min(100, Math.round((Number(summary.active_opportunities) || items.length) / activeCandidates * 100))
+    const hitRate = comparisonCandidates > 0
+      ? Math.min(100, Math.round((Number(summary.active_opportunities) || items.length) / comparisonCandidates * 100))
       : 0;
     setText("kpiToday", String(Number(summary.active_opportunities) || items.length || 0));
     setText("kpiProfit", cny(expectedProfit));
@@ -270,6 +298,25 @@
     });
   }
 
+  function emptyFeedMessage(summary, allItemCount) {
+    if (allItemCount > 0) {
+      return "这个筛选暂时没有通过门槛的机会。调整筛选条件后可查看其他已核验卡片。";
+    }
+    const resaleReady = Number(summary.resale_ready_candidates) || 0;
+    if (resaleReady > 0) {
+      return "已核验 " + resaleReady + " 条挖煤姬商品详情，等待闲鱼价格样本后才计算并展示利润。";
+    }
+    const freshDetails = Number(summary.fresh_source_details) || 0;
+    if (freshDetails > 0) {
+      return "已核验 " + freshDetails + " 条挖煤姬商品详情，等待下一轮闲鱼价格复查后再展示利润卡。";
+    }
+    const staleDetails = Number(summary.stale_source_details) || 0;
+    if (staleDetails > 0) {
+      return staleDetails + " 条挖煤姬采购详情已过期，正在等待重新打开详情页核验；当前不显示过期利润。";
+    }
+    return "暂时没有通过两侧详情核验和利润门槛的机会。";
+  }
+
   function renderFeed() {
     const target = document.getElementById("homeFeed");
     if (!target || !view.board) return;
@@ -291,7 +338,8 @@
       || (Number(right.match_confidence) || 0) - (Number(left.match_confidence) || 0)
     ));
     if (!items.length) {
-      target.innerHTML = '<div class="empty-state">这个筛选暂时没有通过门槛的机会。点击左侧「立即全量扫描」可让采集电脑继续发现。</div>';
+      const summary = view.board.summary || {};
+      target.innerHTML = '<div class="empty-state">' + esc(emptyFeedMessage(summary, allItems.length)) + '</div>';
       return;
     }
     target.innerHTML = items.map(opportunityCard).join("");

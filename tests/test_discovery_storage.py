@@ -922,6 +922,66 @@ def test_selection_board_hides_stale_source_detail_even_with_fresh_xianyu_price(
     assert discovery_summary(db_path)["active_opportunities"] == 0
 
 
+def test_discovery_summary_exposes_detail_first_pipeline_state(tmp_path: Path) -> None:
+    """The board must distinguish fresh purchase evidence from stale debt."""
+
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    assert pool.id is not None
+    fresh_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:fresh-summary-detail",
+            title="Fresh Summary Album CD",
+            source_item_id="fresh-summary-detail",
+            source_url="/mall/mercari/detail/fresh-summary-detail",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+        ),
+    )
+    stale_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:stale-summary-detail",
+            title="Stale Summary Album CD",
+            source_item_id="stale-summary-detail",
+            source_url="/mall/mercari/detail/stale-summary-detail",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+        ),
+    )
+    for candidate_id in (fresh_id, stale_id):
+        record_discovery_candidate_detail_attempt(
+            db_path,
+            candidate_id,
+            pipeline_stage="resale_queued",
+            detail_verified=True,
+        )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE discovery_candidates
+            SET detail_verified_at = datetime(CURRENT_TIMESTAMP, '-181 minutes')
+            WHERE id = ?
+            """,
+            (stale_id,),
+        )
+
+    summary = discovery_summary(db_path)
+
+    assert summary["active_candidates"] == 2
+    assert summary["fresh_source_details"] == 1
+    assert summary["stale_source_details"] == 1
+    assert summary["resale_ready_candidates"] == 1
+
+
 def test_selection_board_retires_a_previous_evaluation_for_the_same_candidate(
     tmp_path: Path,
 ) -> None:

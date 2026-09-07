@@ -34,7 +34,13 @@ def test_pages_build_includes_the_automatic_selection_board(tmp_path: Path) -> N
     assert "闲鱼 · 销售侧" in script
     assert "挖煤姬 · 进货侧" in script
     assert 'class="op-card discovery-op-card"' in script
+    assert 'sideMarkup("xianyu"' in script
+    assert 'sideMarkup("market"' in script
+    assert "comparison-rail" in script
     assert "capture_state" in script
     assert "已自动暂停" in script
+    assert "fresh_source_details" in script
+    assert "resale_ready_candidates" in script
+    assert "等待闲鱼价格样本" in script
     assert "每轮详情页上限" in script
     assert "每轮闲鱼商品上限" in script

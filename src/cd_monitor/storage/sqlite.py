@@ -2448,6 +2448,36 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
             WHERE status = 'active' AND detail_verified = 1
             """
         ).fetchone()[0]
+        detail_pipeline = conn.execute(
+            """
+            SELECT
+              SUM(CASE
+                WHEN datetime(detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
+                THEN 1 ELSE 0
+              END) AS fresh_source_details,
+              SUM(CASE
+                WHEN detail_verified_at IS NULL
+                  OR datetime(detail_verified_at) < datetime(CURRENT_TIMESTAMP, ?)
+                THEN 1 ELSE 0
+              END) AS stale_source_details,
+              SUM(CASE
+                WHEN datetime(detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
+                  AND (
+                    last_xianyu_checked_at IS NULL
+                    OR datetime(last_xianyu_checked_at) <= datetime(CURRENT_TIMESTAMP, ?)
+                  )
+                THEN 1 ELSE 0
+              END) AS resale_ready_candidates
+            FROM discovery_candidates
+            WHERE status = 'active' AND detail_verified = 1
+            """,
+            (
+                source_freshness_window,
+                source_freshness_window,
+                source_freshness_window,
+                freshness_window,
+            ),
+        ).fetchone()
         active_opportunities = conn.execute(
             """
             SELECT COUNT(*) FROM opportunities o
@@ -2504,6 +2534,9 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
         ).fetchone()[0]
     return {
         "active_candidates": int(active_candidates or 0),
+        "fresh_source_details": int(detail_pipeline[0] or 0),
+        "stale_source_details": int(detail_pipeline[1] or 0),
+        "resale_ready_candidates": int(detail_pipeline[2] or 0),
         "active_opportunities": int(active_opportunities or 0),
         "total_expected_profit": float(total_profit or 0),
         "highest_expected_profit": float(highest_profit or 0),
