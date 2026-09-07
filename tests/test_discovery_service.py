@@ -1651,6 +1651,56 @@ def test_cd_discovery_rejects_phone_case_with_a_weak_band_marker(tmp_path: Path)
     assert opened_details == ["Artist Best Album 初回限定盤 CD 帯付き"]
 
 
+def test_cd_discovery_rejects_dior_cd_logo_handbag(tmp_path: Path) -> None:
+    """Dior's ``CDロゴ`` is a fashion logo, not evidence of a music disc."""
+
+    db_path = tmp_path / "selection.db"
+    opened_details: list[str] = []
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title="ディオール Dior カレーニナ CDロゴ カバン ロゴチャーム ギャザー ハンドバッグ レザー ブラック",
+                price=127890,
+                currency="JPY",
+                external_item_id="dior-cd-logo-handbag",
+                availability="available",
+            ),
+            MarketItem(
+                source="wameiji",
+                title="The Charlatans CD 2枚セット 廃盤",
+                price=580,
+                currency="JPY",
+                external_item_id="charlatans-cd-set",
+                availability="available",
+            ),
+        ]
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        opened_details.append(item.title)
+        return await _verified_detail(item)
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        return []
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="CD 廃盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert result.candidate_count == result.detail_query_count == 1
+    assert opened_details == ["The Charlatans CD 2枚セット 廃盤"]
+
+
 def test_cd_discovery_keeps_an_import_disc_without_an_english_cd_marker(tmp_path: Path) -> None:
     """輸入盤 is a valid CD-source signal even when the title omits literal CD."""
 

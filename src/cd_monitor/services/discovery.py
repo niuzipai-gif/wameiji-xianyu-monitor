@@ -65,6 +65,26 @@ _CD_HARD_MEDIA_MARKERS = (
 )
 _CD_SOFT_MEDIA_MARKERS = ("album", "single", "アルバム", "シングル")
 _CD_BONUS_ONLY_MARKERS = ("トレカ", "フォトカード", "生写真", "アクリル", "缶バッジ")
+_CD_FASHION_LOGO_MARKERS = ("cdロゴ", "cd logo", "cd-logo")
+_CD_FASHION_CONTEXT_MARKERS = (
+    "dior",
+    "ディオール",
+    "christian dior",
+    "クリスチャンディオール",
+    "バッグ",
+    "カバン",
+    "ハンドバッグ",
+    "ショルダーバッグ",
+    "財布",
+    "ウォレット",
+    "チャーム",
+    "アクセサリー",
+    "ネックレス",
+    "ピアス",
+    "リング",
+    "ベルト",
+    "レザー",
+)
 _GAME_MEDIA_MARKERS = (
     "switch",
     "nintendo",
@@ -1037,6 +1057,11 @@ def _is_media_relevant(item: MarketItem, media_type: str) -> bool:
         marker in title for marker in _GAME_HARDWARE_MARKERS
     ):
         return False
+    if media_type == "cd" and _is_obvious_cd_logo_fashion_item(title):
+        # A fashion-brand ``CDロゴ`` describes a logo.  It must not inherit the
+        # generic ``cd`` disc marker even if a noisy source card also contains
+        # an identifier-looking string.
+        return False
     if _first_plausible_catalog_no(item.catalog_no) or _first_japanese_jan(item.jan):
         return True
     if media_type == "cd":
@@ -1047,6 +1072,14 @@ def _is_media_relevant(item: MarketItem, media_type: str) -> bool:
     if media_type == "physical_game":
         return any(marker in title for marker in _GAME_MEDIA_MARKERS)
     return bool(title.strip())
+
+
+def _is_obvious_cd_logo_fashion_item(title: str) -> bool:
+    """Recognize fashion-brand ``CDロゴ`` as a logo instead of a disc signal."""
+
+    return any(marker in title for marker in _CD_FASHION_LOGO_MARKERS) and any(
+        marker in title for marker in _CD_FASHION_CONTEXT_MARKERS
+    )
 
 
 def _is_obviously_incomplete_search_card(item: MarketItem, media_type: str) -> bool:
