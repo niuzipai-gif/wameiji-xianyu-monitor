@@ -533,7 +533,7 @@ def _build_handler(
                     {
                         "summary": discovery_summary(db_path),
                         "pools": _discovery_pool_views(db_path),
-                        "opportunities": list_discovery_opportunities(db_path, limit=100),
+                        "opportunities": _discovery_opportunity_views(db_path),
                     }
                 )
                 return
@@ -2578,6 +2578,18 @@ def _discovery_pool_views(db_path: str | Path) -> list[dict[str, object]]:
     return views
 
 
+def _discovery_opportunity_views(db_path: str | Path) -> list[dict[str, object]]:
+    """Make source-detail links usable from the separate GitHub Pages UI."""
+    views = list_discovery_opportunities(db_path, limit=100)
+    for view in views:
+        raw_url = str(view.get("url") or view.get("source_url") or "")
+        canonical_url = _canonical_wameiji_url("wameiji", raw_url)
+        if canonical_url:
+            view["url"] = canonical_url
+            view["source_url"] = canonical_url
+    return views
+
+
 
 
 
@@ -3071,6 +3083,10 @@ def _canonical_wameiji_url(source_site: str | None, url: str | None) -> str | No
     if raw.startswith("https://") and "meruki.cn" not in raw and "example.invalid" not in raw:
         return raw
     if raw.startswith("http://") and "meruki.cn" not in raw:
+        return raw
+    if s in ("wameiji", "meruki", "doorzo"):
+        if raw.startswith("/"):
+            return "https://meruki.cn" + raw
         return raw
     if s in ("mercari_jp", "mercari"):
         # relative "/item/mxxxxx" => jp.mercari.com

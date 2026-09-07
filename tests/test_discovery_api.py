@@ -5,6 +5,7 @@ import threading
 import urllib.error
 import urllib.request
 
+import cd_monitor.web_server as web_server
 from cd_monitor.storage.sqlite import init_db, list_discovery_pools
 from cd_monitor.web_server import create_server
 
@@ -86,3 +87,24 @@ def test_selection_board_and_remote_command_acknowledgement(tmp_path, monkeypatc
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_selection_board_prepares_an_absolute_wameiji_product_link(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        web_server,
+        "list_discovery_opportunities",
+        lambda _db_path, limit: [
+            {
+                "candidate_title": "商品详情页核验样本",
+                "source_url": "/mall/market/detail/232665692319133696",
+                "url": "/mall/market/detail/232665692319133696",
+            }
+        ],
+    )
+
+    views = web_server._discovery_opportunity_views(tmp_path)
+
+    assert views[0]["url"] == "https://meruki.cn/mall/market/detail/232665692319133696"
+    assert views[0]["source_url"] == views[0]["url"]
