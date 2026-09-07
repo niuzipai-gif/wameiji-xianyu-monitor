@@ -92,6 +92,70 @@ def test_init_db_invalidates_legacy_footer_based_reservations(tmp_path: Path) ->
     assert row == ("unknown_but_visible", "active", 0, None)
 
 
+def test_init_db_rechecks_legacy_title_only_candidates_once(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    title_only_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:legacy-title-only",
+            title="Artist Album CD",
+            source_item_id="legacy-title-only",
+            source_price=980,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+    exact_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:legacy-catalog",
+            catalog_no="SRCL-3520",
+            title="Artist Album CD",
+            source_item_id="legacy-catalog",
+            source_price=980,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE discovery_candidates SET last_xianyu_checked_at = '2026-09-07 00:00:00'"
+        )
+        conn.execute(
+            "UPDATE user_settings SET value = 'previous' "
+            "WHERE key = 'discovery_title_query_evidence_version'"
+        )
+
+    init_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, last_xianyu_checked_at FROM discovery_candidates ORDER BY id"
+        ).fetchall()
+    assert rows == [(title_only_id, None), (exact_id, "2026-09-07 00:00:00")]
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE discovery_candidates SET last_xianyu_checked_at = '2026-09-07 01:00:00' "
+            "WHERE id = ?",
+            (title_only_id,),
+        )
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT last_xianyu_checked_at FROM discovery_candidates WHERE id = ?",
+            (title_only_id,),
+        ).fetchone()[0] == "2026-09-07 01:00:00"
+
+
 def test_identity_key_prefers_source_listing_then_catalog_jan_then_title() -> None:
     assert build_identity_key(
         catalog_no=" SRCL-3520 ",

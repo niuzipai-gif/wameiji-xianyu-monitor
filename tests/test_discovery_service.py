@@ -522,7 +522,7 @@ def test_legacy_unverified_candidate_is_excluded_from_the_profit_board(tmp_path:
     assert list_discovery_opportunities(db_path) == []
 
 
-def test_title_only_candidate_is_saved_but_stays_out_of_default_profit_board(tmp_path: Path) -> None:
+def test_title_only_candidate_with_strict_samples_can_enter_profit_board(tmp_path: Path) -> None:
     db_path = tmp_path / "selection.db"
 
     async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
@@ -558,9 +558,54 @@ def test_title_only_candidate_is_saved_but_stays_out_of_default_profit_board(tmp
     )
 
     assert result.candidate_count == 1
-    assert list_discovery_opportunities(db_path) == []
+    feed = list_discovery_opportunities(db_path)
+    assert len(feed) == 1
+    assert feed[0]["match_confidence"] == 0.8
+    assert feed[0]["valid_xianyu_sample_count"] == 3
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT identity_key FROM discovery_candidates").fetchone()[0] == "source:title-only-1"
+
+
+def test_title_only_candidate_discards_unmatched_xianyu_samples(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title="Artist Album 初回限定盤 CD",
+                price=1200,
+                currency="JPY",
+                external_item_id="title-only-unmatched",
+                availability="available",
+            )
+        ]
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        return [
+            XianyuPriceSample(catalog_no=query, title="Other Album CD", price_cny=300),
+            XianyuPriceSample(catalog_no=query, title="Other Album CD", price_cny=320),
+            XianyuPriceSample(catalog_no=query, title="Other Album CD", price_cny=340),
+        ]
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=_verified_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT valid_xianyu_sample_count FROM opportunities"
+        ).fetchone()[0] == 0
+    assert list_discovery_opportunities(db_path) == []
 
 
 def test_cd_discovery_skips_non_disc_results_before_xianyu_lookup(tmp_path: Path) -> None:
@@ -851,7 +896,7 @@ def test_game_discovery_rejects_console_hardware_but_keeps_game_software(
     )
 
     assert result.candidate_count == result.evaluated_count == 1
-    assert xianyu_queries == ["薄桜鬼"]
+    assert xianyu_queries == ["薄桜鬼 Switch"]
 
 
 def test_discovery_stops_the_remaining_xianyu_lookups_after_a_security_check(

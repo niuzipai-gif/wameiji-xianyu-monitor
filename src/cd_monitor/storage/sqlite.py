@@ -13,6 +13,10 @@ from cd_monitor.core.models import MarketItem, Opportunity, WatchItem, XianyuPri
 from cd_monitor.storage.migrations import SCHEMA_SQL
 
 
+_TITLE_QUERY_EVIDENCE_VERSION_KEY = "discovery_title_query_evidence_version"
+_TITLE_QUERY_EVIDENCE_VERSION = "strict-title-sample-v1"
+
+
 
 def _migrate_watchlist_settings(conn: sqlite3.Connection) -> None:
     """Idempotently add task-settings columns to legacy watchlist tables.
@@ -80,6 +84,42 @@ def _migrate_user_settings(conn: sqlite3.Connection) -> None:
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
+    )
+
+
+def _migrate_title_only_xianyu_rechecks(conn: sqlite3.Connection) -> None:
+    """Retry legacy title-only candidates once after title-match hardening.
+
+    Earlier collector runs used a stricter/incorrect title matcher and then
+    persisted the lookup timestamp. Only detail-verified, still-active
+    candidates without a catalog/JAN are reset, so exact-identifier evidence
+    and ordinary scan cadence remain intact.
+    """
+
+    row = conn.execute(
+        "SELECT value FROM user_settings WHERE key = ?",
+        (_TITLE_QUERY_EVIDENCE_VERSION_KEY,),
+    ).fetchone()
+    if row is not None and str(row[0]) == _TITLE_QUERY_EVIDENCE_VERSION:
+        return
+    conn.execute(
+        """
+        UPDATE discovery_candidates
+        SET last_xianyu_checked_at = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE detail_verified = 1
+          AND status = 'active'
+          AND last_xianyu_checked_at IS NOT NULL
+          AND COALESCE(TRIM(catalog_no), '') = ''
+          AND COALESCE(TRIM(jan), '') = ''
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO user_settings (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+        """,
+        (_TITLE_QUERY_EVIDENCE_VERSION_KEY, _TITLE_QUERY_EVIDENCE_VERSION),
     )
 
 
@@ -562,6 +602,7 @@ def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
             _migrate_watchlist_filter_columns(conn)
             _migrate_market_items_cover_columns(conn)
             _migrate_discovery_selection_board(conn)
+            _migrate_title_only_xianyu_rechecks(conn)
     finally:
         conn.close()
 

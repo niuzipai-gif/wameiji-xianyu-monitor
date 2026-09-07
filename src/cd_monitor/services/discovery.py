@@ -11,12 +11,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from cd_monitor.core.cost_model import compute_landed_cost
-from cd_monitor.core.discovery import DiscoveryCandidate, build_identity_key
+from cd_monitor.core.discovery import DiscoveryCandidate, DiscoveryPool, build_identity_key
 from cd_monitor.core.evaluator import evaluate_opportunity
 from cd_monitor.core.identifiers import extract_catalog_candidates, extract_jan_candidates
 from cd_monitor.core.matcher import compute_match_confidence
 from cd_monitor.core.models import MarketItem, WatchItem, XianyuPriceSample
-from cd_monitor.core.title_query import clean_title_search_query
+from cd_monitor.core.title_query import clean_title_search_query, matches_title_search_query
 from cd_monitor.core.xianyu_cleaner import estimate_xianyu_price
 from cd_monitor.storage.sqlite import (
     get_discovery_pool,
@@ -77,6 +77,7 @@ _GAME_HARDWARE_MARKERS = (
 )
 _XIANYU_SECURITY_COOLDOWN_SECONDS = 30 * 60
 _NOT_PURCHASABLE_AVAILABILITY = {"sold_out", "unavailable", "reserved"}
+_STRICT_TITLE_SAMPLE_CONFIDENCE = 0.80
 
 
 @dataclass(slots=True)
@@ -273,8 +274,22 @@ async def scan_discovery_keyword(
             continue
 
         samples = [replace(sample, catalog_no=query) for sample in raw_samples]
+        rejected_title_samples: list[XianyuPriceSample] = []
+        if _is_title_only_candidate(candidate):
+            matched_samples = [
+                sample
+                for sample in samples
+                if matches_title_search_query(sample.title, query)
+            ]
+            matched_ids = {id(sample) for sample in matched_samples}
+            rejected_title_samples = [
+                replace(sample, is_valid=False, invalid_reason="title_mismatch")
+                for sample in samples
+                if id(sample) not in matched_ids
+            ]
+            samples = matched_samples
         item_id = insert_market_items(db_path, [item])[0]
-        insert_xianyu_samples(db_path, samples)
+        insert_xianyu_samples(db_path, [*samples, *rejected_title_samples])
         watch = _watch_for_candidate(candidate, query)
         match = compute_match_confidence(item, watch)
         estimate = estimate_xianyu_price(
@@ -284,6 +299,20 @@ async def scan_discovery_keyword(
             required_keywords=watch.required_keywords,
             excluded_keywords=watch.excluded_keywords,
         )
+        if _has_strict_title_sample_evidence(candidate, estimate.valid_samples, pool):
+            positive_reasons = [*match.positive_reasons, "strict_title_sample_match"]
+            match = replace(
+                match,
+                confidence=max(match.confidence, _STRICT_TITLE_SAMPLE_CONFIDENCE),
+                positive_reasons=positive_reasons,
+            )
+            estimate = estimate_xianyu_price(
+                samples,
+                edition_confidence=max(0.7, match.confidence),
+                edition=watch.edition,
+                required_keywords=watch.required_keywords,
+                excluded_keywords=watch.excluded_keywords,
+            )
         cost = compute_landed_cost(item, expected_holding_days=watch.expected_holding_days)
         opportunity = evaluate_opportunity(watch, item, match, estimate, cost)
         opportunity_id = insert_discovery_opportunity(
@@ -423,6 +452,25 @@ def _needs_xianyu_refresh(
 
 def _xianyu_query(candidate: DiscoveryCandidate) -> str | None:
     return candidate.catalog_no or candidate.jan or clean_title_search_query(candidate.title)
+
+
+def _is_title_only_candidate(candidate: DiscoveryCandidate) -> bool:
+    return not candidate.catalog_no and not candidate.jan
+
+
+def _has_strict_title_sample_evidence(
+    candidate: DiscoveryCandidate,
+    valid_samples: list[XianyuPriceSample],
+    pool: DiscoveryPool,
+) -> bool:
+    if not _is_title_only_candidate(candidate):
+        return False
+    minimum = max(2, int(pool.min_valid_xianyu_samples))
+    distinct_samples = {
+        sample.url or f"{sample.title.casefold()}|{sample.price_cny:.2f}"
+        for sample in valid_samples
+    }
+    return len(distinct_samples) >= minimum
 
 
 def _watch_for_candidate(candidate: DiscoveryCandidate, query: str) -> WatchItem:
