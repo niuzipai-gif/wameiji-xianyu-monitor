@@ -49,6 +49,30 @@ if (-not $ExistingXianyuState -and -not [Environment]::GetEnvironmentVariable("G
 [Environment]::SetEnvironmentVariable("PYTHONUNBUFFERED", "1", "Process")
 [Environment]::SetEnvironmentVariable("PYTHONPATH", (Join-Path $ProjectRoot "src"), "Process")
 
+# A browser worker with an anonymous Goofish state spends its source-detail
+# budget and can leave a misleading "no opportunity" impression. Check the
+# local storage-state before the background process starts; the login launcher
+# is the only supported way to restore it and no cookie values are printed.
+$XianyuStateFile = [Environment]::GetEnvironmentVariable("XIANYU_STATE_FILE", "Process")
+if (-not $XianyuStateFile) {
+    $XianyuStateFile = [Environment]::GetEnvironmentVariable("GOOFISH_STATE_FILE", "Process")
+}
+if ($XianyuStateFile -and -not [System.IO.Path]::IsPathRooted($XianyuStateFile)) {
+    $XianyuStateFile = Join-Path $ProjectRoot $XianyuStateFile
+}
+if ($XianyuStateFile) {
+    [Environment]::SetEnvironmentVariable("XIANYU_STATE_FILE", $XianyuStateFile, "Process")
+}
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogFile) | Out-Null
+$LoginStateStatus = "missing"
+if ($XianyuStateFile) {
+    $LoginStateStatus = & $Python -X utf8 -c "from cd_monitor.services.xianyu_login_state import inspect_xianyu_login_state; import sys; print(inspect_xianyu_login_state(sys.argv[1]).get('status', 'invalid'))" $XianyuStateFile
+}
+if ($LASTEXITCODE -ne 0 -or $LoginStateStatus -ne "ready") {
+    "$(Get-Date -Format s) discovery worker not started; Xianyu login state is $LoginStateStatus. Run 登录闲鱼.cmd, scan the QR code, then start the collector again." | Add-Content -LiteralPath $LogFile
+    exit 0
+}
+
 if (-not [System.IO.Path]::IsPathRooted($Database)) {
     $Database = Join-Path $ProjectRoot $Database
 }

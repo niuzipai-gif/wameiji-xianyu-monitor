@@ -123,7 +123,9 @@ $env:GOOFISH_STATE_FILE = "data/xianyu_state.json"
 
 状态检查只读取 `storage_state` 的结构和 cookie 域名，不会返回 cookie 值。有效文件会显示 `login_state_ready=true` / `state_file_status=ready`；实时采集命令仍会在遇到验证码、安全验证或登录失效时停止并要求用户处理。
 
-如果交接电脑没有浏览器插件，也不影响本项目。首次安装本地运行环境（只需做一次）并打开闲鱼/Goofish 可见登录页：
+如果交接电脑没有浏览器插件，也不影响本项目。最简单的首次登录方式是双击项目根目录的 `登录闲鱼.cmd`：它只会打开一个闲鱼扫码窗口，在成功登录后把登录态保存在这台采集电脑。未检测到有效登录态时，`启动采集电脑.cmd` 不会再启动浏览器采集工作器。
+
+也可用下列命令安装本地运行环境（只需做一次）并打开闲鱼/Goofish 可见登录页：
 
 ```powershell
 .\.venv\Scripts\python.exe -m ensurepip --upgrade       # 若提示 No module named pip
