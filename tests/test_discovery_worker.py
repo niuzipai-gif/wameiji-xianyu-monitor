@@ -145,6 +145,8 @@ def test_worker_uses_detail_fetcher_before_it_queries_xianyu(tmp_path: Path) -> 
     result = asyncio.run(worker.run_once())
 
     assert result.scan_count == 1
+    assert result.detail_query_count == 1
+    assert result.xianyu_query_count == 1
     assert calls == ["search", "detail", "xianyu:SRCL-3520"]
 
 

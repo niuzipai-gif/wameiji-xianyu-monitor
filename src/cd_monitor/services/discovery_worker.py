@@ -50,6 +50,8 @@ class WorkerRunResult:
     scan_count: int
     command_count: int
     human_required_count: int = 0
+    detail_query_count: int = 0
+    xianyu_query_count: int = 0
 
 
 class DiscoveryWorker:
@@ -126,6 +128,8 @@ class DiscoveryWorker:
             human_required_count=sum(
                 1 for result in scan_results if result.status == "human_required"
             ),
+            detail_query_count=sum(result.detail_query_count for result in scan_results),
+            xianyu_query_count=sum(result.xianyu_query_count for result in scan_results),
         )
 
     def _fetch_commands(self) -> list[dict[str, Any]]:
