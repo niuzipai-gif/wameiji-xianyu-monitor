@@ -2921,7 +2921,8 @@ def _opportunity_detail(db_path: Path, opportunity_id: int) -> dict[str, Any] | 
         market_items = conn.execute(
             """
             SELECT source, source_site, external_item_id, catalog_no, jan, title, price,
-              currency, price_cny_display, url, image_url, availability, condition_text,
+              currency, price_cny_display, japan_domestic_shipping_jpy, proxy_fee_jpy, fees_hint,
+              url, image_url, availability, condition_text,
               raw_text, fetched_at
             FROM market_items
             WHERE catalog_no = ? OR title LIKE ? OR raw_text LIKE ?

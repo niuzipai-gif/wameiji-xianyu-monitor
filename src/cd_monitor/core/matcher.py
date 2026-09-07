@@ -59,8 +59,34 @@ FATAL_KEYWORDS = {
 NEGATIVE_KEYWORDS = {
     "rental": ["レンタル", "レンタル落ち", "租赁"],
     "sample": ["見本", "サンプル", "sample"],
-    "poor_condition": ["盤傷", "ケース割れ", "破損"],
+    "poor_condition": [
+        "盤傷",
+        "ケース割れ",
+        "破損",
+        "整体状态不佳",
+        "状态不佳",
+        "品相不佳",
+    ],
 }
+_RENTAL_DENIAL_RE = re.compile(
+    r"(?:非\s*)?レンタル(?:アップ(?:品)?|落ち|品)?\s*"
+    r"(?:では|じゃ|で?は?)?\s*(?:あり)?(?:ません|ない|なし|無し)"
+)
+_CORE_MEDIA_TERM = r"(?:ゲーム(?:ソフト)?|ソフト|ディスク|cd|サントラ|サウンドトラック)"
+_CORE_MEDIA_MISSING_RE = re.compile(
+    rf"{_CORE_MEDIA_TERM}"
+    rf"(?:\s*(?:[+＋、,/・＆&]|と|及び|および)\s*{_CORE_MEDIA_TERM})*"
+    r"\s*(?:が|は)?\s*欠品"
+    r"(?!\s*(?:なし|無し|無|ではありません|ではない|ありません|ございません))",
+    re.IGNORECASE,
+)
+
+
+def _has_negative_keyword(reason: str, keywords: list[str], text_lower: str) -> bool:
+    """Treat an explicit rental denial as evidence of non-rental stock."""
+    if reason == "rental":
+        text_lower = _RENTAL_DENIAL_RE.sub(" ", text_lower)
+    return any(keyword.lower() in text_lower for keyword in keywords)
 
 
 def compute_match_confidence(item: MarketItem, watch_item: WatchItem) -> MatchResult:
@@ -185,8 +211,12 @@ def compute_match_confidence(item: MarketItem, watch_item: WatchItem) -> MatchRe
             fatal.append(flag)
             negatives.append(flag)
             confidence -= 0.60 if flag != "no_disc" else 0.70
+    if _CORE_MEDIA_MISSING_RE.search(text_lower):
+        fatal.append("core_media_missing")
+        negatives.append("core_media_missing")
+        confidence -= 0.70
     for reason, keywords in NEGATIVE_KEYWORDS.items():
-        if any(keyword.lower() in text_lower for keyword in keywords):
+        if _has_negative_keyword(reason, keywords, text_lower):
             negatives.append(reason)
             confidence -= 0.40 if reason == "rental" else 0.30 if reason == "sample" else 0.20
     for keyword in watch_item.excluded_keywords:

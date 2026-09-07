@@ -39,6 +39,7 @@ from cd_monitor.services.discovery_worker import (
 )
 from cd_monitor.services.xianyu_login_state import export_xianyu_login_state
 from cd_monitor.sources.mock import MockWameijiAdapter, MockXianyuAdapter
+from cd_monitor.sources.wikidata_aliases import WikidataTitleAliasResolver
 from cd_monitor.storage.sqlite import (
     add_watch,
     get_opportunity,
@@ -918,6 +919,7 @@ def main(argv: list[str] | None = None) -> int:
             fetch_wameiji=fetch_wameiji,
             fetch_wameiji_detail=fetch_wameiji_detail,
             fetch_xianyu=fetch_xianyu,
+            resolve_title_aliases=WikidataTitleAliasResolver().resolve,
             command_client=command_client_from_environment(),
         )
 

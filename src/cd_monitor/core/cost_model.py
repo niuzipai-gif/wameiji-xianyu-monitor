@@ -9,13 +9,23 @@ def compute_landed_cost(
     expected_holding_days: int = 30,
 ) -> CostBreakdown:
     config = config or CostConfig()
+    japan_domestic_shipping_jpy = (
+        item.japan_domestic_shipping_jpy
+        if item.japan_domestic_shipping_jpy is not None
+        else config.default_japan_domestic_shipping_jpy
+    )
+    proxy_fee_jpy = (
+        item.proxy_fee_jpy
+        if item.proxy_fee_jpy is not None
+        else config.default_proxy_fee_jpy
+    )
     if item.price_cny_display is not None:
         first_payment = item.price_cny_display
     else:
         first_payment = (
             item.price
-            + config.default_japan_domestic_shipping_jpy
-            + config.default_proxy_fee_jpy
+            + japan_domestic_shipping_jpy
+            + proxy_fee_jpy
             + config.add_on_fee_jpy
             + config.merge_fee_jpy
         ) * config.wameiji_exchange_rate

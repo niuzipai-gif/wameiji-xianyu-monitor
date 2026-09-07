@@ -6,9 +6,11 @@ from cd_monitor.storage.sqlite import (
     add_watch,
     disable_watch,
     init_db,
+    insert_market_items,
     insert_opportunity,
     insert_sent_alert,
     list_candidate_rechecks,
+    list_market_items,
     list_watch,
     schedule_candidate_recheck,
     update_candidate_recheck_status,
@@ -34,6 +36,29 @@ def test_alert_hash_deduplicates_but_price_change_changes_hash(tmp_path) -> None
     assert insert_sent_alert(db_path, 1, first, "dry-run", "sent", "{}") is True
     assert insert_sent_alert(db_path, 1, first, "dry-run", "sent", "{}") is False
     assert insert_sent_alert(db_path, 1, second, "dry-run", "sent", "{}") is True
+
+
+def test_market_item_round_trips_verified_detail_fees(tmp_path) -> None:
+    db_path = tmp_path / "detail-fees.db"
+    insert_market_items(
+        db_path,
+        [
+            MarketItem(
+                source="wameiji",
+                title="Verified detail",
+                price=800,
+                japan_domestic_shipping_jpy=550,
+                proxy_fee_jpy=50,
+                fees_hint="proxy_fee+japan_domestic_shipping",
+            )
+        ],
+    )
+
+    stored = list_market_items(db_path)
+
+    assert stored[0].japan_domestic_shipping_jpy == 550
+    assert stored[0].proxy_fee_jpy == 50
+    assert stored[0].fees_hint == "proxy_fee+japan_domestic_shipping"
 
 
 def test_update_and_disable_watch(tmp_path) -> None:

@@ -255,6 +255,129 @@ def test_parse_detail_html_recognizes_paypay_primary_container() -> None:
     assert status.items[0].availability == "available"
 
 
+def test_parse_detail_html_ignores_security_words_inside_listing_content() -> None:
+    """A seller description may mention a verification code without being a challenge page."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card",
+        price=500,
+        currency="JPY",
+        external_item_id="soft-security-text",
+        url="/mall/paypay/detail/soft-security-text",
+    )
+    detail_html = """
+    <html><head><title>挖煤姬 - 专业日淘代购代拍服务</title></head><body>
+      <div class="paypay"><div class="paypay-page"><div class="main">
+        <div class="goods"><div class="name-box"><h1 class="name">Hololive 限定原声带 CD</h1></div></div>
+        <div class="price-box price-box-total"><p class="price-com">1,111 日元</p></div>
+        <div class="operation"><button class="buy-now">立即购买</button></div>
+        <p class="seller-description">旧手机验证码登录后可联系卖家</p>
+        <p class="related-title">Card Staff of Divine Punishment</p>
+      </div></div></div>
+    </body></html>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert status.items[0].detail_verified is True
+    assert status.items[0].title == "Hololive 限定原声带 CD"
+
+
+def test_parse_detail_html_marks_a_deleted_listing_sold_out_without_using_related_cards() -> None:
+    """A deleted detail URL renders recommendations, not a purchasable product."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="Hololive Hanafuda bonus soundtrack CD",
+        price=1111,
+        currency="JPY",
+        external_item_id="deleted-hololive",
+        url="/mall/paypay/detail/deleted-hololive",
+        availability="unknown_but_visible",
+    )
+    detail_html = """
+    <div class="paypay">
+      <div class="common-guide-header"><div class="common-null">
+        <p class="nonsupport-text">商品删除</p>
+      </div></div>
+      <div class="common-guide-widget"><div class="popular">
+        <h1 class="name">Unrelated recommendation CD</h1>
+        <p class="price-com">300 日元</p>
+      </div></div>
+    </div>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert len(status.items) == 1
+    item = status.items[0]
+    assert item.title == search_item.title
+    assert item.price == search_item.price
+    assert item.availability == "sold_out"
+    assert item.detail_verified is True
+
+
+def test_parse_detail_html_recognizes_street_detail_primary_container() -> None:
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card",
+        price=800,
+        currency="JPY",
+        external_item_id="street-detail",
+        url="/mall/market/detail/street-detail",
+    )
+    detail_html = """
+    <div class="street-detail"><div class="body"><div class="info"><div class="goods">
+      <div class="name-box"><h1 class="name">DIABOLIK LOVERS LUNATIC PARADE 限定版</h1></div>
+      <div class="tag-box">二手 整体状态不佳</div>
+      <div class="price-box price-box-total"><p class="price-com">550 <span>日元</span></p></div>
+      <div class="sku-item"><span class="item-name">日本国内运费</span><span class="propertie">550日元</span></div>
+      <div class="sku-item"><span class="item-name">代购手续费</span><span class="propertie">50日元</span></div>
+      <div class="operation"><button class="cart">加入购物车</button><button class="buy-now">立即购买</button></div>
+    </div></div></div></div>
+    <footer>All Rights Reserved</footer>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert status.items[0].detail_verified is True
+    assert status.items[0].price == 550
+    assert status.items[0].availability == "available"
+    assert status.items[0].condition_text == "整体状态不佳"
+    assert status.items[0].japan_domestic_shipping_jpy == 550
+    assert status.items[0].proxy_fee_jpy == 50
+
+
+def test_parse_detail_html_keeps_seller_borne_domestic_shipping_at_zero() -> None:
+    """A later proxy-fee amount must not be mistaken for domestic shipping."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="AQUARIUM limited edition",
+        price=4899,
+        currency="JPY",
+        external_item_id="seller-bears-shipping",
+        url="/mall/mercari/detail/seller-bears-shipping",
+    )
+    detail_html = """
+    <div class="street-detail"><div class="body"><div class="info"><div class="goods">
+      <div class="name-box"><h1 class="name">あくありうむ。 完全生産限定版 Switch ソフト</h1></div>
+      <div class="tag-box">二手 接近未使用</div>
+      <div class="price-box price-box-total"><p class="price-com">4,899 <span>日元</span></p></div>
+      <div class="sku-item"><span class="item-name">日本国内运费</span><span class="propertie">卖家承担</span></div>
+      <div class="sku-item"><span class="item-name">代购手续费</span><span class="propertie">200日元</span></div>
+      <div class="operation"><button class="cart">加入购物车</button><button class="buy-now">立即购买</button></div>
+    </div></div></div></div>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert status.items[0].japan_domestic_shipping_jpy == 0
+    assert status.items[0].proxy_fee_jpy == 200
+
+
 def test_parse_detail_html_does_not_copy_catalog_from_the_search_card() -> None:
     search_item = MarketItem(
         source="wameiji",

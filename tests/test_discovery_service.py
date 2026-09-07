@@ -7,6 +7,7 @@ from pathlib import Path
 
 from cd_monitor.core.models import MarketItem, XianyuPriceSample
 from cd_monitor.services.discovery import scan_discovery_keyword
+from cd_monitor.sources.wikidata_aliases import ResolvedTitleAlias
 from cd_monitor.storage.sqlite import (
     discovery_summary,
     get_discovery_source_cooldown,
@@ -204,6 +205,107 @@ def test_detail_fetches_are_bounded_by_the_candidate_budget(tmp_path: Path) -> N
 
     assert detail_urls == ["/mall/mercari/detail/listing-0"]
     assert result.xianyu_query_count == result.evaluated_count == 1
+
+
+def test_detail_budget_skips_a_search_card_that_explicitly_lacks_the_game(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "selection.db"
+    detail_ids: list[str] = []
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title="PS Vita 相州戦神館學園 八命陣 天之刻 初回限定版 ソフトなし",
+                price=1280,
+                currency="JPY",
+                external_item_id="missing-game-card",
+                availability="available",
+            ),
+            MarketItem(
+                source="wameiji",
+                title="Switch Macross Shooting Insight 限定版",
+                price=3300,
+                currency="JPY",
+                external_item_id="complete-game-card",
+                availability="available",
+            ),
+        ]
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        detail_ids.append(str(item.external_item_id))
+        return replace(item, detail_verified=True)
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        return []
+
+    pool_id = list_discovery_pools(db_path)[1].id
+    assert pool_id is not None
+    update_discovery_pool(db_path, pool_id, {"candidate_budget": 1})
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="Switch 限定版",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert result.detail_query_count == 1
+    assert detail_ids == ["complete-game-card"]
+
+
+def test_detail_budget_prioritizes_the_cheapest_complete_limited_game(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "selection.db"
+    detail_ids: list[str] = []
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title="Switch Macross Shooting Insight 限定版",
+                price=4000,
+                currency="JPY",
+                external_item_id="higher-price",
+                availability="available",
+            ),
+            MarketItem(
+                source="wameiji",
+                title="Switch Macross Shooting Insight 限定版",
+                price=3300,
+                currency="JPY",
+                external_item_id="lower-price",
+                availability="available",
+            ),
+        ]
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        detail_ids.append(str(item.external_item_id))
+        return replace(item, detail_verified=True)
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        return []
+
+    pool_id = list_discovery_pools(db_path)[1].id
+    assert pool_id is not None
+    update_discovery_pool(db_path, pool_id, {"candidate_budget": 1})
+    asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="Switch 限定版",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert detail_ids == ["lower-price"]
 
 
 def test_sold_detail_page_is_saved_but_never_sent_to_xianyu(tmp_path: Path) -> None:
@@ -541,7 +643,6 @@ def test_title_only_candidate_with_strict_samples_can_enter_profit_board(tmp_pat
         return [
             XianyuPriceSample(catalog_no=query, title="Artist Album 初回限定盤", price_cny=300),
             XianyuPriceSample(catalog_no=query, title="Artist Album 初回限定盤", price_cny=320),
-            XianyuPriceSample(catalog_no=query, title="Artist Album 初回限定盤", price_cny=340),
         ]
 
     pool_id = list_discovery_pools(db_path)[0].id
@@ -561,7 +662,7 @@ def test_title_only_candidate_with_strict_samples_can_enter_profit_board(tmp_pat
     feed = list_discovery_opportunities(db_path)
     assert len(feed) == 1
     assert feed[0]["match_confidence"] == 0.8
-    assert feed[0]["valid_xianyu_sample_count"] == 3
+    assert feed[0]["valid_xianyu_sample_count"] == 2
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT identity_key FROM discovery_candidates").fetchone()[0] == "source:title-only-1"
 
@@ -897,6 +998,336 @@ def test_game_discovery_rejects_console_hardware_but_keeps_game_software(
 
     assert result.candidate_count == result.evaluated_count == 1
     assert xianyu_queries == ["薄桜鬼 Switch"]
+
+
+def test_game_discovery_skips_xianyu_when_detail_is_missing_the_core_media(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "selection.db"
+    xianyu_queries: list[str] = []
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title="Nintendo Switch レイディアント シルバーガン COLLECTOR'S BOX",
+                price=1799,
+                currency="JPY",
+                external_item_id="incomplete-collector-box",
+                availability="available",
+            )
+        ]
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        return replace(
+            item,
+            detail_verified=True,
+            raw_text="※ソフト+サントラ欠品です。",
+        )
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        xianyu_queries.append(query)
+        return []
+
+    pool_id = list_discovery_pools(db_path)[1].id
+    assert pool_id is not None
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="Switch 限定版",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert result.detail_query_count == 1
+    assert result.xianyu_query_count == result.evaluated_count == 0
+    assert xianyu_queries == []
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT status FROM discovery_candidates WHERE source_item_id = ?",
+            ("incomplete-collector-box",),
+        ).fetchone()[0] == "ignored"
+
+
+def test_title_only_discovery_retries_with_an_exact_public_title_alias(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    xianyu_queries: list[str] = []
+
+    source = MarketItem(
+        source="wameiji",
+        title="【一部未使用】あくありうむ。 完全生産限定版 Switch ソフト",
+        price=4899,
+        currency="JPY",
+        external_item_id="aquarium-alias",
+        availability="available",
+    )
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [source]
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        xianyu_queries.append(query)
+        if query == "あくありうむ Switch":
+            return []
+        assert query == "Aquarium Switch 完全生产限定版"
+        return [
+            XianyuPriceSample(
+                catalog_no=query,
+                title="凑阿库娅 AQUARIUM 完全生产限定版 Switch 游戏卡带",
+                price_cny=400,
+                url="https://www.goofish.com/item?id=400",
+            ),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="凑阿库娅 AQUARIUM 完全生产限定版 Switch 游戏卡带",
+                price_cny=450,
+                url="https://www.goofish.com/item?id=450",
+            ),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="凑阿库娅 AQUARIUM 完全生产限定版 Switch 游戏卡带",
+                price_cny=500,
+                url="https://www.goofish.com/item?id=500",
+            ),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="AQUARIUM 完全生产限定版 Switch 日本代购",
+                price_cny=456,
+                url="https://www.goofish.com/item?id=456",
+            ),
+        ]
+
+    async def resolve_aliases(_candidate):
+        return [
+            ResolvedTitleAlias(
+                value="Aquarium",
+                source="wikidata",
+                source_url="https://www.wikidata.org/wiki/Q114964778",
+                entity_id="Q114964778",
+            )
+        ]
+
+    pool_id = list_discovery_pools(db_path)[1].id
+    assert pool_id is not None
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="Switch 限定版",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=_verified_detail,
+            fetch_xianyu=fetch_xianyu,
+            resolve_title_aliases=resolve_aliases,
+        )
+    )
+
+    assert result.xianyu_query_count == 2
+    assert result.evaluated_count == 1
+    assert xianyu_queries == ["あくありうむ Switch", "Aquarium Switch 完全生产限定版"]
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT query, source_url FROM discovery_title_alias_evidence"
+        ).fetchone() == (
+            "Aquarium Switch 完全生产限定版",
+            "https://www.wikidata.org/wiki/Q114964778",
+        )
+        assert conn.execute(
+            "SELECT valid_xianyu_sample_count FROM opportunities"
+        ).fetchone()[0] == 3
+        assert conn.execute(
+            "SELECT is_valid, invalid_reason FROM xianyu_price_samples WHERE price_cny = 456"
+        ).fetchone() == (0, "invalid_proxy_listing")
+
+
+def test_title_only_limited_source_excludes_normal_edition_resale_cards(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "selection.db"
+    source = MarketItem(
+        source="wameiji",
+        title="Switch Macross Shooting Insight 限定版",
+        price=4000,
+        currency="JPY",
+        external_item_id="macross-limited-edition",
+        availability="available",
+    )
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [source]
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        assert query == "Switch Macross Shooting Insight"
+        return [
+            XianyuPriceSample(
+                catalog_no=query,
+                title="Switch Macross Shooting Insight 普通版 游戏卡带",
+                price_cny=95,
+                url="https://www.goofish.com/item?id=normal",
+            ),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="Switch Macross Shooting Insight 日版限定版 游戏卡带",
+                price_cny=265,
+                url="https://www.goofish.com/item?id=limited-265",
+            ),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="Switch Macross Shooting Insight 日版限定版 游戏卡带",
+                price_cny=418,
+                url="https://www.goofish.com/item?id=limited-418",
+            ),
+        ]
+
+    pool_id = list_discovery_pools(db_path)[1].id
+    assert pool_id is not None
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="Switch 限定版",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=_verified_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert result.evaluated_count == 1
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT valid_xianyu_sample_count FROM opportunities"
+        ).fetchone()[0] == 2
+        assert conn.execute(
+            "SELECT is_valid, invalid_reason FROM xianyu_price_samples WHERE price_cny = 95"
+        ).fetchone() == (0, "title_mismatch")
+
+
+def test_detail_verified_new_source_excludes_explicitly_used_resale_cards(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "selection.db"
+    source = MarketItem(
+        source="wameiji",
+        title="Switch Macross Shooting Insight 限定版",
+        price=3300,
+        currency="JPY",
+        external_item_id="new-macross-limited",
+        availability="available",
+        raw_text=(
+            "Switch Macross Shooting Insight 限定版 新品 价格 3300 日元 "
+            "中古精选站点活动"
+        ),
+    )
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [source]
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        assert query == "Switch Macross Shooting Insight"
+        return [
+            XianyuPriceSample(
+                catalog_no=query,
+                title="Switch Macross Shooting Insight 限定版 日版二手",
+                price_cny=245,
+                url="https://www.goofish.com/item?id=used",
+            ),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="Switch Macross Shooting Insight 限定版 全新未拆封",
+                price_cny=340,
+                url="https://www.goofish.com/item?id=new-340",
+            ),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="Switch Macross Shooting Insight 限定版 全新未拆封",
+                price_cny=418,
+                url="https://www.goofish.com/item?id=new-418",
+            ),
+        ]
+
+    pool_id = list_discovery_pools(db_path)[1].id
+    assert pool_id is not None
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="Switch 限定版",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=_verified_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert result.evaluated_count == 1
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT valid_xianyu_sample_count FROM opportunities"
+        ).fetchone()[0] == 2
+        assert conn.execute(
+            "SELECT is_valid, invalid_reason FROM xianyu_price_samples WHERE price_cny = 245"
+        ).fetchone() == (0, "invalid_condition_mismatch")
+
+
+def test_catalog_lookup_falls_back_to_a_matched_title_when_xianyu_omits_the_code(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "selection.db"
+    xianyu_queries: list[str] = []
+    source = MarketItem(
+        source="wameiji",
+        title="Horizon Zero Dawn 初回限定版 PS4",
+        price=297,
+        currency="JPY",
+        catalog_no="PCJS-73501",
+        external_item_id="catalog-title-fallback",
+        availability="available",
+    )
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [source]
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        xianyu_queries.append(query)
+        if query == "PCJS-73501":
+            return []
+        assert query == "Horizon Zero Dawn PS4"
+        return [
+            XianyuPriceSample(
+                catalog_no=query,
+                title="Horizon Zero Dawn PS4 限定版 游戏光盘",
+                price_cny=120,
+                url="https://www.goofish.com/item?id=120",
+            ),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="Horizon Zero Dawn PS4 初回限定版",
+                price_cny=140,
+                url="https://www.goofish.com/item?id=140",
+            ),
+        ]
+
+    pool_id = list_discovery_pools(db_path)[1].id
+    assert pool_id is not None
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="PS4 限定版",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=_verified_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert result.xianyu_query_count == 2
+    assert result.evaluated_count == 1
+    assert xianyu_queries == ["PCJS-73501", "Horizon Zero Dawn PS4"]
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT valid_xianyu_sample_count FROM opportunities"
+        ).fetchone()[0] == 2
 
 
 def test_discovery_stops_the_remaining_xianyu_lookups_after_a_security_check(

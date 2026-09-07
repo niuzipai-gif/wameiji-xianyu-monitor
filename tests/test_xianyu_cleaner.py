@@ -25,6 +25,61 @@ def test_filters_extreme_and_noise_samples() -> None:
     }
 
 
+def test_keeps_listing_that_says_tracks_are_included_or_collectible() -> None:
+    cleaned = clean_xianyu_samples(
+        [sample("Xenoblade 原声CD，收录12首曲目，适合收藏", 160)]
+    )
+
+    assert cleaned[0].is_valid
+    assert cleaned[0].invalid_reason is None
+
+
+def test_filters_crossborder_proxy_listing_out_of_resale_reference() -> None:
+    cleaned = clean_xianyu_samples(
+        [
+            sample(
+                "PS Vita 领结×恶意 -无限版- VLJM-38101 日本代购 ",
+                118,
+            )
+        ]
+    )
+
+    assert not cleaned[0].is_valid
+    assert cleaned[0].invalid_reason == "invalid_proxy_listing"
+
+
+def test_game_bundle_keeps_accessories_but_rejects_a_single_bonus_item() -> None:
+    cleaned = clean_xianyu_samples(
+        [
+            sample(
+                "AQUARIUM 完全生产限定版 Switch 游戏卡带 特典CD 立牌 挂件 "
+                "售出不退不换",
+                450,
+            ),
+            sample("AQUARIUM 特典单出 立牌", 80),
+        ],
+        allow_complete_game_bundles=True,
+    )
+
+    assert cleaned[0].is_valid is True
+    assert cleaned[1].is_valid is False
+    assert cleaned[1].invalid_reason == "invalid_noise"
+
+
+def test_new_source_reference_excludes_explicitly_used_resale_cards() -> None:
+    cleaned = clean_xianyu_samples(
+        [
+            sample("Switch Macross Shooting Insight 限定版 日版二手", 245),
+            sample("Switch Macross Shooting Insight 限定版 全新未拆封", 340),
+        ],
+        require_new_condition=True,
+    )
+
+    assert cleaned[0].is_valid is False
+    assert cleaned[0].invalid_reason == "invalid_condition_mismatch"
+    assert cleaned[1].is_valid is True
+
+
 def test_reference_price_uses_trimmed_mean_for_six_or_more() -> None:
     estimate = estimate_xianyu_price([sample("SRCL-3520", p) for p in [50, 80, 90, 100, 110, 300]])
     assert estimate.valid_sample_count == 6
@@ -42,6 +97,16 @@ def test_reference_price_marks_poor_under_three() -> None:
     estimate = estimate_xianyu_price([sample("SRCL-3520", 100), sample("SRCL-3520", 120)])
     assert estimate.reference_price_cny == 0
     assert estimate.liquidity_status == "poor"
+
+
+def test_reference_price_uses_configured_two_sample_threshold() -> None:
+    estimate = estimate_xianyu_price(
+        [sample("SRCL-3520", 100), sample("SRCL-3520", 120)],
+        min_reference_samples=2,
+    )
+
+    assert estimate.reference_price_cny == 110
+    assert estimate.liquidity_status == "thin"
 
 
 def test_filters_xianyu_samples_by_expected_edition() -> None:

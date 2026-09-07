@@ -474,29 +474,39 @@ def _is_xianyu_auth_domain(domain: str) -> bool:
     return any(token in lowered for token in _XIANYU_AUTH_DOMAINS)
 
 
+_HARD_SECURITY_MARKERS = (
+    "captcha",
+    "cloudflare",
+    "rgv587_error",
+    "fail_sys_user_validate",
+    "____tmd____",
+    "x5step",
+)
+_TITLE_SECURITY_MARKERS = (
+    "安全验证",
+    "驗證",
+    "登录失效",
+    "請完成",
+    "请完成",
+    "滑块",
+    "風控",
+    "风控",
+    "验证失败",
+    "需要登录",
+    "请登录",
+)
+_HTML_TITLE_RE = re.compile(r"<title\b[^>]*>(.*?)</title\s*>", re.IGNORECASE | re.DOTALL)
+
+
 def _requires_human(html: str) -> bool:
     lowered = html.lower()
-    return any(
-        token in lowered
-        for token in [
-            "captcha",
-            "安全验证",
-            "驗證",
-            "登录失效",
-            "請完成",
-            "请完成",
-            "cloudflare",
-            "rgv587_error",
-            "fail_sys_user_validate",
-            "punish",
-            "____tmd____",
-            "x5step",
-            "滑块",
-            "验证码",
-            "風控",
-            "风控",
-            "验证失败",
-            "需要登录",
-            "请登录",
-        ]
-    )
+    if any(token in lowered for token in _HARD_SECURITY_MARKERS):
+        return True
+    # Result cards contain full seller descriptions. Generic phrases such as
+    # “验证码” or “风控” are ordinary listing text, so only accept the softer
+    # signals when the document itself identifies as a challenge page.
+    title_match = _HTML_TITLE_RE.search(html)
+    if title_match is None:
+        return False
+    title = re.sub(r"<[^>]+>", " ", title_match.group(1)).casefold()
+    return any(token in title for token in _TITLE_SECURITY_MARKERS)

@@ -103,6 +103,10 @@ class MarketItem:
     # Search cards are discovery hints only.  Automatic comparison is allowed
     # only after the item was read from its own Wameiji detail page.
     detail_verified: bool = False
+    # Detail-page fees are optional because search cards generally omit them.
+    # When present, the landed-cost model must use them instead of defaults.
+    japan_domestic_shipping_jpy: float | None = None
+    proxy_fee_jpy: float | None = None
 
 
 @dataclass(slots=True)

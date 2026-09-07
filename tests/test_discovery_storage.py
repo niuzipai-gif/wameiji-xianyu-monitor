@@ -13,6 +13,7 @@ from cd_monitor.storage.sqlite import (
     list_discovery_opportunities,
     list_discovery_pools,
     mark_discovery_keyword_scanned,
+    record_discovery_title_alias_evidence,
     replace_discovery_keywords,
     update_discovery_pool,
     update_discovery_pool_last_scan,
@@ -187,6 +188,53 @@ def test_identity_key_prefers_source_listing_then_catalog_jan_then_title() -> No
     assert len(title_key) == len("title:") + 24
 
 
+def test_init_db_ignores_legacy_catalog_candidate_when_the_same_source_listing_exists(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    legacy_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="catalog:TKCA72506",
+            catalog_no="TKCA-72506",
+            title="Legacy Song File",
+            source_item_id="same-listing",
+            source_price=890,
+            source_currency="JPY",
+            availability="unknown_but_visible",
+            detail_verified=False,
+        ),
+    )
+    canonical_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:same-listing",
+            catalog_no="TKCA-72506",
+            title="Verified Song File",
+            source_item_id="same-listing",
+            source_price=890,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+
+    init_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, status FROM discovery_candidates WHERE id IN (?, ?) ORDER BY id",
+            (legacy_id, canonical_id),
+        ).fetchall()
+    assert rows == [(legacy_id, "ignored"), (canonical_id, "active")]
+
+
 def test_candidate_upsert_keeps_identity_and_refreshes_market_observation(tmp_path: Path) -> None:
     db_path = tmp_path / "selection.db"
     init_db(db_path)
@@ -217,6 +265,51 @@ def test_candidate_upsert_keeps_identity_and_refreshes_market_observation(tmp_pa
             (first_id,),
         ).fetchone()
     assert row == (980, "likely_available", 2, "active")
+
+
+def test_title_alias_evidence_is_persisted_with_its_public_source(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[1]
+    candidate_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="physical_game",
+            identity_key="source:alias-proof",
+            title="あくありうむ。 完全生産限定版 Switch",
+            source_item_id="alias-proof",
+            source_price=4899,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+
+    record_discovery_title_alias_evidence(
+        db_path,
+        candidate_id=candidate_id,
+        source_title="あくありうむ。 完全生産限定版 Switch",
+        alias="Aquarium",
+        query="Aquarium Switch 完全生产限定版",
+        resolver="wikidata",
+        source_url="https://www.wikidata.org/wiki/Q114964778",
+        entity_id="Q114964778",
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT source_title, alias, query, resolver, source_url, entity_id "
+            "FROM discovery_title_alias_evidence"
+        ).fetchone()
+    assert row == (
+        "あくありうむ。 完全生産限定版 Switch",
+        "Aquarium",
+        "Aquarium Switch 完全生产限定版",
+        "wikidata",
+        "https://www.wikidata.org/wiki/Q114964778",
+        "Q114964778",
+    )
 
 
 def test_batch_candidate_upsert_preserves_previous_values_in_input_order(tmp_path: Path) -> None:
@@ -439,3 +532,89 @@ def test_selection_board_orders_linked_opportunities_by_profit_descending(tmp_pa
     assert all(item["media_type"] == "cd" for item in feed)
     assert feed[0]["purchase_price_jpy"] == 1200.0
     assert feed[0]["xianyu_price_cny"] == 200.0
+
+
+def test_selection_board_retires_a_previous_evaluation_for_the_same_candidate(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    candidate_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:rechecked",
+            title="Rechecked Album",
+            source_item_id="rechecked",
+            source_price=1000,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+    item = MarketItem(
+        source="wameiji",
+        title="Rechecked Album",
+        price=1000,
+        currency="JPY",
+        external_item_id="rechecked",
+        availability="available",
+    )
+    item_id = insert_market_items(db_path, [item])[0]
+
+    positive_id = insert_discovery_opportunity(
+        db_path,
+        Opportunity(
+            catalog_no="rechecked",
+            item=item,
+            xianyu_reference_price=300,
+            expected_sale_price=250,
+            landed_cost=70,
+            expected_revenue=170,
+            expected_profit=100,
+            net_margin=1.0,
+            turnover_adjusted_roi=1.0,
+            match_confidence=0.9,
+            valid_xianyu_sample_count=3,
+            liquidity_status="normal",
+            decision="strong_alert",
+            opportunity_hash="rechecked-positive",
+        ),
+        wameiji_item_id=item_id,
+        discovery_candidate_id=candidate_id,
+        media_type="cd",
+        identity_key="source:rechecked",
+    )
+    rejected_id = insert_discovery_opportunity(
+        db_path,
+        Opportunity(
+            catalog_no="rechecked",
+            item=item,
+            xianyu_reference_price=0,
+            expected_sale_price=0,
+            landed_cost=70,
+            expected_revenue=0,
+            expected_profit=-70,
+            net_margin=-1.0,
+            turnover_adjusted_roi=-1.0,
+            match_confidence=0.7,
+            valid_xianyu_sample_count=0,
+            liquidity_status="poor",
+            decision="reject",
+            opportunity_hash="rechecked-reject",
+        ),
+        wameiji_item_id=item_id,
+        discovery_candidate_id=candidate_id,
+        media_type="cd",
+        identity_key="source:rechecked",
+    )
+
+    assert list_discovery_opportunities(db_path) == []
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, status FROM opportunities WHERE id IN (?, ?) ORDER BY id",
+            (positive_id, rejected_id),
+        ).fetchall()
+    assert rows == [(positive_id, "expired"), (rejected_id, "active")]

@@ -15,6 +15,27 @@ def test_jpy_exchange_calculation_when_no_page_cny() -> None:
     assert cost.first_payment_cny == 60
 
 
+def test_detail_fee_amounts_override_cost_defaults() -> None:
+    item = MarketItem(
+        source="wameiji",
+        title="Verified detail",
+        price=800,
+        japan_domestic_shipping_jpy=550,
+        proxy_fee_jpy=50,
+    )
+
+    cost = compute_landed_cost(
+        item,
+        CostConfig(
+            wameiji_exchange_rate=0.05,
+            default_japan_domestic_shipping_jpy=0,
+            default_proxy_fee_jpy=200,
+        ),
+    )
+
+    assert cost.first_payment_cny == 70
+
+
 def test_risk_reserve_minimum_and_capital_cost() -> None:
     item = MarketItem(source="wameiji", title="SRCL-3520", price=100)
     cost = compute_landed_cost(item, CostConfig(risk_reserve_min_cny=8, annual_capital_rate=0.08))

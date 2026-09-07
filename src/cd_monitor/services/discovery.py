@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
+from math import isfinite
 from pathlib import Path
 
 from cd_monitor.core.cost_model import compute_landed_cost
@@ -16,8 +17,14 @@ from cd_monitor.core.evaluator import evaluate_opportunity
 from cd_monitor.core.identifiers import extract_catalog_candidates, extract_jan_candidates
 from cd_monitor.core.matcher import compute_match_confidence
 from cd_monitor.core.models import MarketItem, WatchItem, XianyuPriceSample
-from cd_monitor.core.title_query import clean_title_search_query, matches_title_search_query
+from cd_monitor.core.title_query import (
+    build_alias_search_query,
+    clean_title_search_query,
+    matches_title_search_query,
+    source_edition_required_terms,
+)
 from cd_monitor.core.xianyu_cleaner import estimate_xianyu_price
+from cd_monitor.sources.wikidata_aliases import ResolvedTitleAlias
 from cd_monitor.storage.sqlite import (
     get_discovery_pool,
     get_discovery_source_cooldown,
@@ -26,6 +33,7 @@ from cd_monitor.storage.sqlite import (
     insert_xianyu_samples,
     mark_discovery_candidate_xianyu_checked,
     record_discovery_run,
+    record_discovery_title_alias_evidence,
     set_discovery_source_cooldown,
     update_discovery_pool_last_scan,
     upsert_discovery_candidates_with_previous,
@@ -34,6 +42,7 @@ from cd_monitor.storage.sqlite import (
 FetchWameiji = Callable[[str], Awaitable[list[MarketItem]]]
 FetchWameijiDetail = Callable[[MarketItem], Awaitable[MarketItem | None]]
 FetchXianyu = Callable[[str], Awaitable[list[XianyuPriceSample]]]
+ResolveTitleAliases = Callable[[DiscoveryCandidate], Awaitable[list[ResolvedTitleAlias]]]
 
 
 _CD_HARD_MEDIA_MARKERS = (
@@ -75,6 +84,46 @@ _GAME_HARDWARE_MARKERS = (
     "保護フィルム",
     "ケースのみ",
 )
+_INCOMPLETE_GAME_SEARCH_CARD_MARKERS = (
+    "ソフトなし",
+    "ゲームなし",
+    "カセットなし",
+    "ディスクなし",
+    "本なし",
+    "ケースのみ",
+    "外箱のみ",
+    "パッケージのみ",
+    "特典のみ",
+    "特典単品",
+    "特典だけ",
+    "予約特典のみ",
+    "コードのみ",
+    "ダウンロードコードのみ",
+)
+_INCOMPLETE_CD_SEARCH_CARD_MARKERS = (
+    "盤なし",
+    "ディスクなし",
+    "cdなし",
+    "cd無し",
+    "ケースのみ",
+    "外箱のみ",
+    "パッケージのみ",
+    "特典のみ",
+    "特典単品",
+    "特典だけ",
+)
+_SPECIAL_EDITION_MARKERS = (
+    "完全生産限定",
+    "完全生产限定",
+    "初回限定",
+    "限定版",
+    "限定盤",
+    "collector",
+    "collectors",
+    "limited edition",
+)
+_CONDITION_PRIORITY_MARKERS = ("新品", "未開封", "未使用", "帯付き")
+_RARITY_PRIORITY_MARKERS = ("廃盤", "レア", "サウンドトラック", "サントラ", "ost")
 _XIANYU_SECURITY_COOLDOWN_SECONDS = 30 * 60
 _NOT_PURCHASABLE_AVAILABILITY = {"sold_out", "unavailable", "reserved"}
 _STRICT_TITLE_SAMPLE_CONFIDENCE = 0.80
@@ -108,6 +157,7 @@ async def scan_discovery_keyword(
     fetch_wameiji: FetchWameiji,
     fetch_wameiji_detail: FetchWameijiDetail,
     fetch_xianyu: FetchXianyu,
+    resolve_title_aliases: ResolveTitleAliases | None = None,
 ) -> DiscoveryScanResult:
     """Discover a bounded set of purchase listings for one pool keyword.
 
@@ -180,12 +230,26 @@ async def scan_discovery_keyword(
             break
         if not _is_media_relevant(item, pool.media_type):
             continue
+        if _is_obviously_incomplete_search_card(item, pool.media_type):
+            # A source result card can already say that it contains only a
+            # box, booklet, bonus, or other non-core component.  It cannot
+            # become a purchase candidate, so do not spend a scarce detail
+            # browser read merely to learn the same thing again.
+            continue
         candidate = _candidate_from_market_item(pool_id, pool.media_type, item)
         if candidate.identity_key in seen_identity_keys:
             continue
         seen_identity_keys.add(candidate.identity_key)
         candidate_items.append((item, candidate))
 
+    # Marketplace relevance ordering is not a profit ordering.  Spend the
+    # bounded detail-page budget on verifiable, special/rare, lower-cost cards
+    # first; source details still remain the sole authority for availability,
+    # fee and completeness before any resale lookup is made.
+    candidate_items.sort(
+        key=lambda pair: _detail_priority(pair[0]),
+        reverse=True,
+    )
     candidate_count = len(candidate_items)
     persisted = upsert_discovery_candidates_with_previous(
         db_path, [candidate for _, candidate in candidate_items]
@@ -241,66 +305,169 @@ async def scan_discovery_keyword(
         _, candidate_id = detail_persisted[0]
         if candidate.availability in _NOT_PURCHASABLE_AVAILABILITY:
             continue
-        if xianyu_blocked:
-            continue
 
         query = _xianyu_query(candidate)
         if not query:
             continue
-        if xianyu_query_count >= pool.candidate_budget:
-            continue
-        xianyu_query_count += 1
-        try:
-            raw_samples = await fetch_xianyu(query)
-        except Exception as exc:  # noqa: BLE001 - browser adapters expose heterogeneous failures
-            record_discovery_run(
-                db_path,
-                pool_id=pool_id,
-                source="xianyu",
-                status="human_required",
-                keyword=query,
-                candidate_count=1,
-                error_type=type(exc).__name__,
-                error_message=str(exc),
+        watch = _watch_for_candidate(candidate, query)
+        preflight_match = compute_match_confidence(item, watch)
+        if preflight_match.fatal_flags:
+            # A detail page can reveal that a collector box is only packaging
+            # or that its game disc / soundtrack is missing.  No Xianyu price
+            # can make an incomplete core product a valid purchase candidate.
+            upsert_discovery_candidates_with_previous(
+                db_path, [replace(candidate, status="ignored")]
             )
-            if _is_xianyu_security_check(exc):
-                set_discovery_source_cooldown(
-                    db_path,
-                    "xianyu",
-                    cooldown_seconds=_XIANYU_SECURITY_COOLDOWN_SECONDS,
-                    reason="security_check",
-                )
-                xianyu_blocked = True
+            continue
+        if xianyu_blocked:
             continue
 
-        samples = [replace(sample, catalog_no=query) for sample in raw_samples]
+        source_edition_terms = source_edition_required_terms(candidate.title)
+        initial_required_terms = (
+            source_edition_terms if _is_title_only_candidate(candidate) else ()
+        )
+        query_variants: list[
+            tuple[str, tuple[str, ...], ResolvedTitleAlias | None, bool]
+        ] = [
+            (
+                query,
+                initial_required_terms,
+                None,
+                _is_title_only_candidate(candidate),
+            )
+        ]
+        samples: list[XianyuPriceSample] = []
         rejected_title_samples: list[XianyuPriceSample] = []
-        if _is_title_only_candidate(candidate):
-            matched_samples = [
-                sample
-                for sample in samples
-                if matches_title_search_query(sample.title, query)
+        seen_query_keys: set[str] = set()
+        used_title_alias = False
+        xianyu_lookup_failed = False
+        while query_variants and xianyu_query_count < pool.candidate_budget:
+            (
+                current_query,
+                required_any_terms,
+                alias_evidence,
+                requires_title_match,
+            ) = query_variants.pop(0)
+            query_key = " ".join(current_query.casefold().split())
+            if not query_key or query_key in seen_query_keys:
+                continue
+            seen_query_keys.add(query_key)
+            xianyu_query_count += 1
+            try:
+                raw_samples = await fetch_xianyu(current_query)
+            except Exception as exc:  # noqa: BLE001 - browser adapters expose heterogeneous failures
+                record_discovery_run(
+                    db_path,
+                    pool_id=pool_id,
+                    source="xianyu",
+                    status="human_required",
+                    keyword=current_query,
+                    candidate_count=1,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                )
+                if _is_xianyu_security_check(exc):
+                    set_discovery_source_cooldown(
+                        db_path,
+                        "xianyu",
+                        cooldown_seconds=_XIANYU_SECURITY_COOLDOWN_SECONDS,
+                        reason="security_check",
+                    )
+                    xianyu_blocked = True
+                xianyu_lookup_failed = True
+                break
+
+            current_samples = [
+                replace(sample, catalog_no=current_query) for sample in raw_samples
             ]
-            matched_ids = {id(sample) for sample in matched_samples}
-            rejected_title_samples = [
-                replace(sample, is_valid=False, invalid_reason="title_mismatch")
-                for sample in samples
-                if id(sample) not in matched_ids
-            ]
-            samples = matched_samples
+            if requires_title_match:
+                matched_samples, rejected_samples = _filter_title_only_samples(
+                    current_samples,
+                    current_query,
+                    required_any_terms=required_any_terms,
+                )
+                samples.extend(matched_samples)
+                rejected_title_samples.extend(rejected_samples)
+            else:
+                samples.extend(current_samples)
+
+            if alias_evidence is not None:
+                used_title_alias = True
+            preview = estimate_xianyu_price(
+                _deduplicate_xianyu_samples(samples),
+                min_reference_samples=pool.min_valid_xianyu_samples,
+                edition_confidence=max(0.7, preflight_match.confidence),
+                edition=watch.edition,
+                required_keywords=watch.required_keywords,
+                excluded_keywords=watch.excluded_keywords,
+                allow_complete_game_bundles=pool.media_type == "physical_game",
+                require_new_condition=_source_is_factory_new(item),
+            )
+            if preview.valid_sample_count >= pool.min_valid_xianyu_samples:
+                break
+            aliases: list[ResolvedTitleAlias] = []
+            if alias_evidence is None and resolve_title_aliases is not None:
+                try:
+                    aliases = await resolve_title_aliases(candidate)
+                except Exception:  # noqa: BLE001 - a free resolver cannot block collection.
+                    aliases = []
+            for resolved_alias in aliases:
+                alias_variant = build_alias_search_query(resolved_alias.value, candidate.title)
+                if alias_variant is None:
+                    continue
+                alias_key = " ".join(alias_variant.query.casefold().split())
+                if alias_key in seen_query_keys or any(
+                    alias_key == " ".join(queued[0].casefold().split())
+                    for queued in query_variants
+                ):
+                    continue
+                record_discovery_title_alias_evidence(
+                    db_path,
+                    candidate_id=candidate_id,
+                    source_title=candidate.title,
+                    alias=resolved_alias.value,
+                    query=alias_variant.query,
+                    resolver=resolved_alias.source,
+                    source_url=resolved_alias.source_url,
+                    entity_id=resolved_alias.entity_id,
+                )
+                query_variants.append(
+                    (
+                        alias_variant.query,
+                        alias_variant.required_any_terms,
+                        resolved_alias,
+                        True,
+                    )
+                )
+            direct_title_query = clean_title_search_query(candidate.title)
+            direct_title_key = " ".join(direct_title_query.casefold().split())
+            if direct_title_key and direct_title_key not in seen_query_keys and not any(
+                direct_title_key == " ".join(queued[0].casefold().split())
+                for queued in query_variants
+            ):
+                query_variants.append(
+                    (direct_title_query, source_edition_terms, None, True)
+                )
+
+        if xianyu_lookup_failed:
+            continue
+        samples = _deduplicate_xianyu_samples(samples)
         item_id = insert_market_items(db_path, [item])[0]
-        insert_xianyu_samples(db_path, [*samples, *rejected_title_samples])
-        watch = _watch_for_candidate(candidate, query)
-        match = compute_match_confidence(item, watch)
+        match = preflight_match
         estimate = estimate_xianyu_price(
             samples,
+            min_reference_samples=pool.min_valid_xianyu_samples,
             edition_confidence=max(0.7, match.confidence),
             edition=watch.edition,
             required_keywords=watch.required_keywords,
             excluded_keywords=watch.excluded_keywords,
+            allow_complete_game_bundles=pool.media_type == "physical_game",
+            require_new_condition=_source_is_factory_new(item),
         )
         if _has_strict_title_sample_evidence(candidate, estimate.valid_samples, pool):
             positive_reasons = [*match.positive_reasons, "strict_title_sample_match"]
+            if used_title_alias:
+                positive_reasons.append("exact_public_title_alias")
             match = replace(
                 match,
                 confidence=max(match.confidence, _STRICT_TITLE_SAMPLE_CONFIDENCE),
@@ -308,11 +475,25 @@ async def scan_discovery_keyword(
             )
             estimate = estimate_xianyu_price(
                 samples,
+                min_reference_samples=pool.min_valid_xianyu_samples,
                 edition_confidence=max(0.7, match.confidence),
                 edition=watch.edition,
                 required_keywords=watch.required_keywords,
                 excluded_keywords=watch.excluded_keywords,
+                allow_complete_game_bundles=pool.media_type == "physical_game",
+                require_new_condition=_source_is_factory_new(item),
             )
+        # Persist the cleaner's verdict rather than the unclassified search
+        # card. The board must show why a proxy listing or a bonus-only item
+        # was excluded from the reference price.
+        insert_xianyu_samples(
+            db_path,
+            [
+                *estimate.valid_samples,
+                *estimate.invalid_samples,
+                *rejected_title_samples,
+            ],
+        )
         cost = compute_landed_cost(item, expected_holding_days=watch.expected_holding_days)
         opportunity = evaluate_opportunity(watch, item, match, estimate, cost)
         opportunity_id = insert_discovery_opportunity(
@@ -404,6 +585,70 @@ def _is_media_relevant(item: MarketItem, media_type: str) -> bool:
     return bool(title.strip())
 
 
+def _is_obviously_incomplete_search_card(item: MarketItem, media_type: str) -> bool:
+    title = str(item.title or "").casefold()
+    if media_type == "physical_game":
+        return any(marker in title for marker in _INCOMPLETE_GAME_SEARCH_CARD_MARKERS)
+    if media_type == "cd":
+        return any(marker in title for marker in _INCOMPLETE_CD_SEARCH_CARD_MARKERS)
+    return False
+
+
+def _source_is_factory_new(item: MarketItem) -> bool:
+    """Read the condition from an already-verified source detail page."""
+
+    explicit_condition = str(item.condition_text or "").casefold()
+    raw_text = str(item.raw_text or "")
+    title = str(item.title or "")
+    title_index = raw_text.find(title) if title else -1
+    # The Wameiji detail header carries the seller's product state before the
+    # long product description and platform campaign text.  Later campaign
+    # text can say “中古精选” even for a product whose actual state is 新品.
+    header_start = title_index + len(title) if title_index >= 0 else 0
+    header_condition = raw_text[header_start : header_start + 240]
+    # The first price field ends the condition block.  Do not let later site
+    # promotions such as “中古精选” overwrite a preceding product-state word.
+    for boundary in ("价格", "価格", "price"):
+        index = header_condition.casefold().find(boundary.casefold())
+        if index >= 0:
+            header_condition = header_condition[:index]
+            break
+    header_condition = header_condition.casefold()
+    text = " ".join((explicit_condition, header_condition))
+    if any(
+        marker in text
+        for marker in (
+            "二手",
+            "中古",
+            "使用済",
+            "開封済",
+            "已拆",
+            "一部未使用",
+            "未使用に近い",
+        )
+    ):
+        return False
+    return any(marker in text for marker in ("新品", "未開封", "未使用", "全新", "未拆"))
+
+
+def _detail_priority(item: MarketItem) -> tuple[int, int, int, float]:
+    """Rank search cards for a limited source-detail inspection budget."""
+
+    title = str(item.title or "").casefold()
+    has_exact_identifier = int(
+        bool(_first_plausible_catalog_no(item.catalog_no))
+        or bool(_first_japanese_jan(item.jan))
+    )
+    special_edition = int(any(marker in title for marker in _SPECIAL_EDITION_MARKERS))
+    condition_or_rarity = int(
+        any(marker in title for marker in _CONDITION_PRIORITY_MARKERS)
+        or any(marker in title for marker in _RARITY_PRIORITY_MARKERS)
+    )
+    price = float(item.price)
+    affordable_price = -price if isfinite(price) and price > 0 else float("-inf")
+    return has_exact_identifier, special_edition, condition_or_rarity, affordable_price
+
+
 def _first_japanese_jan(text: str | None) -> str | None:
     """Return only a plausible Japanese retail JAN, never an incidental ID."""
 
@@ -471,6 +716,48 @@ def _has_strict_title_sample_evidence(
         for sample in valid_samples
     }
     return len(distinct_samples) >= minimum
+
+
+def _filter_title_only_samples(
+    samples: list[XianyuPriceSample],
+    query: str,
+    *,
+    required_any_terms: tuple[str, ...] = (),
+) -> tuple[list[XianyuPriceSample], list[XianyuPriceSample]]:
+    """Keep only title evidence that retains the variant's product facts."""
+
+    matched = [
+        sample
+        for sample in samples
+        if matches_title_search_query(
+            sample.title,
+            query,
+            required_any_terms=required_any_terms,
+        )
+    ]
+    matched_ids = {id(sample) for sample in matched}
+    rejected = [
+        replace(sample, is_valid=False, invalid_reason="title_mismatch")
+        for sample in samples
+        if id(sample) not in matched_ids
+    ]
+    return matched, rejected
+
+
+def _deduplicate_xianyu_samples(
+    samples: list[XianyuPriceSample],
+) -> list[XianyuPriceSample]:
+    """A listing returned by both Japanese and alias queries counts once."""
+
+    unique: list[XianyuPriceSample] = []
+    seen: set[str] = set()
+    for sample in samples:
+        key = sample.url or f"{sample.title.casefold()}|{sample.price_cny:.2f}"
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(sample)
+    return unique
 
 
 def _watch_for_candidate(candidate: DiscoveryCandidate, query: str) -> WatchItem:

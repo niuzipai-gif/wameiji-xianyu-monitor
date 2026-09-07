@@ -18,6 +18,7 @@ from cd_monitor.services.discovery import (
     FetchWameiji,
     FetchWameijiDetail,
     FetchXianyu,
+    ResolveTitleAliases,
     scan_discovery_keyword,
 )
 from cd_monitor.services.live_browser_capture import capture_page_html, capture_search_html
@@ -68,12 +69,14 @@ class DiscoveryWorker:
         fetch_wameiji: FetchWameiji,
         fetch_wameiji_detail: FetchWameijiDetail,
         fetch_xianyu: FetchXianyu,
+        resolve_title_aliases: ResolveTitleAliases | None = None,
         command_client: CollectorCommandClient | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.fetch_wameiji = fetch_wameiji
         self.fetch_xianyu = fetch_xianyu
         self.fetch_wameiji_detail = fetch_wameiji_detail
+        self.resolve_title_aliases = resolve_title_aliases
         self.command_client = command_client
 
     async def run_once(self) -> WorkerRunResult:
@@ -116,6 +119,7 @@ class DiscoveryWorker:
                     fetch_wameiji=self.fetch_wameiji,
                     fetch_wameiji_detail=self.fetch_wameiji_detail,
                     fetch_xianyu=self.fetch_xianyu,
+                    resolve_title_aliases=self.resolve_title_aliases,
                 )
                 scan_results.append(result)
                 if result.status == "ok" and keyword.id is not None:

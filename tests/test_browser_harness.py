@@ -38,6 +38,35 @@ def test_xianyu_html_snapshot_parses_samples() -> None:
     assert status.items[0].price_cny == 260
 
 
+def test_xianyu_listing_security_words_are_not_treated_as_a_security_page() -> None:
+    for phrase in ("安全验证", "验证码", "滑块", "风控", "验证失败", "需要登录"):
+        html = f"""
+        <div data-xianyu-card>
+          <a href="https://example.invalid/x/1">Artist SRCL-3520 初回限定</a>
+          <span data-price>￥260</span>
+          <p>登录第三方服务时可能需要手机{phrase}。</p>
+        </div>
+        """
+
+        status = XianyuBrowserAdapter(enabled=True).parse_search_html(
+            html,
+            WatchItem("SRCL-3520"),
+        )
+
+        assert status.status == "ok"
+        assert len(status.items) == 1
+
+
+def test_xianyu_security_title_requires_human() -> None:
+    status = XianyuBrowserAdapter(enabled=True).parse_search_html(
+        "<title>安全验证</title><p>请完成验证后继续</p>",
+        WatchItem("SRCL-3520"),
+    )
+
+    assert status.status == "human_required"
+    assert status.error_type == "security_check"
+
+
 def test_xianyu_current_goofish_feed_cards_parse_title_price_and_image() -> None:
     html = """
     <main class="feeds-list-container--hash">

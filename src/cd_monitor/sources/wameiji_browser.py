@@ -82,6 +82,22 @@ class WameijiBrowserAdapter(BrowserHarnessAdapter):
                 error_type="security_check",
                 error_message="Captcha, security check, or login challenge detected.",
             )
+        if _is_removed_listing_page(html):
+            # A deleted Wameiji URL renders generic recommendation cards under
+            # the same site container. Keep the original identity only to mark
+            # it unavailable; never mistake one of those cards for the source.
+            return AdapterStatus(
+                status="ok",
+                items=[
+                    replace(
+                        search_item,
+                        availability="sold_out",
+                        detail_verified=True,
+                        price_cny_display=None,
+                        raw_text="Wameiji detail page reports that this listing was removed.",
+                    )
+                ],
+            )
         parser = _WameijiDetailParser()
         parser.feed(html)
         item = _detail_item_from_parser(parser, search_item)
@@ -220,6 +236,7 @@ class _WameijiDetailParser(HTMLParser):
         "surugaya-detail",
         "bookoff-detail",
         "market-detail",
+        "street-detail",
         "paypay",
     }
     _EXCLUDED_CLASSES = {
@@ -409,7 +426,9 @@ def _detail_item_from_parser(
         external_item_id=search_item.external_item_id,
         catalog_no=catalog_no,
         jan=jan,
-        price_cny_display=search_item.price_cny_display,
+        # Do not carry a search-card conversion amount into a verified detail
+        # record: it may be stale and does not include page-specific fees.
+        price_cny_display=None,
         url=search_item.url,
         image_url=search_item.image_url,
         availability=parser.availability(),
@@ -417,6 +436,10 @@ def _detail_item_from_parser(
         fees_hint=_detect_fees_hint(raw_text),
         raw_text=raw_text,
         detail_verified=True,
+        japan_domestic_shipping_jpy=_extract_labeled_jpy_fee(
+            raw_text, "日本国内运费"
+        ),
+        proxy_fee_jpy=_extract_labeled_jpy_fee(raw_text, "代购手续费"),
     )
 
 
@@ -438,6 +461,41 @@ def _first_detail_jan(text: str) -> str | None:
 def _parse_price(value: str) -> float:
     digits = re.sub(r"[^\d.]", "", value)
     return float(digits) if digits else 0.0
+
+
+def _extract_labeled_jpy_fee(text: str, label: str) -> float | None:
+    """Read a JPY fee only when it follows its detail-page label.
+
+    Wameiji renders the product price, domestic shipping and proxy fee as
+    separate ``sku-item`` rows.  Looking for a bare number would confuse one
+    row with another, so the label is mandatory and the search stops at the
+    first nearby ``日元`` value.
+    """
+    if not text or not label:
+        return None
+    label_match = re.search(re.escape(label), text)
+    if label_match is None:
+        return None
+
+    # ``get_text`` flattens individual sku rows.  Restrict the read to this
+    # row so a later fee (for example ``代购手续费 200日元``) cannot become the
+    # value for a seller-borne domestic-shipping row.
+    nearby = text[label_match.end() : label_match.end() + 160]
+    next_label = re.search(
+        r"(?:日本国内运费|代购手续费|追加手数料|サービス料|加固|拍照|检查费|保障|合单费)",
+        nearby,
+    )
+    row_text = nearby[: next_label.start()] if next_label else nearby
+    if label == "日本国内运费" and any(
+        marker in row_text
+        for marker in ("卖家承担", "出品者負担", "送料込み", "送料無料")
+    ):
+        return 0.0
+
+    amount_match = re.search(r"([0-9][0-9,]*)\s*日元", row_text)
+    if amount_match is None:
+        return None
+    return float(amount_match.group(1).replace(",", ""))
 
 
 def _catalog_in_text(text: str, catalog_no: str) -> bool:
@@ -669,6 +727,9 @@ def _detect_condition_text(parts: list[str]) -> str | None:
         "不良",
         "瑕疵",
         "裂",
+        "整体状态不佳",
+        "状态不佳",
+        "品相不佳",
     ]
     for part in parts:
         if any(token in part for token in condition_tokens):
@@ -762,31 +823,76 @@ def _first_attr_text(attr: dict[str, str | None], *keys: str) -> str:
     return ""
 
 
+_HARD_SECURITY_MARKERS = (
+    "captcha",
+    "cloudflare",
+    "rgv587_error",
+    "fail_sys_user_validate",
+    "____tmd____",
+    "x5step",
+)
+_TITLE_SECURITY_MARKERS = (
+    "安全验证",
+    "驗證",
+    "登录失效",
+    "請完成",
+    "请完成",
+    "滑块",
+    "验证码",
+    "風控",
+    "风控",
+    "验证失败",
+    "需要登录",
+    "请登录",
+)
+_HTML_TITLE_RE = re.compile(r"<title\\b[^>]*>(.*?)</title\\s*>", re.IGNORECASE | re.DOTALL)
+
+
 def _requires_human(html: str) -> bool:
     lowered = html.lower()
-    return any(
-        token in lowered
-        for token in [
-            "captcha",
-            "安全验证",
-            "驗證",
-            "登录失效",
-            "請完成",
-            "请完成",
-            "cloudflare",
-            "rgv587_error",
-            "fail_sys_user_validate",
-            "punish",
-            "____tmd____",
-            "x5step",
-            "滑块",
-            "验证码",
-            "風控",
-            "风控",
-            "验证失败",
-            "需要登录",
-            "请登录",
-        ]
+    if any(token in lowered for token in _HARD_SECURITY_MARKERS):
+        return True
+    # Product pages contain full seller descriptions. Phrases such as “验证码”
+    # may be ordinary listing text, so accept softer markers only when the
+    # document title itself identifies a challenge or login page.
+    title_match = _HTML_TITLE_RE.search(html)
+    if title_match is None:
+        return False
+    title = re.sub(r"<[^>]+>", " ", title_match.group(1)).casefold()
+    return any(token in title for token in _TITLE_SECURITY_MARKERS)
+
+
+_REMOVED_LISTING_CLASSES = (
+    "common-null",
+    "nonsupport-text",
+    "listing-removed",
+    "item-removed",
+    "product-removed",
+)
+_REMOVED_LISTING_MARKERS = (
+    "商品删除",
+    "商品已删除",
+    "商品不存在",
+    "商品已下架",
+    "商品已移除",
+    "该商品已删除",
+    "商品已失效",
+    "item has been removed",
+    "listing has been removed",
+    "product has been removed",
+    "this item is unavailable",
+    "商品は削除されました",
+    "商品が削除されました",
+    "削除された商品",
+)
+
+
+def _is_removed_listing_page(html: str) -> bool:
+    """Recognize Wameiji's detail-page deletion shell before reading its cards."""
+    lowered = html.casefold()
+    return (
+        any(marker in lowered for marker in _REMOVED_LISTING_MARKERS)
+        and any(class_name in lowered for class_name in _REMOVED_LISTING_CLASSES)
     )
 
 """Wameiji 真实 Playwright 读取执行器。
@@ -802,7 +908,7 @@ def _requires_human(html: str) -> bool:
 import asyncio
 import logging
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any

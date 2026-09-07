@@ -14,7 +14,7 @@ from cd_monitor.storage.migrations import SCHEMA_SQL
 
 
 _TITLE_QUERY_EVIDENCE_VERSION_KEY = "discovery_title_query_evidence_version"
-_TITLE_QUERY_EVIDENCE_VERSION = "strict-title-sample-v1"
+_TITLE_QUERY_EVIDENCE_VERSION = "strict-title-sample-v3"
 
 
 
@@ -121,6 +121,69 @@ def _migrate_title_only_xianyu_rechecks(conn: sqlite3.Connection) -> None:
         """,
         (_TITLE_QUERY_EVIDENCE_VERSION_KEY, _TITLE_QUERY_EVIDENCE_VERSION),
     )
+
+
+def _migrate_duplicate_source_candidates(conn: sqlite3.Connection) -> None:
+    """Retire legacy catalog/title rows duplicated by a source-listing key.
+
+    Early discovery runs keyed some cards by catalog/JAN before the stable
+    Wameiji listing id was available. A later detail read correctly creates a
+    ``source:...`` row, but leaving both rows active spends the detail budget
+    twice and can leave an old evaluation on the selection board.
+    """
+
+    duplicate_sources = conn.execute(
+        """
+        SELECT pool_id, TRIM(source_item_id) AS source_item_id
+        FROM discovery_candidates
+        WHERE COALESCE(TRIM(source_item_id), '') != ''
+        GROUP BY pool_id, TRIM(source_item_id)
+        HAVING COUNT(*) > 1
+        """
+    ).fetchall()
+    for pool_id, source_item_id in duplicate_sources:
+        rows = conn.execute(
+            """
+            SELECT id, identity_key, detail_verified, status, last_xianyu_checked_at
+            FROM discovery_candidates
+            WHERE pool_id = ? AND TRIM(source_item_id) = ?
+            """,
+            (pool_id, source_item_id),
+        ).fetchall()
+        # Preserve the row with the strongest purchase evidence. When both
+        # have equal evidence, the source-listing identity is canonical.
+        canonical = max(
+            rows,
+            key=lambda row: (
+                int(bool(row[2])),
+                int(str(row[1] or "").startswith("source:")),
+                int(str(row[3] or "") == "active"),
+                int(row[4] is not None),
+                int(row[0]),
+            ),
+        )
+        canonical_id = int(canonical[0])
+        for row in rows:
+            duplicate_id = int(row[0])
+            if duplicate_id == canonical_id:
+                continue
+            conn.execute(
+                """
+                UPDATE opportunities
+                SET status = 'expired'
+                WHERE discovery_candidate_id = ?
+                  AND COALESCE(status, 'active') = 'active'
+                """,
+                (duplicate_id,),
+            )
+            conn.execute(
+                """
+                UPDATE discovery_candidates
+                SET status = 'ignored', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (duplicate_id,),
+            )
 
 
 def _migrate_price_snapshots(conn: sqlite3.Connection) -> None:
@@ -367,6 +430,19 @@ def _migrate_market_items_cover_columns(conn: sqlite3.Connection) -> None:
             pass
 
 
+def _migrate_market_item_detail_fee_columns(conn: sqlite3.Connection) -> None:
+    """Keep verified Wameiji fee rows available for later audit and rechecks."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(market_items)").fetchall()}
+    additions = (
+        ("japan_domestic_shipping_jpy", "REAL"),
+        ("proxy_fee_jpy", "REAL"),
+        ("fees_hint", "TEXT"),
+    )
+    for name, declaration in additions:
+        if name not in cols:
+            conn.execute(f"ALTER TABLE market_items ADD COLUMN {name} {declaration}")
+
+
 def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
     """Create candidate-pool tables while leaving legacy watches untouched."""
     conn.executescript(
@@ -460,6 +536,21 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
           FOREIGN KEY(pool_id) REFERENCES discovery_pools(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS discovery_title_alias_evidence (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          candidate_id INTEGER NOT NULL,
+          source_title TEXT NOT NULL,
+          alias TEXT NOT NULL,
+          query TEXT NOT NULL,
+          resolver TEXT NOT NULL,
+          source_url TEXT NOT NULL,
+          entity_id TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(candidate_id, alias, query),
+          FOREIGN KEY(candidate_id) REFERENCES discovery_candidates(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS collector_commands (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           remote_command_id TEXT,
@@ -479,6 +570,8 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
           WHERE dedupe_key IS NOT NULL AND status IN ('pending', 'accepted', 'running');
         CREATE INDEX IF NOT EXISTS idx_discovery_candidates_pool_status
           ON discovery_candidates(pool_id, status, last_seen_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_discovery_title_alias_candidate
+          ON discovery_title_alias_evidence(candidate_id, updated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_discovery_runs_pool_time
           ON discovery_runs(pool_id, started_at DESC);
         """
@@ -601,7 +694,9 @@ def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
             _migrate_opportunity_p55_columns(conn)
             _migrate_watchlist_filter_columns(conn)
             _migrate_market_items_cover_columns(conn)
+            _migrate_market_item_detail_fee_columns(conn)
             _migrate_discovery_selection_board(conn)
+            _migrate_duplicate_source_candidates(conn)
             _migrate_title_only_xianyu_rechecks(conn)
     finally:
         conn.close()
@@ -1039,8 +1134,9 @@ def insert_market_items(db_path: str | Path, items: Iterable[MarketItem]) -> lis
             cur = conn.execute(
                 """
                 INSERT INTO market_items (source, source_site, external_item_id, catalog_no, jan, title,
-                  price, currency, price_cny_display, url, image_url, availability, condition_text, raw_text)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  price, currency, price_cny_display, japan_domestic_shipping_jpy, proxy_fee_jpy, fees_hint,
+                  url, image_url, availability, condition_text, raw_text)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item.source,
@@ -1052,6 +1148,9 @@ def insert_market_items(db_path: str | Path, items: Iterable[MarketItem]) -> lis
                     item.price,
                     item.currency,
                     item.price_cny_display,
+                    item.japan_domestic_shipping_jpy,
+                    item.proxy_fee_jpy,
+                    item.fees_hint,
                     item.url,
                     item.image_url,
                     item.availability,
@@ -1508,6 +1607,45 @@ def mark_discovery_candidate_xianyu_checked(db_path: str | Path, candidate_id: i
         )
 
 
+def record_discovery_title_alias_evidence(
+    db_path: str | Path,
+    *,
+    candidate_id: int,
+    source_title: str,
+    alias: str,
+    query: str,
+    resolver: str,
+    source_url: str,
+    entity_id: str | None = None,
+) -> None:
+    """Store the public title mapping that enabled a fallback price query."""
+
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO discovery_title_alias_evidence (
+              candidate_id, source_title, alias, query, resolver, source_url, entity_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(candidate_id, alias, query) DO UPDATE SET
+              source_title = excluded.source_title,
+              resolver = excluded.resolver,
+              source_url = excluded.source_url,
+              entity_id = excluded.entity_id,
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                candidate_id,
+                source_title,
+                alias,
+                query,
+                resolver,
+                source_url,
+                entity_id,
+            ),
+        )
+
+
 def update_discovery_pool_last_scan(db_path: str | Path, pool_id: int) -> None:
     init_db(db_path)
     with sqlite3.connect(db_path) as conn:
@@ -1717,6 +1855,19 @@ def insert_discovery_opportunity(
     """Persist an evaluated automatic candidate and retain legacy compatibility."""
     opportunity_id = insert_opportunity(db_path, opportunity, wameiji_item_id=wameiji_item_id)
     with sqlite3.connect(db_path) as conn:
+        # An evaluation is a point-in-time statement. Once the same source
+        # listing is rechecked, its prior positive result must not remain on
+        # the board beside (or after) a new reject.
+        conn.execute(
+            """
+            UPDATE opportunities
+            SET status = 'expired'
+            WHERE discovery_candidate_id = ?
+              AND id != ?
+              AND COALESCE(status, 'active') = 'active'
+            """,
+            (discovery_candidate_id, opportunity_id),
+        )
         conn.execute(
             """
             UPDATE opportunities
@@ -2029,7 +2180,8 @@ def get_opportunity(db_path: str | Path, opportunity_id: int) -> Opportunity:
             SELECT
               o.*,
               m.source, m.source_site, m.external_item_id, m.catalog_no AS item_catalog_no,
-              m.jan, m.title, m.price, m.currency, m.price_cny_display, m.url, m.image_url,
+              m.jan, m.title, m.price, m.currency, m.price_cny_display,
+              m.japan_domestic_shipping_jpy, m.proxy_fee_jpy, m.fees_hint, m.url, m.image_url,
               m.availability, m.condition_text, m.raw_text
             FROM opportunities o
             LEFT JOIN market_items m ON m.id = o.wameiji_item_id
@@ -2049,6 +2201,9 @@ def get_opportunity(db_path: str | Path, opportunity_id: int) -> Opportunity:
         price=row["price"] or 0,
         currency=row["currency"] or "JPY",
         price_cny_display=row["price_cny_display"],
+        japan_domestic_shipping_jpy=row["japan_domestic_shipping_jpy"],
+        proxy_fee_jpy=row["proxy_fee_jpy"],
+        fees_hint=row["fees_hint"],
         url=row["url"],
         image_url=row["image_url"],
         availability=row["availability"] or "unknown_but_visible",
@@ -2093,7 +2248,8 @@ def list_market_items(db_path: str | Path, catalog_no: str | None = None) -> lis
     init_db(db_path)
     sql = """
         SELECT source, source_site, external_item_id, catalog_no, jan, title, price, currency,
-          price_cny_display, url, image_url, availability, condition_text, raw_text
+          price_cny_display, japan_domestic_shipping_jpy, proxy_fee_jpy, fees_hint,
+          url, image_url, availability, condition_text, raw_text
         FROM market_items
     """
     params: tuple[object, ...] = ()
@@ -2115,6 +2271,9 @@ def list_market_items(db_path: str | Path, catalog_no: str | None = None) -> lis
             price=row["price"],
             currency=row["currency"],
             price_cny_display=row["price_cny_display"],
+            japan_domestic_shipping_jpy=row["japan_domestic_shipping_jpy"],
+            proxy_fee_jpy=row["proxy_fee_jpy"],
+            fees_hint=row["fees_hint"],
             url=row["url"],
             image_url=row["image_url"],
             availability=row["availability"] or "unknown_but_visible",
