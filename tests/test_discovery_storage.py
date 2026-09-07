@@ -36,6 +36,30 @@ def test_init_db_seeds_cd_and_physical_game_pools(tmp_path: Path) -> None:
     assert all(pool.candidate_budget == 2 for pool in pools)
 
 
+def test_init_db_rebuilds_stale_pool_next_run_for_the_pool_rate_limit(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE discovery_pools
+            SET scan_interval_minutes = 25,
+                last_scanned_at = '2026-09-07 00:00:00',
+                next_run_at = '1999-01-01 00:00:00'
+            WHERE id = ?
+            """,
+            (pool_id,),
+        )
+
+    init_db(db_path)
+
+    assert list_discovery_pools(db_path)[0].next_run_at == "2026-09-07 00:25:00"
+
+
 def test_identity_key_prefers_source_listing_then_catalog_jan_then_title() -> None:
     assert build_identity_key(
         catalog_no=" SRCL-3520 ",

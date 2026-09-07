@@ -503,6 +503,28 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
         SELECT id, '3DS 限定版', 2 FROM discovery_pools WHERE slug = 'physical-game';
         """
     )
+    # ``next_run_at`` is derived state. Rebuild it during every initialization
+    # so databases created before pool-level throttling do not show stale
+    # per-keyword deadlines in the dashboard.
+    conn.execute(
+        """
+        UPDATE discovery_pools
+        SET next_run_at = CASE
+          WHEN last_scanned_at IS NULL THEN CURRENT_TIMESTAMP
+          ELSE datetime(last_scanned_at, '+' || scan_interval_minutes || ' minutes')
+        END
+        WHERE (last_scanned_at IS NULL AND next_run_at IS NULL)
+           OR (
+             last_scanned_at IS NOT NULL
+             AND (
+               next_run_at IS NULL
+               OR datetime(next_run_at) != datetime(
+                 last_scanned_at, '+' || scan_interval_minutes || ' minutes'
+               )
+             )
+           )
+        """
+    )
 
 
 def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
