@@ -148,6 +148,36 @@ def test_worker_uses_detail_fetcher_before_it_queries_xianyu(tmp_path: Path) -> 
     assert calls == ["search", "detail", "xianyu:SRCL-3520"]
 
 
+def test_scheduled_worker_limits_due_keywords_to_the_pool_budget(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    cd_pool, game_pool = list_discovery_pools(db_path)
+    assert cd_pool.id is not None
+    assert game_pool.id is not None
+    update_discovery_pool(db_path, cd_pool.id, {"keyword_budget": 1})
+    update_discovery_pool(db_path, game_pool.id, {"enabled": False})
+    searched_keywords: list[str] = []
+
+    async def fetch_wameiji(keyword: str) -> list[MarketItem]:
+        searched_keywords.append(keyword)
+        return []
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        raise AssertionError("empty Wameiji results must not query Xianyu")
+
+    worker = DiscoveryWorker(
+        db_path=db_path,
+        fetch_wameiji=fetch_wameiji,
+        fetch_wameiji_detail=_verified_detail,
+        fetch_xianyu=fetch_xianyu,
+    )
+
+    result = asyncio.run(worker.run_once())
+
+    assert result.scan_count == 1
+    assert len(searched_keywords) == 1
+
+
 def test_worker_respects_disabled_pool_even_when_commanded(tmp_path: Path) -> None:
     db_path = tmp_path / "selection.db"
     init_db(db_path)
