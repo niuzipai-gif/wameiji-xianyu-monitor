@@ -1627,6 +1627,12 @@ def update_discovery_pool(
         "keyword_budget",
         "page_budget",
         "candidate_budget",
+        "search_card_budget",
+        "detail_budget",
+        "xianyu_query_budget",
+        "queue_high_watermark",
+        "capture_state",
+        "pause_reason",
         "min_profit_cny",
         "min_margin",
         "min_match_confidence",
@@ -1634,6 +1640,13 @@ def update_discovery_pool(
         "cost_overrides_json",
     }
     values = {key: value for key, value in updates.items() if key in allowed}
+    if "candidate_budget" in values:
+        # Backward compatibility for saved UI settings from the one-budget
+        # collector. New callers set the independent budgets directly.
+        values.setdefault("detail_budget", values["candidate_budget"])
+        values.setdefault("xianyu_query_budget", values["candidate_budget"])
+    if values.get("capture_state") == "active" and "pause_reason" not in values:
+        values["pause_reason"] = None
     if values:
         init_db(db_path)
         assignments = ", ".join(f"{key} = ?" for key in values)
@@ -1645,6 +1658,28 @@ def update_discovery_pool(
             )
             _refresh_discovery_pool_next_run(conn, pool_id)
     return get_discovery_pool(db_path, pool_id)
+
+
+def set_discovery_pool_capture_state(
+    db_path: str | Path,
+    pool_id: int,
+    *,
+    capture_state: str,
+    pause_reason: str | None = None,
+) -> DiscoveryPool:
+    """Change automatic capture state without disabling the user's pool."""
+
+    normalized = str(capture_state or "").strip().lower()
+    if normalized not in {"active", "paused_quality"}:
+        raise ValueError("invalid_capture_state")
+    return update_discovery_pool(
+        db_path,
+        pool_id,
+        {
+            "capture_state": normalized,
+            "pause_reason": pause_reason if normalized == "paused_quality" else None,
+        },
+    )
 
 
 def get_discovery_candidate_by_identity(
@@ -1705,7 +1740,10 @@ def list_discovery_detail_queue(
             WHERE pool_id = ?
               AND status = 'active'
               AND detail_verified = 0
-              AND COALESCE(TRIM(source_url), '') != ''
+              AND (
+                COALESCE(TRIM(source_url), '') != ''
+                OR COALESCE(TRIM(source_item_id), '') != ''
+              )
               AND COALESCE(pipeline_stage, 'search_discovered') IN (
                 'search_discovered', 'detail_queued'
               )
@@ -1713,6 +1751,48 @@ def list_discovery_detail_queue(
             LIMIT ?
             """,
             (pool_id, max(0, int(limit))),
+        ).fetchall()
+    return [_discovery_candidate_from_row(row) for row in rows]
+
+
+def list_discovery_resale_queue(
+    db_path: str | Path,
+    pool_id: int,
+    *,
+    limit: int,
+    refresh_after_minutes: int = 180,
+) -> list[DiscoveryCandidate]:
+    """Return unobserved or stale verified details for a resale observation."""
+
+    init_db(db_path)
+    refresh_window = max(1, int(refresh_after_minutes))
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
+              artist, edition, source_item_id, source_url, source_price,
+              source_currency, availability, status, observation_count,
+              missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified,
+              pipeline_stage, product_key, detail_attempt_count,
+              last_detail_attempt_at, last_detail_error, detail_verified_at
+            FROM discovery_candidates
+            WHERE pool_id = ?
+              AND status = 'active'
+              AND detail_verified = 1
+              AND (
+                last_xianyu_checked_at IS NULL
+                OR datetime(last_xianyu_checked_at) <= datetime(CURRENT_TIMESTAMP, ?)
+              )
+            ORDER BY
+              CASE WHEN last_xianyu_checked_at IS NULL THEN 0 ELSE 1 END,
+              CASE WHEN COALESCE(TRIM(catalog_no), '') != ''
+                      OR COALESCE(TRIM(jan), '') != '' THEN 0 ELSE 1 END,
+              datetime(COALESCE(last_xianyu_checked_at, detail_verified_at)) ASC,
+              id ASC
+            LIMIT ?
+            """,
+            (pool_id, f"-{refresh_window} minutes", max(0, int(limit))),
         ).fetchall()
     return [_discovery_candidate_from_row(row) for row in rows]
 
@@ -1776,7 +1856,12 @@ def record_discovery_run(
     keyword_id: int | None = None,
     discovered_count: int = 0,
     candidate_count: int = 0,
+    detail_query_count: int = 0,
+    detail_verified_count: int = 0,
+    detail_rejected_count: int = 0,
     evaluated_count: int = 0,
+    xianyu_query_count: int = 0,
+    resale_sampled_count: int = 0,
     error_type: str | None = None,
     error_message: str | None = None,
     screenshot_path: str | None = None,
@@ -1788,9 +1873,11 @@ def record_discovery_run(
             """
             INSERT INTO discovery_runs (
               pool_id, keyword_id, keyword, source, status, discovered_count,
-              candidate_count, evaluated_count, error_type, error_message,
-              screenshot_path, raw_snapshot_path, finished_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+              candidate_count, detail_query_count, detail_verified_count,
+              detail_rejected_count, evaluated_count, xianyu_query_count,
+              resale_sampled_count, error_type, error_message, screenshot_path,
+              raw_snapshot_path, finished_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
             (
                 pool_id,
@@ -1800,7 +1887,12 @@ def record_discovery_run(
                 status,
                 discovered_count,
                 candidate_count,
+                detail_query_count,
+                detail_verified_count,
+                detail_rejected_count,
                 evaluated_count,
+                xianyu_query_count,
+                resale_sampled_count,
                 error_type,
                 error_message,
                 screenshot_path,
@@ -1816,10 +1908,60 @@ def mark_discovery_candidate_xianyu_checked(db_path: str | Path, candidate_id: i
         conn.execute(
             """
             UPDATE discovery_candidates
-            SET last_xianyu_checked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            SET last_xianyu_checked_at = CURRENT_TIMESTAMP, pipeline_stage = 'evaluated',
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
             (candidate_id,),
+        )
+
+
+def record_discovery_candidate_detail_attempt(
+    db_path: str | Path,
+    candidate_id: int,
+    *,
+    pipeline_stage: str,
+    detail_verified: bool = False,
+    error_message: str | None = None,
+    product_key: str | None = None,
+    increment_attempt: bool = True,
+) -> None:
+    """Persist one source-detail outcome for queue recovery and diagnostics."""
+
+    if pipeline_stage not in {
+        "detail_queued",
+        "resale_queued",
+        "blocked",
+        "rejected",
+    }:
+        raise ValueError("invalid_discovery_pipeline_stage")
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE discovery_candidates
+            SET detail_attempt_count = detail_attempt_count + ?,
+                last_detail_attempt_at = CURRENT_TIMESTAMP,
+                last_detail_error = ?,
+                detail_verified = CASE WHEN ? THEN 1 ELSE detail_verified END,
+                detail_verified_at = CASE
+                  WHEN ? THEN COALESCE(detail_verified_at, CURRENT_TIMESTAMP)
+                  ELSE detail_verified_at
+                END,
+                pipeline_stage = ?,
+                product_key = COALESCE(?, product_key),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                int(increment_attempt),
+                error_message,
+                int(detail_verified),
+                int(detail_verified),
+                pipeline_stage,
+                product_key,
+                candidate_id,
+            ),
         )
 
 
@@ -1952,7 +2094,14 @@ def _refresh_discovery_pool_next_run(conn: sqlite3.Connection, pool_id: int) -> 
 def upsert_discovery_candidate(db_path: str | Path, candidate: DiscoveryCandidate) -> int:
     init_db(db_path)
     with sqlite3.connect(db_path) as conn:
-        return _upsert_discovery_candidate(conn, candidate)
+        conn.row_factory = sqlite3.Row
+        row = _select_discovery_candidate_by_identity(
+            conn, candidate.pool_id, candidate.identity_key
+        )
+        previous = _discovery_candidate_from_row(row) if row is not None else None
+        candidate_id = _upsert_discovery_candidate(conn, candidate)
+        _requeue_changed_verified_candidate(conn, previous, candidate, candidate_id)
+        return candidate_id
 
 
 def upsert_discovery_candidates_with_previous(
@@ -1978,8 +2127,59 @@ def upsert_discovery_candidates_with_previous(
             )
             previous = _discovery_candidate_from_row(row) if row is not None else None
             candidate_id = _upsert_discovery_candidate(conn, candidate)
+            _requeue_changed_verified_candidate(conn, previous, candidate, candidate_id)
             results.append((previous, candidate_id))
     return results
+
+
+def _requeue_changed_verified_candidate(
+    conn: sqlite3.Connection,
+    previous: DiscoveryCandidate | None,
+    current: DiscoveryCandidate,
+    candidate_id: int,
+) -> None:
+    """Require fresh source-detail evidence after an unverified card changes."""
+
+    if (
+        previous is None
+        or not previous.detail_verified
+        or previous.status != "active"
+        or current.detail_verified
+    ):
+        return
+    price_changed = abs(previous.source_price - current.source_price) > 0.001
+    explicitly_reavailable = (
+        current.availability == "available"
+        and previous.availability != current.availability
+    )
+    if not price_changed and not explicitly_reavailable:
+        return
+    conn.execute(
+        """
+        UPDATE discovery_candidates
+        SET detail_verified = 0,
+            detail_verified_at = NULL,
+            last_xianyu_checked_at = NULL,
+            pipeline_stage = 'detail_queued',
+            product_key = NULL,
+            last_detail_error = NULL,
+            availability = CASE
+              WHEN ? THEN 'available'
+              ELSE availability
+            END,
+            status = CASE
+              WHEN ? THEN 'active'
+              ELSE status
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            int(explicitly_reavailable),
+            int(explicitly_reavailable),
+            candidate_id,
+        ),
+    )
 
 
 def _upsert_discovery_candidate(
@@ -2207,8 +2407,10 @@ def list_discovery_runs(db_path: str | Path, limit: int = 30) -> list[dict[str, 
         rows = conn.execute(
             """
             SELECT id, pool_id, keyword_id, keyword, source, status,
-              discovered_count, candidate_count, evaluated_count, error_type,
-              error_message, screenshot_path, raw_snapshot_path, started_at, finished_at
+              discovered_count, candidate_count, detail_query_count,
+              detail_verified_count, detail_rejected_count, evaluated_count,
+              xianyu_query_count, resale_sampled_count, error_type, error_message,
+              screenshot_path, raw_snapshot_path, started_at, finished_at
             FROM discovery_runs
             ORDER BY id DESC LIMIT ?
             """,

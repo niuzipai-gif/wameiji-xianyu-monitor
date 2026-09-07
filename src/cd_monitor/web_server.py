@@ -119,6 +119,7 @@ from cd_monitor.storage.sqlite import (
     list_discovery_keywords,
     list_discovery_opportunities,
     list_discovery_pools,
+    list_discovery_runs,
 )
 
 
@@ -534,6 +535,7 @@ def _build_handler(
                         "summary": discovery_summary(db_path),
                         "pools": _discovery_pool_views(db_path),
                         "opportunities": _discovery_opportunity_views(db_path),
+                        "runs": list_discovery_runs(db_path, limit=30),
                     }
                 )
                 return

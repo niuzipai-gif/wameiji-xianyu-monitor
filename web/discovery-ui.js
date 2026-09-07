@@ -56,6 +56,40 @@
     if (element && element.textContent !== text) element.textContent = text;
   }
 
+  function pauseReasonLabel(reason) {
+    const labels = {
+      consecutive_detail_access_blocks: "详情页访问受阻",
+      detail_verification_rate_below_50_percent: "详情页验证率过低",
+      source_url_duplicate_rate_above_5_percent: "搜索结果 URL 重复异常",
+    };
+    return labels[reason] || "采集质量需要检查";
+  }
+
+  function setDiscoveryStatus(text, state) {
+    setText("discoveryStatusText", text);
+    const element = document.getElementById("discoveryStatus");
+    if (!element) return;
+    ["idle", "running", "paused_quality"].forEach((name) => element.classList.remove(name));
+    element.classList.add(state);
+  }
+
+  function renderDiscoveryStatus(summary) {
+    const pools = Array.isArray(view.board && view.board.pools) ? view.board.pools : [];
+    const pausedPool = pools.find((pool) => pool && pool.enabled && pool.capture_state === "paused_quality");
+    if (pausedPool) {
+      setDiscoveryStatus(
+        "已自动暂停 · " + typeLabel(pausedPool.media_type) + " · " + pauseReasonLabel(pausedPool.pause_reason),
+        "paused_quality",
+      );
+      return;
+    }
+    if (summary.last_scan_at) {
+      setDiscoveryStatus("已同步 · " + timeLabel(summary.last_scan_at), "running");
+      return;
+    }
+    setDiscoveryStatus("等待本机采集", "idle");
+  }
+
   function setCommandMessage(text, error) {
     const element = document.getElementById("discoveryCommandStatus");
     if (!element) return;
@@ -114,7 +148,7 @@
     setText("kpiProfit", cny(expectedProfit));
     setText("kpiMax", cny(highestProfit));
     setText("kpiHitRate", hitRate + "%");
-    setText("discoveryStatusText", summary.last_scan_at ? "已同步 · " + timeLabel(summary.last_scan_at) : "等待本机采集");
+    renderDiscoveryStatus(summary);
   }
 
   function safeHttpUrl(value) {
@@ -289,22 +323,29 @@
       .map((keyword) => keyword.keyword)
       .join("\n");
     const enabled = Boolean(pool.enabled);
+    const paused = enabled && pool.capture_state === "paused_quality";
+    const stateClass = paused ? "bad" : (enabled ? "ok" : "idle");
+    const stateLabel = paused ? "已自动暂停" : (enabled ? "运行中" : "已停用");
+    const stateDetail = paused ? " · 原因：" + pauseReasonLabel(pool.pause_reason) : "";
     const marginPercent = Math.round((Number(pool.min_margin) || 0) * 100);
     return [
       '<article class="discovery-pool" data-pool-id="' + esc(id) + '">',
         '<div class="discovery-pool-title">',
-          '<div><h4>' + esc(pool.name) + '</h4><p>' + esc(typeLabel(pool.media_type)) + ' · 上次扫描：' + esc(timeLabel(pool.last_scanned_at)) + '</p></div>',
-          '<span class="status ' + (enabled ? "ok" : "idle") + '">' + (enabled ? "已启用" : "已暂停") + "</span>",
+          '<div><h4>' + esc(pool.name) + '</h4><p>' + esc(typeLabel(pool.media_type)) + ' · 上次扫描：' + esc(timeLabel(pool.last_scanned_at)) + esc(stateDetail) + '</p></div>',
+          '<span class="status ' + stateClass + '">' + stateLabel + "</span>",
         '</div>',
         '<div class="discovery-pool-actions">',
-          '<button class="primary" type="button" data-discovery-action="scan" data-pool-id="' + esc(id) + '">立即扫描此池</button>',
+          (paused
+            ? '<button class="primary" type="button" data-discovery-action="resume-pool">恢复此池</button>'
+            : '<button class="primary" type="button" data-discovery-action="scan" data-pool-id="' + esc(id) + '">立即扫描此池</button>'),
           '<button type="button" data-discovery-action="save-pool">保存采集规则</button>',
         '</div>',
         '<div class="discovery-rule-grid">',
           '<label><span>启用采集</span><input data-discovery-field="enabled" type="checkbox" ' + (enabled ? "checked" : "") + ' /></label>',
           '<label><span>扫描间隔（分钟）</span><input data-discovery-field="scan_interval_minutes" type="number" min="5" max="1440" value="' + esc(pool.scan_interval_minutes) + '" /></label>',
           '<label><span>每轮关键词数</span><input data-discovery-field="keyword_budget" type="number" min="1" max="10" value="' + esc(pool.keyword_budget) + '" /></label>',
-          '<label><span>每词候选上限</span><input data-discovery-field="candidate_budget" type="number" min="1" max="50" value="' + esc(pool.candidate_budget) + '" /></label>',
+          '<label><span>每轮详情页上限</span><input data-discovery-field="detail_budget" type="number" min="0" max="10" value="' + esc(pool.detail_budget ?? 4) + '" /></label>',
+          '<label><span>每轮闲鱼商品上限</span><input data-discovery-field="xianyu_query_budget" type="number" min="0" max="10" value="' + esc(pool.xianyu_query_budget ?? 3) + '" /></label>',
           '<label><span>最低预估净利（CNY）</span><input data-discovery-field="min_profit_cny" type="number" min="0" value="' + esc(pool.min_profit_cny) + '" /></label>',
           '<label><span>最低利润率（%）</span><input data-discovery-field="min_margin_percent" type="number" min="0" max="100" value="' + esc(marginPercent) + '" /></label>',
         '</div>',
@@ -386,7 +427,8 @@
       enabled: Boolean(root.querySelector('[data-discovery-field="enabled"]')?.checked),
       scan_interval_minutes: numberValue(root, "scan_interval_minutes", 30, 5, 1440),
       keyword_budget: numberValue(root, "keyword_budget", 2, 1, 10),
-      candidate_budget: numberValue(root, "candidate_budget", 2, 1, 50),
+      detail_budget: numberValue(root, "detail_budget", 4, 0, 10),
+      xianyu_query_budget: numberValue(root, "xianyu_query_budget", 3, 0, 10),
       min_profit_cny: numberValue(root, "min_profit_cny", 35, 0, 100000),
       min_margin: numberValue(root, "min_margin_percent", 25, 0, 100) / 100,
     };
@@ -396,6 +438,21 @@
       setTimeout(refreshBoard, 1200);
     } catch (error) {
       setCommandMessage("保存采集规则失败：" + error.message, true);
+    }
+  }
+
+  async function resumePool(root) {
+    const poolId = Number(root.getAttribute("data-pool-id"));
+    try {
+      await apiPost("/api/discovery/commands", {
+        command_type: "set_pool",
+        pool_id: poolId,
+        updates: { capture_state: "active" },
+      });
+      setCommandMessage("恢复命令已提交；采集电脑收到后会先按新的质量门槛运行。", false);
+      setTimeout(refreshBoard, 1200);
+    } catch (error) {
+      setCommandMessage("恢复采集失败：" + error.message, true);
     }
   }
 
@@ -449,6 +506,7 @@
       if (!root) return;
       const action = button.getAttribute("data-discovery-action");
       if (action === "scan") queueScan(button.getAttribute("data-pool-id"));
+      if (action === "resume-pool") resumePool(root);
       if (action === "save-pool") savePool(root);
       if (action === "save-keywords") saveKeywords(root);
     });

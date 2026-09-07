@@ -24,7 +24,12 @@ _TITLE_NOISE_PATTERNS = (
     re.compile(r"トレカ(?:[Ａ-ＺA-Z]?タイプ?\d*種?)?|フォトカード(?:付)?|生写真"),
     re.compile(r"送料無料|メール便|最短翌日配達対応|楽天ブックス|オリジナルステッカー"),
     re.compile(
-        r"\b(?:blu[\s-]?ray|bd|dvd|cd|disc|album|single|edition|limited|bonus)\b",
+        # Japanese reseller titles commonly attach ``付`` directly to a Latin
+        # format name (for example ``Blu-ray付``). ``\b`` does not see a
+        # boundary before a CJK character, leaving the format in a supposedly
+        # product-only query and causing a same-product result to be rejected.
+        r"(?<![A-Za-z])(?:blu[\s-]?ray|bd|dvd|cd|disc|album|single|edition|limited|bonus)"
+        r"(?![A-Za-z])(?:付(?:き)?|同梱)?",
         re.IGNORECASE,
     ),
     re.compile(r"ブルーレイ|ディスク|アルバム|シングル"),

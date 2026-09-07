@@ -725,7 +725,7 @@ body.kuro #discoveryCommandStatus.error { color: #b43f52; }
   background: rgba(94, 139, 94, 0.18);
   color: #5e8b5e;
 }
-.scraper-status.error, .scraper-status.not_running {
+.scraper-status.error, .scraper-status.not_running, .scraper-status.paused_quality {
   background: rgba(180, 80, 80, 0.15);
   color: #b45050;
 }

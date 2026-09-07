@@ -10,9 +10,12 @@ from cd_monitor.services.discovery import scan_discovery_keyword
 from cd_monitor.sources.wikidata_aliases import ResolvedTitleAlias
 from cd_monitor.storage.sqlite import (
     discovery_summary,
+    get_discovery_candidate_by_identity,
+    get_discovery_pool,
     get_discovery_source_cooldown,
     list_discovery_opportunities,
     list_discovery_pools,
+    list_discovery_runs,
     update_discovery_pool,
 )
 
@@ -20,6 +23,345 @@ from cd_monitor.storage.sqlite import (
 async def _verified_detail(item: MarketItem) -> MarketItem:
     """Offline stand-in for a separately tested successful Wameiji detail read."""
     return replace(item, detail_verified=True)
+
+
+def test_four_bad_detail_pages_pause_the_pool_without_xianyu_calls(
+    tmp_path: Path,
+) -> None:
+    """A bad detail batch stops before broadening the collection further."""
+
+    db_path = tmp_path / "selection.db"
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title=f"Artist {index} CD 初回限定盤",
+                price=1000 + index,
+                currency="JPY",
+                external_item_id=f"bad-detail-{index}",
+                url=f"/mall/mercari/detail/bad-detail-{index}",
+                availability="available",
+            )
+            for index in range(4)
+        ]
+
+    async def fetch_wameiji_detail(_item: MarketItem) -> None:
+        return None
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        raise AssertionError("unverified detail pages must never query Xianyu")
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(
+        db_path,
+        pool_id,
+        {
+            "detail_budget": 4,
+            "xianyu_query_budget": 3,
+        },
+    )
+
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    pool = get_discovery_pool(db_path, pool_id)
+    assert result.status == "paused_quality"
+    assert result.detail_query_count == 4
+    assert pool.capture_state == "paused_quality"
+    assert pool.pause_reason == "detail_verification_rate_below_50_percent"
+
+
+def test_two_detail_access_blocks_pause_the_pool_before_resale_lookup(
+    tmp_path: Path,
+) -> None:
+    """Two access challenges mean the browser session needs a human reset."""
+
+    db_path = tmp_path / "selection.db"
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title=f"Artist {index} CD 初回限定盤",
+                price=1000 + index,
+                currency="JPY",
+                external_item_id=f"redirected-detail-{index}",
+                url=f"/mall/mercari/detail/redirected-detail-{index}",
+                availability="available",
+            )
+            for index in range(2)
+        ]
+
+    async def fetch_wameiji_detail(_item: MarketItem) -> None:
+        raise RuntimeError("wameiji_detail:redirected_away_from_listing")
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        raise AssertionError("a blocked detail browser must not enter resale lookup")
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(
+        db_path,
+        pool_id,
+        {"detail_budget": 2, "xianyu_query_budget": 3},
+    )
+
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    pool = get_discovery_pool(db_path, pool_id)
+    assert result.status == "paused_quality"
+    assert result.detail_query_count == 2
+    assert pool.capture_state == "paused_quality"
+    assert pool.pause_reason == "consecutive_detail_access_blocks"
+
+
+def test_detail_backlog_at_high_watermark_skips_new_search_cards(tmp_path: Path) -> None:
+    """Existing source-detail debt is drained before another broad search."""
+
+    db_path = tmp_path / "selection.db"
+    phase = "seed"
+    search_calls: list[str] = []
+    detail_calls: list[str] = []
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        search_calls.append(phase)
+        if phase != "seed":
+            raise AssertionError("high detail backlog must suppress a new search page")
+        return [
+            MarketItem(
+                source="wameiji",
+                title=f"Artist {index} CD 初回限定盤",
+                price=1000 + index,
+                currency="JPY",
+                external_item_id=f"backlog-high-water-{index}",
+                url=f"/mall/mercari/detail/backlog-high-water-{index}",
+                availability="available",
+            )
+            for index in range(2)
+        ]
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        detail_calls.append(str(item.external_item_id))
+        return replace(item, detail_verified=True)
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        raise AssertionError("resale work is intentionally disabled for this queue test")
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(
+        db_path,
+        pool_id,
+        {"detail_budget": 0, "xianyu_query_budget": 0, "queue_high_watermark": 2},
+    )
+    asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    phase = "drain"
+    update_discovery_pool(db_path, pool_id, {"detail_budget": 1})
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert result.discovered_count == result.candidate_count == 0
+    assert result.detail_query_count == 1
+    assert search_calls == ["seed"]
+    assert detail_calls == ["backlog-high-water-0"]
+
+
+def test_duplicate_source_urls_in_one_search_batch_pause_before_detail_reads(
+    tmp_path: Path,
+) -> None:
+    """A parser that repeats listing URLs must not consume source-detail budget."""
+
+    db_path = tmp_path / "selection.db"
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        unique = [
+            MarketItem(
+                source="wameiji",
+                title=f"Unique Artist {index} CD 初回限定盤",
+                price=1000 + index,
+                currency="JPY",
+                external_item_id=f"unique-url-{index}",
+                url=f"/mall/mercari/detail/unique-url-{index}",
+                availability="available",
+            )
+            for index in range(17)
+        ]
+        repeated = [
+            MarketItem(
+                source="wameiji",
+                title="Repeated Artist CD 初回限定盤",
+                price=1200,
+                currency="JPY",
+                external_item_id=f"repeated-url-{index}",
+                url="/mall/mercari/detail/repeated-source-url",
+                availability="available",
+            )
+            for index in range(3)
+        ]
+        return [*unique, *repeated]
+
+    async def fetch_wameiji_detail(_item: MarketItem) -> MarketItem:
+        raise AssertionError("duplicate source URLs must stop before detail reads")
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        raise AssertionError("duplicate source URLs must stop before resale lookup")
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(
+        db_path,
+        pool_id,
+        {"search_card_budget": 20, "detail_budget": 4, "xianyu_query_budget": 3},
+    )
+
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    pool = get_discovery_pool(db_path, pool_id)
+    assert result.status == "paused_quality"
+    assert result.detail_query_count == result.xianyu_query_count == 0
+    assert pool.capture_state == "paused_quality"
+    assert pool.pause_reason == "source_url_duplicate_rate_above_5_percent"
+
+
+def test_completed_run_exposes_detail_and_resale_stage_metrics(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title="Artist SRCL-4040 CD",
+                price=900,
+                currency="JPY",
+                catalog_no="SRCL-4040",
+                external_item_id="stage-metrics",
+                url="/mall/mercari/detail/stage-metrics",
+                availability="available",
+            )
+        ]
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        return [
+            XianyuPriceSample(catalog_no=query, title="SRCL-4040 CD", price_cny=280),
+            XianyuPriceSample(catalog_no=query, title="SRCL-4040 CD", price_cny=300),
+        ]
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=_verified_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    run = list_discovery_runs(db_path, limit=1)[0]
+    assert run["detail_query_count"] == 1
+    assert run["detail_verified_count"] == 1
+    assert run["detail_rejected_count"] == 0
+    assert run["xianyu_query_count"] == 1
+    assert run["resale_sampled_count"] == 1
+    candidate = get_discovery_candidate_by_identity(
+        db_path, pool_id, "source:stage-metrics"
+    )
+    assert candidate is not None
+    assert candidate.pipeline_stage == "evaluated"
+    assert candidate.product_key == "catalog:srcl-4040"
+
+
+def test_failed_detail_attempt_is_persisted_as_blocked_queue_state(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title="Artist CD 初回限定盤",
+                price=900,
+                currency="JPY",
+                external_item_id="blocked-detail",
+                url="/mall/mercari/detail/blocked-detail",
+                availability="available",
+            )
+        ]
+
+    async def fetch_wameiji_detail(_item: MarketItem) -> None:
+        return None
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        raise AssertionError("an unverified detail is not a resale candidate")
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(db_path, pool_id, {"detail_budget": 1})
+    asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    candidate = get_discovery_candidate_by_identity(
+        db_path, pool_id, "source:blocked-detail"
+    )
+    assert candidate is not None
+    assert candidate.detail_attempt_count == 1
+    assert candidate.pipeline_stage == "blocked"
+    assert candidate.last_detail_error == "detail_parse_failed"
 
 
 def test_keyword_scan_creates_a_ranked_opportunity_and_skips_unchanged_requery(
@@ -205,6 +547,74 @@ def test_detail_fetches_are_bounded_by_the_candidate_budget(tmp_path: Path) -> N
 
     assert detail_urls == ["/mall/mercari/detail/listing-0"]
     assert result.xianyu_query_count == result.evaluated_count == 1
+
+
+def test_second_search_drains_previous_detail_backlog_before_its_new_card(
+    tmp_path: Path,
+) -> None:
+    """The next page cannot starve a source URL already queued for detail."""
+
+    db_path = tmp_path / "selection.db"
+    phase = 0
+    detail_calls: list[str] = []
+
+    def card(identifier: str) -> MarketItem:
+        return MarketItem(
+            source="wameiji",
+            title=f"Artist {identifier} CD 初回限定盤",
+            price=1200,
+            currency="JPY",
+            external_item_id=identifier,
+            url=f"/mall/mercari/detail/{identifier}",
+            availability="available",
+        )
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [card("first"), card("backlog")] if phase == 0 else [card("new-page")]
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        detail_calls.append(str(item.external_item_id))
+        return replace(item, detail_verified=True)
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        return []
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(
+        db_path,
+        pool_id,
+        {
+            "candidate_budget": 1,
+            "detail_budget": 1,
+            "xianyu_query_budget": 0,
+        },
+    )
+
+    first = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+    phase = 1
+    second = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert first.detail_query_count == second.detail_query_count == 1
+    assert detail_calls == ["first", "backlog"]
 
 
 def test_detail_budget_skips_a_search_card_that_explicitly_lacks_the_game(
@@ -470,8 +880,10 @@ def test_detail_page_can_reject_a_misclassified_search_card_before_xianyu(
         ).fetchone() == ("ignored", 1)
 
 
-def test_keyword_scan_keeps_distinct_source_listings_for_one_catalog(tmp_path: Path) -> None:
-    """Different source listings for the same catalog are distinct purchase opportunities."""
+def test_two_verified_source_listings_for_one_catalog_share_one_xianyu_query(
+    tmp_path: Path,
+) -> None:
+    """Different purchase links reuse one market lookup after detail verification."""
     db_path = tmp_path / "selection.db"
     xianyu_queries: list[str] = []
 
@@ -519,12 +931,247 @@ def test_keyword_scan_keeps_distinct_source_listings_for_one_catalog(tmp_path: P
     )
 
     assert result.evaluated_count == 2
-    assert xianyu_queries == ["SRCL-3520", "SRCL-3520"]
+    assert xianyu_queries == ["SRCL-3520"]
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
             "SELECT identity_key, source_price FROM discovery_candidates ORDER BY source_price"
         ).fetchall()
     assert rows == [("source:cheap-listing", 900.0), ("source:expensive-listing", 1600.0)]
+
+
+def test_verified_detail_waits_in_persistent_resale_queue_for_a_later_budget(
+    tmp_path: Path,
+) -> None:
+    """A detail read remains useful even when its resale budget is exhausted."""
+
+    db_path = tmp_path / "selection.db"
+    phase = 0
+    detail_calls: list[str] = []
+    xianyu_queries: list[str] = []
+    source = MarketItem(
+        source="wameiji",
+        title="Artist SRCL-9090 初回限定盤 CD",
+        price=900,
+        currency="JPY",
+        catalog_no="SRCL-9090",
+        external_item_id="persistent-resale-queue",
+        url="/mall/mercari/detail/persistent-resale-queue",
+        availability="available",
+    )
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [source] if phase == 0 else []
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        detail_calls.append(str(item.external_item_id))
+        return replace(item, detail_verified=True)
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        xianyu_queries.append(query)
+        return [
+            XianyuPriceSample(catalog_no=query, title="SRCL-9090 CD", price_cny=280),
+            XianyuPriceSample(catalog_no=query, title="SRCL-9090 CD", price_cny=300),
+        ]
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(
+        db_path,
+        pool_id,
+        {
+            "candidate_budget": 1,
+            "detail_budget": 1,
+            "xianyu_query_budget": 0,
+        },
+    )
+    first = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    phase = 1
+    update_discovery_pool(db_path, pool_id, {"xianyu_query_budget": 1})
+    second = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert first.detail_query_count == 1
+    assert first.xianyu_query_count == first.evaluated_count == 0
+    assert second.detail_query_count == 0
+    assert second.evaluated_count == 1
+    assert second.resale_sampled_count == 1
+    assert detail_calls == ["persistent-resale-queue"]
+    assert xianyu_queries == ["SRCL-9090"]
+
+
+def test_stale_resale_samples_are_rechecked_without_reopening_wameiji_detail(
+    tmp_path: Path,
+) -> None:
+    """A stable source listing still needs a low-frequency Xianyu price refresh."""
+
+    db_path = tmp_path / "selection.db"
+    phase = 0
+    detail_calls: list[str] = []
+    xianyu_queries: list[str] = []
+    source = MarketItem(
+        source="wameiji",
+        title="Artist SRCL-8181 初回限定盤 CD",
+        price=900,
+        currency="JPY",
+        catalog_no="SRCL-8181",
+        external_item_id="stale-resale-sample",
+        url="/mall/mercari/detail/stale-resale-sample",
+        availability="available",
+    )
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [source] if phase == 0 else []
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        detail_calls.append(str(item.external_item_id))
+        return replace(item, detail_verified=True)
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        xianyu_queries.append(query)
+        resale_price = 280 if phase == 0 else 380
+        return [
+            XianyuPriceSample(catalog_no=query, title="SRCL-8181 CD", price_cny=resale_price),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="SRCL-8181 CD",
+                price_cny=resale_price + 20,
+            ),
+        ]
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(
+        db_path,
+        pool_id,
+        {"detail_budget": 1, "xianyu_query_budget": 1},
+    )
+    asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE discovery_candidates
+            SET last_xianyu_checked_at = datetime(CURRENT_TIMESTAMP, '-181 minutes')
+            WHERE identity_key = 'source:stale-resale-sample'
+            """
+        )
+        conn.commit()
+
+    phase = 1
+    second = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert second.detail_query_count == 0
+    assert second.xianyu_query_count == second.evaluated_count == 1
+    assert detail_calls == ["stale-resale-sample"]
+    assert xianyu_queries == ["SRCL-8181", "SRCL-8181"]
+
+
+def test_changed_search_price_reopens_the_wameiji_detail_before_repricing(
+    tmp_path: Path,
+) -> None:
+    """A search-card price change cannot overwrite a detail-verified purchase."""
+
+    db_path = tmp_path / "selection.db"
+    phase = 0
+    detail_prices: list[float] = []
+    xianyu_queries: list[str] = []
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        price = 900 if phase == 0 else 600
+        return [
+            MarketItem(
+                source="wameiji",
+                title="Artist SRCL-6060 CD",
+                price=price,
+                currency="JPY",
+                catalog_no="SRCL-6060",
+                external_item_id="changed-detail-price",
+                url="/mall/mercari/detail/changed-detail-price",
+                availability="available",
+            )
+        ]
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        detail_prices.append(item.price)
+        return replace(item, detail_verified=True)
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        xianyu_queries.append(query)
+        return [
+            XianyuPriceSample(catalog_no=query, title="SRCL-6060 CD", price_cny=280),
+            XianyuPriceSample(catalog_no=query, title="SRCL-6060 CD", price_cny=300),
+        ]
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(
+        db_path,
+        pool_id,
+        {
+            "candidate_budget": 1,
+            "detail_budget": 1,
+            "xianyu_query_budget": 1,
+        },
+    )
+    asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+    phase = 1
+    asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert detail_prices == [900, 600]
+    assert xianyu_queries == ["SRCL-6060", "SRCL-6060"]
 
 
 def test_unverified_search_card_cannot_enter_the_profit_board(tmp_path: Path) -> None:
@@ -1048,9 +1695,9 @@ def test_game_discovery_skips_xianyu_when_detail_is_missing_the_core_media(
     assert xianyu_queries == []
     with sqlite3.connect(db_path) as conn:
         assert conn.execute(
-            "SELECT status FROM discovery_candidates WHERE source_item_id = ?",
+            "SELECT status, detail_attempt_count FROM discovery_candidates WHERE source_item_id = ?",
             ("incomplete-collector-box",),
-        ).fetchone()[0] == "ignored"
+        ).fetchone() == ("ignored", 1)
 
 
 def test_title_only_discovery_retries_with_an_exact_public_title_alias(tmp_path: Path) -> None:

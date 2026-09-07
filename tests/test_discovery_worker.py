@@ -218,6 +218,44 @@ def test_worker_respects_disabled_pool_even_when_commanded(tmp_path: Path) -> No
     assert command_client.completions == [(92, "completed", {"runs": 0, "status": "ok"})]
 
 
+def test_worker_skips_paused_quality_pool_before_browser_fetch(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pools = list_discovery_pools(db_path)
+    pool_id = pools[0].id
+    assert pool_id is not None
+    assert pools[1].id is not None
+    update_discovery_pool(db_path, pools[1].id, {"enabled": False})
+    update_discovery_pool(
+        db_path,
+        pool_id,
+        {
+            "capture_state": "paused_quality",
+            "pause_reason": "detail_verification_rate_below_50_percent",
+        },
+    )
+    calls: list[str] = []
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        calls.append("wameiji")
+        return []
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        raise AssertionError("paused collection must not query Xianyu")
+
+    worker = DiscoveryWorker(
+        db_path=db_path,
+        fetch_wameiji=fetch_wameiji,
+        fetch_wameiji_detail=_verified_detail,
+        fetch_xianyu=fetch_xianyu,
+    )
+
+    result = asyncio.run(worker.run_once())
+
+    assert result.scan_count == 0
+    assert calls == []
+
+
 def test_remote_command_identity_survives_render_id_reset(tmp_path: Path) -> None:
     """A Render restart can reuse numeric ids, so local mirroring needs its UUID."""
     db_path = tmp_path / "selection.db"

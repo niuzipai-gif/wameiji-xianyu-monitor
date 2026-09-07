@@ -45,6 +45,8 @@ def test_selection_board_and_remote_command_acknowledgement(tmp_path, monkeypatc
         assert board["pools"][0]["keywords"][0]["keyword"] == "初回限定盤"
         assert board["opportunities"] == []
         assert board["summary"]["active_candidates"] == 0
+        assert board["runs"] == []
+        assert board["pools"][0]["capture_state"] == "active"
 
         code, command = _request(
             f"{base_url}/api/discovery/commands?access_token=viewer-secret",

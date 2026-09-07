@@ -96,10 +96,16 @@ class DiscoveryWorker:
             pools = [
                 pool
                 for pool in list_discovery_pools(self.db_path)
-                if pool.enabled and (force_all or pool.id in forced_pool_ids)
+                if pool.enabled
+                and pool.capture_state == "active"
+                and (force_all or pool.id in forced_pool_ids)
             ]
         else:
-            pools = [pool for pool in list_discovery_pools(self.db_path) if pool.enabled]
+            pools = [
+                pool
+                for pool in list_discovery_pools(self.db_path)
+                if pool.enabled and pool.capture_state == "active"
+            ]
 
         scan_results = []
         for pool in pools:
