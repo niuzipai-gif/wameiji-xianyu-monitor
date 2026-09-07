@@ -1291,17 +1291,7 @@ def get_discovery_candidate_by_identity(
     init_db(db_path)
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            """
-            SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
-              artist, edition, source_item_id, source_url, source_price,
-              source_currency, availability, status, observation_count,
-              missing_scan_count, last_xianyu_checked_at, raw_text
-            FROM discovery_candidates
-            WHERE pool_id = ? AND identity_key = ?
-            """,
-            (pool_id, identity_key),
-        ).fetchone()
+        row = _select_discovery_candidate_by_identity(conn, pool_id, identity_key)
     if row is None:
         return None
     return _discovery_candidate_from_row(row)
@@ -1348,6 +1338,22 @@ def _discovery_candidate_from_row(row: sqlite3.Row) -> DiscoveryCandidate:
         last_xianyu_checked_at=row["last_xianyu_checked_at"],
         raw_text=row["raw_text"],
     )
+
+
+def _select_discovery_candidate_by_identity(
+    conn: sqlite3.Connection, pool_id: int, identity_key: str
+) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
+          artist, edition, source_item_id, source_url, source_price,
+          source_currency, availability, status, observation_count,
+          missing_scan_count, last_xianyu_checked_at, raw_text
+        FROM discovery_candidates
+        WHERE pool_id = ? AND identity_key = ?
+        """,
+        (pool_id, identity_key),
+    ).fetchone()
 
 
 def record_discovery_run(
@@ -1509,60 +1515,93 @@ def _refresh_discovery_pool_next_run(conn: sqlite3.Connection, pool_id: int) -> 
 def upsert_discovery_candidate(db_path: str | Path, candidate: DiscoveryCandidate) -> int:
     init_db(db_path)
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            INSERT INTO discovery_candidates (
-              pool_id, media_type, identity_key, catalog_no, jan, title, artist,
-              edition, source_item_id, source_url, source_price, source_currency,
-              availability, status, observation_count, missing_scan_count,
-              last_xianyu_checked_at, raw_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-            ON CONFLICT(pool_id, identity_key) DO UPDATE SET
-              media_type = excluded.media_type,
-              catalog_no = COALESCE(excluded.catalog_no, discovery_candidates.catalog_no),
-              jan = COALESCE(excluded.jan, discovery_candidates.jan),
-              title = excluded.title,
-              artist = COALESCE(excluded.artist, discovery_candidates.artist),
-              edition = COALESCE(excluded.edition, discovery_candidates.edition),
-              source_item_id = COALESCE(excluded.source_item_id, discovery_candidates.source_item_id),
-              source_url = COALESCE(excluded.source_url, discovery_candidates.source_url),
-              source_price = excluded.source_price,
-              source_currency = excluded.source_currency,
-              availability = excluded.availability,
-              status = CASE
-                WHEN excluded.availability IN ('sold_out', 'unavailable') THEN 'expired'
-                ELSE 'active'
-              END,
-              observation_count = discovery_candidates.observation_count + 1,
-              missing_scan_count = 0,
-              raw_text = COALESCE(excluded.raw_text, discovery_candidates.raw_text),
-              last_seen_at = CURRENT_TIMESTAMP,
-              updated_at = CURRENT_TIMESTAMP
-            """,
-            (
-                candidate.pool_id,
-                candidate.media_type,
-                candidate.identity_key,
-                candidate.catalog_no,
-                candidate.jan,
-                candidate.title,
-                candidate.artist,
-                candidate.edition,
-                candidate.source_item_id,
-                candidate.source_url,
-                candidate.source_price,
-                candidate.source_currency,
-                candidate.availability,
-                candidate.status,
-                candidate.missing_scan_count,
-                candidate.last_xianyu_checked_at,
-                candidate.raw_text,
-            ),
-        )
-        row = conn.execute(
-            "SELECT id FROM discovery_candidates WHERE pool_id = ? AND identity_key = ?",
-            (candidate.pool_id, candidate.identity_key),
-        ).fetchone()
+        return _upsert_discovery_candidate(conn, candidate)
+
+
+def upsert_discovery_candidates_with_previous(
+    db_path: str | Path, candidates: Iterable[DiscoveryCandidate]
+) -> list[tuple[DiscoveryCandidate | None, int]]:
+    """Upsert a source page in one transaction and retain pre-write state.
+
+    Discovery needs the previous observation to decide whether a costly Xianyu
+    lookup is necessary. Returning it alongside the resolved row id keeps that
+    decision exact without opening one SQLite connection per visible card.
+    """
+
+    items = list(candidates)
+    if not items:
+        return []
+    init_db(db_path)
+    results: list[tuple[DiscoveryCandidate | None, int]] = []
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        for candidate in items:
+            row = _select_discovery_candidate_by_identity(
+                conn, candidate.pool_id, candidate.identity_key
+            )
+            previous = _discovery_candidate_from_row(row) if row is not None else None
+            candidate_id = _upsert_discovery_candidate(conn, candidate)
+            results.append((previous, candidate_id))
+    return results
+
+
+def _upsert_discovery_candidate(
+    conn: sqlite3.Connection, candidate: DiscoveryCandidate
+) -> int:
+    conn.execute(
+        """
+        INSERT INTO discovery_candidates (
+          pool_id, media_type, identity_key, catalog_no, jan, title, artist,
+          edition, source_item_id, source_url, source_price, source_currency,
+          availability, status, observation_count, missing_scan_count,
+          last_xianyu_checked_at, raw_text
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+        ON CONFLICT(pool_id, identity_key) DO UPDATE SET
+          media_type = excluded.media_type,
+          catalog_no = COALESCE(excluded.catalog_no, discovery_candidates.catalog_no),
+          jan = COALESCE(excluded.jan, discovery_candidates.jan),
+          title = excluded.title,
+          artist = COALESCE(excluded.artist, discovery_candidates.artist),
+          edition = COALESCE(excluded.edition, discovery_candidates.edition),
+          source_item_id = COALESCE(excluded.source_item_id, discovery_candidates.source_item_id),
+          source_url = COALESCE(excluded.source_url, discovery_candidates.source_url),
+          source_price = excluded.source_price,
+          source_currency = excluded.source_currency,
+          availability = excluded.availability,
+          status = CASE
+            WHEN excluded.availability IN ('sold_out', 'unavailable') THEN 'expired'
+            ELSE 'active'
+          END,
+          observation_count = discovery_candidates.observation_count + 1,
+          missing_scan_count = 0,
+          raw_text = COALESCE(excluded.raw_text, discovery_candidates.raw_text),
+          last_seen_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+        """,
+        (
+            candidate.pool_id,
+            candidate.media_type,
+            candidate.identity_key,
+            candidate.catalog_no,
+            candidate.jan,
+            candidate.title,
+            candidate.artist,
+            candidate.edition,
+            candidate.source_item_id,
+            candidate.source_url,
+            candidate.source_price,
+            candidate.source_currency,
+            candidate.availability,
+            candidate.status,
+            candidate.missing_scan_count,
+            candidate.last_xianyu_checked_at,
+            candidate.raw_text,
+        ),
+    )
+    row = conn.execute(
+        "SELECT id FROM discovery_candidates WHERE pool_id = ? AND identity_key = ?",
+        (candidate.pool_id, candidate.identity_key),
+    ).fetchone()
     if row is None:
         raise RuntimeError("Discovery candidate insert did not resolve an id")
     return int(row[0])

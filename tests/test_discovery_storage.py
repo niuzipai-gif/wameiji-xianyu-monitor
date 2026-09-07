@@ -17,6 +17,7 @@ from cd_monitor.storage.sqlite import (
     update_discovery_pool,
     update_discovery_pool_last_scan,
     upsert_discovery_candidate,
+    upsert_discovery_candidates_with_previous,
 )
 
 
@@ -95,6 +96,60 @@ def test_candidate_upsert_keeps_identity_and_refreshes_market_observation(tmp_pa
             (first_id,),
         ).fetchone()
     assert row == (980, "likely_available", 2, "active")
+
+
+def test_batch_candidate_upsert_preserves_previous_values_in_input_order(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    cd_pool = list_discovery_pools(db_path)[0]
+    assert cd_pool.id is not None
+    existing = DiscoveryCandidate(
+        pool_id=cd_pool.id,
+        media_type="cd",
+        identity_key="source:batch-existing",
+        title="Existing Album CD",
+        source_item_id="batch-existing",
+        source_price=1200,
+        source_currency="JPY",
+        availability="available",
+    )
+    existing_id = upsert_discovery_candidate(db_path, existing)
+    refreshed = DiscoveryCandidate(
+        pool_id=cd_pool.id,
+        media_type="cd",
+        identity_key="source:batch-existing",
+        title="Existing Album CD",
+        source_item_id="batch-existing",
+        source_price=950,
+        source_currency="JPY",
+        availability="available",
+    )
+    new = DiscoveryCandidate(
+        pool_id=cd_pool.id,
+        media_type="cd",
+        identity_key="source:batch-new",
+        title="New Album CD",
+        source_item_id="batch-new",
+        source_price=880,
+        source_currency="JPY",
+        availability="available",
+    )
+
+    result = upsert_discovery_candidates_with_previous(db_path, [refreshed, new])
+
+    previous_existing, refreshed_id = result[0]
+    previous_new, new_id = result[1]
+    assert previous_existing is not None
+    assert previous_existing.id == existing_id
+    assert previous_existing.source_price == 1200
+    assert refreshed_id == existing_id
+    assert previous_new is None
+    assert new_id != existing_id
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT identity_key, source_price FROM discovery_candidates ORDER BY identity_key"
+        ).fetchall()
+    assert rows == [("source:batch-existing", 950), ("source:batch-new", 880)]
 
 
 def test_replacing_pool_keywords_disables_stale_default_terms(tmp_path: Path) -> None:

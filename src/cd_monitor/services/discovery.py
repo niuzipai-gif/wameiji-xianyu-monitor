@@ -19,7 +19,6 @@ from cd_monitor.core.models import MarketItem, WatchItem, XianyuPriceSample
 from cd_monitor.core.title_query import clean_title_search_query
 from cd_monitor.core.xianyu_cleaner import estimate_xianyu_price
 from cd_monitor.storage.sqlite import (
-    get_discovery_candidate_by_identity,
     get_discovery_pool,
     get_discovery_source_cooldown,
     insert_discovery_opportunity,
@@ -29,7 +28,7 @@ from cd_monitor.storage.sqlite import (
     record_discovery_run,
     set_discovery_source_cooldown,
     update_discovery_pool_last_scan,
-    upsert_discovery_candidate,
+    upsert_discovery_candidates_with_previous,
 )
 
 FetchWameiji = Callable[[str], Awaitable[list[MarketItem]]]
@@ -168,8 +167,9 @@ async def scan_discovery_keyword(
     # Ingest enough of them for cache hits at the front not to hide later
     # listings, while keeping the local SQLite growth bounded.
     listing_budget = max(pool.candidate_budget * 10, 100)
+    candidate_items: list[tuple[MarketItem, DiscoveryCandidate]] = []
     for item in purchase_items:
-        if candidate_count >= listing_budget:
+        if len(candidate_items) >= listing_budget:
             break
         if not _is_media_relevant(item, pool.media_type):
             continue
@@ -177,11 +177,15 @@ async def scan_discovery_keyword(
         if candidate.identity_key in seen_identity_keys:
             continue
         seen_identity_keys.add(candidate.identity_key)
-        previous = get_discovery_candidate_by_identity(
-            db_path, pool_id, candidate.identity_key
-        )
-        candidate_id = upsert_discovery_candidate(db_path, candidate)
-        candidate_count += 1
+        candidate_items.append((item, candidate))
+
+    candidate_count = len(candidate_items)
+    persisted = upsert_discovery_candidates_with_previous(
+        db_path, [candidate for _, candidate in candidate_items]
+    )
+    for (item, candidate), (previous, candidate_id) in zip(
+        candidate_items, persisted, strict=True
+    ):
         if candidate.availability in {"sold_out", "unavailable"}:
             continue
         if xianyu_blocked:
