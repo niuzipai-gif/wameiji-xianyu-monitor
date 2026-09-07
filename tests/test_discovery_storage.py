@@ -13,6 +13,8 @@ from cd_monitor.storage.sqlite import (
     list_discovery_opportunities,
     list_discovery_pools,
     replace_discovery_keywords,
+    update_discovery_pool,
+    update_discovery_pool_last_scan,
     upsert_discovery_candidate,
 )
 
@@ -110,6 +112,35 @@ def test_replacing_pool_keywords_disables_stale_default_terms(tmp_path: Path) ->
     enabled = [item for item in keywords if item.enabled]
     assert [(item.keyword, item.weight) for item in enabled] == [("动画原声带 初回限定", 3)]
     assert any(item.keyword == "初回限定盤" and not item.enabled for item in keywords)
+
+
+def test_pool_next_run_tracks_the_earliest_due_keyword(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(db_path, pool_id, {"scan_interval_minutes": 25})
+    replace_discovery_keywords(
+        db_path,
+        pool_id,
+        [
+            {"keyword": "first", "weight": 2, "enabled": True},
+            {"keyword": "second", "weight": 1, "enabled": True},
+        ],
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE discovery_keywords SET last_scanned_at = ? WHERE pool_id = ? AND keyword = ?",
+            ("2026-09-07 00:00:00", pool_id, "first"),
+        )
+        conn.execute(
+            "UPDATE discovery_keywords SET last_scanned_at = ? WHERE pool_id = ? AND keyword = ?",
+            ("2026-09-07 00:20:00", pool_id, "second"),
+        )
+
+    update_discovery_pool_last_scan(db_path, pool_id)
+
+    assert list_discovery_pools(db_path)[0].next_run_at == "2026-09-07 00:25:00"
 
 
 def test_selection_board_orders_linked_opportunities_by_profit_descending(tmp_path: Path) -> None:

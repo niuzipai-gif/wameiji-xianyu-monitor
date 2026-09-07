@@ -1193,6 +1193,7 @@ def replace_discovery_keywords(
                 """,
                 (pool_id, keyword, weight, int(enabled)),
             )
+        _refresh_discovery_pool_next_run(conn, pool_id)
     return list_discovery_keywords(db_path, pool_id)
 
 
@@ -1268,6 +1269,7 @@ def update_discovery_pool(
                 f"UPDATE discovery_pools SET {assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 tuple(params),
             )
+            _refresh_discovery_pool_next_run(conn, pool_id)
     return get_discovery_pool(db_path, pool_id)
 
 
@@ -1399,13 +1401,41 @@ def update_discovery_pool_last_scan(db_path: str | Path, pool_id: int) -> None:
         conn.execute(
             """
             UPDATE discovery_pools
-            SET last_scanned_at = CURRENT_TIMESTAMP,
-              next_run_at = datetime(CURRENT_TIMESTAMP, '+' || scan_interval_minutes || ' minutes'),
-              updated_at = CURRENT_TIMESTAMP
+            SET last_scanned_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
             (pool_id,),
         )
+        _refresh_discovery_pool_next_run(conn, pool_id)
+
+
+def _refresh_discovery_pool_next_run(conn: sqlite3.Connection, pool_id: int) -> None:
+    """Mirror the earliest enabled-keyword deadline onto the pool for the UI."""
+
+    conn.execute(
+        """
+        UPDATE discovery_pools
+        SET next_run_at = CASE
+          WHEN EXISTS(
+            SELECT 1
+            FROM discovery_keywords
+            WHERE pool_id = ? AND enabled = 1 AND last_scanned_at IS NULL
+          ) THEN CURRENT_TIMESTAMP
+          ELSE COALESCE(
+            (
+              SELECT MIN(datetime(k.last_scanned_at, '+' || p.scan_interval_minutes || ' minutes'))
+              FROM discovery_keywords AS k
+              JOIN discovery_pools AS p ON p.id = k.pool_id
+              WHERE k.pool_id = ? AND k.enabled = 1 AND k.last_scanned_at IS NOT NULL
+            ),
+            datetime(CURRENT_TIMESTAMP, '+' || scan_interval_minutes || ' minutes')
+          )
+        END,
+        updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (pool_id, pool_id, pool_id),
+    )
 
 
 def upsert_discovery_candidate(db_path: str | Path, candidate: DiscoveryCandidate) -> int:
