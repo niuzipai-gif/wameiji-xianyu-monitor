@@ -21,11 +21,13 @@ from cd_monitor.core.xianyu_cleaner import estimate_xianyu_price
 from cd_monitor.storage.sqlite import (
     get_discovery_candidate_by_identity,
     get_discovery_pool,
+    get_discovery_source_cooldown,
     insert_discovery_opportunity,
     insert_market_items,
     insert_xianyu_samples,
     mark_discovery_candidate_xianyu_checked,
     record_discovery_run,
+    set_discovery_source_cooldown,
     update_discovery_pool_last_scan,
     upsert_discovery_candidate,
 )
@@ -73,6 +75,7 @@ _GAME_HARDWARE_MARKERS = (
     "保護フィルム",
     "ケースのみ",
 )
+_XIANYU_SECURITY_COOLDOWN_SECONDS = 30 * 60
 
 
 @dataclass(slots=True)
@@ -145,7 +148,20 @@ async def scan_discovery_keyword(
     candidate_count = 0
     evaluated_count = 0
     xianyu_query_count = 0
-    xianyu_blocked = False
+    cooldown_until = get_discovery_source_cooldown(db_path, "xianyu")
+    xianyu_blocked = cooldown_until is not None
+    if xianyu_blocked:
+        # Keep ingesting fresh Wameiji candidates during a challenge, but do
+        # not reopen Xianyu from another pool until its cooldown has elapsed.
+        record_discovery_run(
+            db_path,
+            pool_id=pool_id,
+            source="xianyu",
+            status="cooldown",
+            keyword=keyword,
+            error_type="security_cooldown",
+            error_message=f"Xianyu lookup paused until {cooldown_until} after a security check.",
+        )
     opportunity_ids: list[int] = []
     seen_identity_keys: set[str] = set()
     # Wameiji can return over one hundred visible cards for a broad keyword.
@@ -193,6 +209,12 @@ async def scan_discovery_keyword(
                 error_message=str(exc),
             )
             if _is_xianyu_security_check(exc):
+                set_discovery_source_cooldown(
+                    db_path,
+                    "xianyu",
+                    cooldown_seconds=_XIANYU_SECURITY_COOLDOWN_SECONDS,
+                    reason="security_check",
+                )
                 xianyu_blocked = True
             continue
 

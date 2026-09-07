@@ -385,6 +385,13 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
           FOREIGN KEY(keyword_id) REFERENCES discovery_keywords(id) ON DELETE SET NULL
         );
 
+        CREATE TABLE IF NOT EXISTS discovery_source_cooldowns (
+          source TEXT PRIMARY KEY,
+          cooldown_until TIMESTAMP NOT NULL,
+          reason TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS discovery_candidates (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           pool_id INTEGER NOT NULL,
@@ -1412,6 +1419,62 @@ def update_discovery_pool_last_scan(db_path: str | Path, pool_id: int) -> None:
             (pool_id,),
         )
         _refresh_discovery_pool_next_run(conn, pool_id)
+
+
+def get_discovery_source_cooldown(db_path: str | Path, source: str) -> str | None:
+    """Return the active source-wide cooldown deadline, if one exists."""
+
+    init_db(db_path)
+    normalized = source.strip().lower()
+    if not normalized:
+        raise ValueError("source is required")
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT cooldown_until
+            FROM discovery_source_cooldowns
+            WHERE source = ? AND datetime(cooldown_until) > CURRENT_TIMESTAMP
+            """,
+            (normalized,),
+        ).fetchone()
+    return str(row[0]) if row is not None else None
+
+
+def set_discovery_source_cooldown(
+    db_path: str | Path,
+    source: str,
+    *,
+    cooldown_seconds: int,
+    reason: str | None = None,
+) -> str:
+    """Persist the later of an existing and newly requested source cooldown."""
+
+    init_db(db_path)
+    normalized = source.strip().lower()
+    if not normalized:
+        raise ValueError("source is required")
+    seconds = max(1, int(cooldown_seconds))
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO discovery_source_cooldowns (source, cooldown_until, reason)
+            VALUES (?, datetime(CURRENT_TIMESTAMP, ?), ?)
+            ON CONFLICT(source) DO UPDATE SET
+              cooldown_until = CASE
+                WHEN datetime(excluded.cooldown_until)
+                   > datetime(discovery_source_cooldowns.cooldown_until)
+                  THEN excluded.cooldown_until
+                ELSE discovery_source_cooldowns.cooldown_until
+              END,
+              reason = excluded.reason,
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            (normalized, f"+{seconds} seconds", reason),
+        )
+    deadline = get_discovery_source_cooldown(db_path, normalized)
+    if deadline is None:
+        raise RuntimeError("source cooldown was not persisted")
+    return deadline
 
 
 def _refresh_discovery_pool_next_run(conn: sqlite3.Connection, pool_id: int) -> None:

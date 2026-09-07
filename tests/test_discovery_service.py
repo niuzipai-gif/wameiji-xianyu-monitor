@@ -7,6 +7,7 @@ from pathlib import Path
 from cd_monitor.core.models import MarketItem, XianyuPriceSample
 from cd_monitor.services.discovery import scan_discovery_keyword
 from cd_monitor.storage.sqlite import (
+    get_discovery_source_cooldown,
     list_discovery_opportunities,
     list_discovery_pools,
     update_discovery_pool,
@@ -451,6 +452,71 @@ def test_discovery_stops_the_remaining_xianyu_lookups_after_a_security_check(
     assert result.xianyu_query_count == 1
     assert result.evaluated_count == 0
     assert xianyu_queries == ["Artist One Blue Skies"]
+
+
+def test_security_check_cools_down_future_xianyu_lookups_but_keeps_discovery(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "selection.db"
+    xianyu_queries: list[str] = []
+    phase = 0
+
+    first = MarketItem(
+        source="wameiji",
+        title="Artist One Blue Skies CD",
+        price=1000,
+        currency="JPY",
+        external_item_id="security-cooldown-first",
+        availability="available",
+    )
+    second = MarketItem(
+        source="wameiji",
+        title="Game Two Nintendo Switch 限定版",
+        price=5000,
+        currency="JPY",
+        external_item_id="security-cooldown-second",
+        availability="available",
+    )
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [first] if phase == 0 else [second]
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        xianyu_queries.append(query)
+        raise RuntimeError("xianyu:security_check")
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    game_pool_id = list_discovery_pools(db_path)[1].id
+    assert pool_id is not None
+    assert game_pool_id is not None
+    first_result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="初回限定盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+    phase = 1
+    second_result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=game_pool_id,
+            keyword="廃盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert first_result.xianyu_query_count == 1
+    assert get_discovery_source_cooldown(db_path, "xianyu") is not None
+    assert second_result.status == "ok"
+    assert second_result.candidate_count == 1
+    assert second_result.xianyu_query_count == second_result.evaluated_count == 0
+    assert xianyu_queries == ["Artist One Blue Skies"]
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT count(*) FROM discovery_candidates").fetchone()[0] == 2
 
 
 def test_pool_profit_threshold_filters_existing_evaluations_without_a_new_source_lookup(
