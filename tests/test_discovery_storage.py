@@ -81,6 +81,103 @@ def test_detail_queue_keeps_an_older_unverified_listing_after_later_ingest(
     assert [candidate.id for candidate in queued] == [first_id]
 
 
+def test_init_db_quarantines_pre_epoch_unverified_detail_debt_once(tmp_path: Path) -> None:
+    """Old search cards must not starve the first real detail-first batch."""
+
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    assert pool.id is not None
+    legacy_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:pre-epoch-card",
+            title="Unverified legacy card CD",
+            source_item_id="pre-epoch-card",
+            source_url="/mall/mercari/detail/pre-epoch-card",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+        ),
+    )
+    verified_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:verified-before-epoch",
+            title="Verified evidence CD",
+            source_item_id="verified-before-epoch",
+            source_url="/mall/mercari/detail/verified-before-epoch",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+    # Simulate an existing database being opened for the first detail-queue
+    # recovery. The one-time epoch marker is absent in that old database.
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM user_settings WHERE key = 'discovery_unverified_queue_epoch'"
+        )
+
+    init_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, status, pipeline_stage FROM discovery_candidates "
+            "WHERE id IN (?, ?) ORDER BY id",
+            (legacy_id, verified_id),
+        ).fetchall()
+    assert rows == [
+        (legacy_id, "ignored", "quarantined"),
+        (verified_id, "active", "resale_queued"),
+    ]
+    assert list_discovery_detail_queue(db_path, pool.id, limit=10) == []
+
+    fresh_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:post-epoch-card",
+            title="Fresh detail candidate CD",
+            source_item_id="post-epoch-card",
+            source_url="/mall/mercari/detail/post-epoch-card",
+            source_price=900,
+            source_currency="JPY",
+            availability="available",
+        ),
+    )
+    init_db(db_path)
+
+    assert [candidate.id for candidate in list_discovery_detail_queue(db_path, pool.id, limit=10)] == [fresh_id]
+
+    revived_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:pre-epoch-card",
+            title="Re-observed source detail candidate CD",
+            source_item_id="pre-epoch-card",
+            source_url="/mall/mercari/detail/pre-epoch-card",
+            source_price=1100,
+            source_currency="JPY",
+            availability="available",
+        ),
+    )
+
+    assert revived_id == legacy_id
+    assert [candidate.id for candidate in list_discovery_detail_queue(db_path, pool.id, limit=10)] == [
+        legacy_id,
+        fresh_id,
+    ]
+
+
 def test_init_db_retires_duplicate_source_urls_without_erasing_history(
     tmp_path: Path,
 ) -> None:

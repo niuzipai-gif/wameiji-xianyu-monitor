@@ -1601,6 +1601,98 @@ def test_cd_discovery_rejects_album_bonus_card_without_a_disc_marker(tmp_path: P
     assert xianyu_queries == ["CANDY TUNE BEST"]
 
 
+def test_cd_discovery_rejects_phone_case_with_a_weak_band_marker(tmp_path: Path) -> None:
+    """"帯付き" modifies a title; it never proves the item is a CD."""
+
+    db_path = tmp_path / "selection.db"
+    opened_details: list[str] = []
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title="OPPO A3 5G CPH2639スマホケース 手首帯付き リンク付き 無地ビジネス革ケース",
+                price=2236,
+                currency="JPY",
+                external_item_id="oppo-case-with-band",
+                availability="available",
+            ),
+            MarketItem(
+                source="wameiji",
+                title="Artist Best Album 初回限定盤 CD 帯付き",
+                price=1200,
+                currency="JPY",
+                external_item_id="actual-cd-with-band",
+                availability="available",
+            ),
+        ]
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        opened_details.append(item.title)
+        return await _verified_detail(item)
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        return []
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="帯付き",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert result.candidate_count == result.detail_query_count == 1
+    assert opened_details == ["Artist Best Album 初回限定盤 CD 帯付き"]
+
+
+def test_cd_discovery_keeps_an_import_disc_without_an_english_cd_marker(tmp_path: Path) -> None:
+    """輸入盤 is a valid CD-source signal even when the title omits literal CD."""
+
+    db_path = tmp_path / "selection.db"
+    opened_details: list[str] = []
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title="Worrisome Heart [帯付き輸入盤]",
+                price=1296,
+                currency="JPY",
+                external_item_id="import-disc",
+                availability="available",
+            )
+        ]
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        opened_details.append(item.title)
+        return await _verified_detail(item)
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        return []
+
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="輸入盤",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert result.candidate_count == result.detail_query_count == 1
+    assert opened_details == ["Worrisome Heart [帯付き輸入盤]"]
+
+
 def test_game_discovery_rejects_console_hardware_but_keeps_game_software(
     tmp_path: Path,
 ) -> None:
@@ -1646,6 +1738,56 @@ def test_game_discovery_rejects_console_hardware_but_keeps_game_software(
 
     assert result.candidate_count == result.evaluated_count == 1
     assert xianyu_queries == ["薄桜鬼 Switch"]
+
+
+def test_game_discovery_rejects_switch_protective_case(tmp_path: Path) -> None:
+    """A platform name alone must not enqueue a protective accessory."""
+
+    db_path = tmp_path / "selection.db"
+    opened_details: list[str] = []
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return [
+            MarketItem(
+                source="wameiji",
+                title="Nintendo Switch 有機ELモデル用 保護ケース",
+                price=1800,
+                currency="JPY",
+                external_item_id="switch-protective-case",
+                availability="available",
+            ),
+            MarketItem(
+                source="wameiji",
+                title="薄桜鬼 Switch 限定版 ゲームソフト",
+                price=5000,
+                currency="JPY",
+                external_item_id="switch-game-software",
+                availability="available",
+            ),
+        ]
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        opened_details.append(item.title)
+        return await _verified_detail(item)
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        return []
+
+    pool_id = list_discovery_pools(db_path)[1].id
+    assert pool_id is not None
+    result = asyncio.run(
+        scan_discovery_keyword(
+            db_path=db_path,
+            pool_id=pool_id,
+            keyword="Switch 限定版",
+            fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
+            fetch_xianyu=fetch_xianyu,
+        )
+    )
+
+    assert result.candidate_count == result.detail_query_count == 1
+    assert opened_details == ["薄桜鬼 Switch 限定版 ゲームソフト"]
 
 
 def test_game_discovery_skips_xianyu_when_detail_is_missing_the_core_media(

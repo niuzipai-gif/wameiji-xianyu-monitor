@@ -15,6 +15,8 @@ from cd_monitor.storage.migrations import SCHEMA_SQL
 
 _TITLE_QUERY_EVIDENCE_VERSION_KEY = "discovery_title_query_evidence_version"
 _TITLE_QUERY_EVIDENCE_VERSION = "strict-title-sample-v3"
+_DISCOVERY_UNVERIFIED_QUEUE_EPOCH_KEY = "discovery_unverified_queue_epoch"
+_DISCOVERY_UNVERIFIED_QUEUE_EPOCH = "detail-first-baseline-v1"
 
 
 
@@ -836,6 +838,60 @@ def _migrate_detail_first_discovery(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_unverified_discovery_queue_epoch(conn: sqlite3.Connection) -> None:
+    """Quarantine search-only rows that predate the detail-first queue.
+
+    Previous collector runs saved hundreds of broad search cards without
+    opening their product pages. Treating those stale observations as a new
+    detail queue makes the collector spend days on old, unproven URLs before
+    it can inspect a fresh source result. Keep them for audit, but reserve the
+    post-migration queue exclusively for cards discovered by the new flow.
+    """
+
+    row = conn.execute(
+        "SELECT value FROM user_settings WHERE key = ?",
+        (_DISCOVERY_UNVERIFIED_QUEUE_EPOCH_KEY,),
+    ).fetchone()
+    if row is not None and str(row[0]) == _DISCOVERY_UNVERIFIED_QUEUE_EPOCH:
+        return
+
+    eligible = """
+        status = 'active'
+        AND COALESCE(detail_verified, 0) = 0
+        AND COALESCE(TRIM(pipeline_stage), 'search_discovered') IN (
+          'search_discovered', 'detail_queued'
+        )
+    """
+    conn.execute(
+        f"""
+        UPDATE opportunities
+        SET status = 'expired'
+        WHERE discovery_candidate_id IN (
+          SELECT id FROM discovery_candidates WHERE {eligible}
+        )
+          AND COALESCE(status, 'active') = 'active'
+        """
+    )
+    conn.execute(
+        f"""
+        UPDATE discovery_candidates
+        SET status = 'ignored',
+            pipeline_stage = 'quarantined',
+            last_detail_error = 'pre_detail_queue_epoch',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE {eligible}
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO user_settings (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+        """,
+        (_DISCOVERY_UNVERIFIED_QUEUE_EPOCH_KEY, _DISCOVERY_UNVERIFIED_QUEUE_EPOCH),
+    )
+
+
 def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -858,6 +914,7 @@ def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
             _migrate_detail_first_discovery(conn)
             _migrate_duplicate_source_candidates(conn)
             _migrate_duplicate_source_url_candidates(conn)
+            _migrate_unverified_discovery_queue_epoch(conn)
             _migrate_title_only_xianyu_rechecks(conn)
     finally:
         conn.close()
@@ -2226,6 +2283,16 @@ def _upsert_discovery_candidate(
             AND excluded.detail_verified = 0 THEN discovery_candidates.raw_text
             ELSE excluded.raw_text END,
           detail_verified = MAX(discovery_candidates.detail_verified, excluded.detail_verified),
+          pipeline_stage = CASE
+            WHEN discovery_candidates.pipeline_stage = 'quarantined'
+              AND excluded.detail_verified = 0 THEN 'search_discovered'
+            ELSE discovery_candidates.pipeline_stage
+          END,
+          last_detail_error = CASE
+            WHEN discovery_candidates.pipeline_stage = 'quarantined'
+              AND excluded.detail_verified = 0 THEN NULL
+            ELSE discovery_candidates.last_detail_error
+          END,
           last_seen_at = CURRENT_TIMESTAMP,
           updated_at = CURRENT_TIMESTAMP
         """,
