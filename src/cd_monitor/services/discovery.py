@@ -56,6 +56,9 @@ _CD_HARD_MEDIA_MARKERS = (
     "blu-ray",
     "bluray",
     "sacd",
+    "輸入盤",
+    "レコード",
+    "vinyl",
     "音楽cd",
     "サウンドトラック",
     "サントラ",
@@ -87,6 +90,11 @@ _GAME_HARDWARE_MARKERS = (
     "充電スタンド",
     "ドック",
     "保護フィルム",
+    "保護ケース",
+    "保護カバー",
+    "キャリングケース",
+    "収納ケース",
+    "ポーチ",
     "ケースのみ",
 )
 _INCOMPLETE_GAME_SEARCH_CARD_MARKERS = (
