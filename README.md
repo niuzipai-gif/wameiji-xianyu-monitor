@@ -24,6 +24,16 @@ Render 免费 Web Service 的文件系统会在重启、重新部署或闲置唤
 3. 在网页顶部点击“让采集电脑立即扫描”。采集电脑会在下一分钟内收到命令；扫描完成后，结果会随下一次数据库同步出现在“自动选品广场”。无需输入具体 CD，也无需在家里的电脑安装插件。
 4. 需要调整方向时，在“选品池设置”中改发现关键词、扫描间隔、每轮候选数、最低利润和最低利润率，点击保存即可。设置会由采集电脑执行。
 
+### 采集机开机自启（只需设置一次）
+
+在采集电脑已登录 Windows 的情况下，运行下面这一条即可把本地后端、同步器和浏览器采集工作器注册为开机登录后自动运行的任务；任一任务异常退出后会自动重启。浏览器采集需要保留该 Windows 登录会话，不能在完全注销后继续使用登录 profile。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-collector-autostart.ps1 -StartNow
+```
+
+如需移除这些本机任务，运行同一脚本并加 `-Remove`。
+
 首次接管按下面顺序操作：
 
 1. 在 Render 用本仓库的 Blueprint 创建 `wameiji-xianyu-api`，选择 Free。填写三个环境变量：`WEB_ALLOWED_ORIGINS=https://niuzipai-gif.github.io`、随机的 `WEB_ACCESS_TOKEN`、随机的 `CD_SYNC_TOKEN`。两个 token 只放 Render 和本机 `.env`，不要写进仓库。
