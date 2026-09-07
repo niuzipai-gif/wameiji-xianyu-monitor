@@ -4,7 +4,19 @@
 (function () {
   "use strict";
 
-  const view = { board: null, commands: [], filter: "all", refreshing: false };
+  // app.js still supplies task, ranking and settings views.  This module owns
+  // the homepage so that its renderer cannot be replaced by the legacy cards.
+  window.CD_MONITOR_API = window.CD_MONITOR_API || {};
+  window.CD_MONITOR_API.selectionBoardOwnsHome = true;
+
+  const view = {
+    board: null,
+    commands: [],
+    filter: "all",
+    query: "",
+    advancedFilter: null,
+    refreshing: false,
+  };
 
   function esc(value) {
     if (value === null || value === undefined) return "";
@@ -85,57 +97,190 @@
   }
 
   function renderKpis(summary) {
-    setText("kpiToday", String(Number(summary.active_opportunities) || 0));
-    setText("kpiProfit", cny(summary.highest_expected_profit));
-    setText("kpiMax", String(Number(summary.active_candidates) || 0));
-    setText("kpiHitRate", timeLabel(summary.last_scan_at));
+    const items = Array.isArray(view.board && view.board.opportunities) ? view.board.opportunities : [];
+    const activeCandidates = Number(summary.active_candidates) || 0;
+    const totalExpectedProfit = Number(summary.total_expected_profit);
+    const expectedProfit = Number.isFinite(totalExpectedProfit)
+      ? totalExpectedProfit
+      : items.reduce((total, item) => total + (Number(item.expected_profit) || 0), 0);
+    const highestExpectedProfit = Number(summary.highest_expected_profit);
+    const highestProfit = Number.isFinite(highestExpectedProfit)
+      ? highestExpectedProfit
+      : items.reduce((maximum, item) => Math.max(maximum, Number(item.expected_profit) || 0), 0);
+    const hitRate = activeCandidates > 0
+      ? Math.min(100, Math.round((Number(summary.active_opportunities) || items.length) / activeCandidates * 100))
+      : 0;
+    setText("kpiToday", String(Number(summary.active_opportunities) || items.length || 0));
+    setText("kpiProfit", cny(expectedProfit));
+    setText("kpiMax", cny(highestProfit));
+    setText("kpiHitRate", hitRate + "%");
     setText("discoveryStatusText", summary.last_scan_at ? "已同步 · " + timeLabel(summary.last_scan_at) : "等待本机采集");
   }
 
+  function safeHttpUrl(value) {
+    const url = String(value || "").trim();
+    return /^https?:\/\/[^\s]+$/i.test(url) ? url : "";
+  }
+
+  function usableProductImage(value) {
+    const url = safeHttpUrl(value);
+    if (!url) return "";
+    return /searchlist|placeholder|\/logo(?:[._/]|$)|paypaay|mokaki\.cn\/sigimage\/icon/i.test(url) ? "" : url;
+  }
+
+  function liquidityChip(value) {
+    if (value === "normal") return '<span class="status ok">流动性正常</span>';
+    if (value === "thin") return '<span class="status warn">样本偏少</span>';
+    if (value === "dead") return '<span class="status bad">无有效成交</span>';
+    return '<span class="status idle">' + esc(value || "流动性待验证") + '</span>';
+  }
+
+  function decisionChip(value) {
+    if (value === "strong_alert") return '<span class="status ok">强提醒</span>';
+    if (value === "weak_alert") return '<span class="status blue">弱提醒</span>';
+    if (value === "skip" || value === "reject") return '<span class="status idle">仅供复核</span>';
+    return '<span class="status warn">' + esc(value || "待复核") + '</span>';
+  }
+
+  function thumbMarkup(imageUrl, lineOne, lineTwo) {
+    const image = usableProductImage(imageUrl);
+    if (image) return '<img src="' + esc(image) + '" alt="" loading="lazy" />';
+    return '<span>' + esc(lineOne) + '<br />' + esc(lineTwo) + '</span>';
+  }
+
+  function sideMarkup(kind, href, body) {
+    const safeHref = safeHttpUrl(href);
+    if (!safeHref) return '<div class="side-product ' + kind + '">' + body + '</div>';
+    const title = kind === "market" ? "打开挖煤姬商品详情页" : "打开闲鱼可比商品";
+    return '<a class="side-product ' + kind + ' side-link" href="' + esc(safeHref) + '" target="_blank" rel="noopener" title="' + esc(title) + '">' + body + '</a>';
+  }
+
   function opportunityCard(item) {
-    const sourceUrl = String(item.url || item.source_url || "").trim();
-    const safeSourceUrl = /^https?:\/\//i.test(sourceUrl) ? sourceUrl : "";
+    const sourceUrl = safeHttpUrl(item.url || item.source_url);
+    const xianyuUrl = safeHttpUrl(item.xianyu_url);
     const title = item.item_title || item.candidate_title || "未命名候选";
     const reference = Number(item.xianyu_price_cny || item.xianyu_reference_price || 0);
+    const purchasePrice = Number(item.purchase_price_jpy || item.source_price || 0);
+    const expectedProfit = Number(item.expected_profit || 0);
+    const sampleCount = Number(item.valid_xianyu_sample_count || 0);
+    const sampleRows = Number(item.xianyu_sample_rows || sampleCount);
+    const xianyuTitle = item.xianyu_item_title || "闲鱼可售参考";
+    const catalogNo = item.catalog_no || item.jan || "待人工确认";
     const detailVerified = item.detail_verified === true || Number(item.detail_verified) === 1;
-    const card = [
-      '<article class="discovery-card">',
-        '<div class="discovery-card-head">',
-          '<span class="tag hot">挖煤姬 · ' + esc(typeLabel(item.media_type)) + '</span>',
-          '<span class="discovery-verification ' + (detailVerified ? "verified" : "pending") + '">' + (detailVerified ? "详情已核验" : "详情待核验") + '</span>',
-          '<span class="discovery-confidence">匹配 ' + esc(percent(item.match_confidence)) + '</span>',
-        '</div>',
+    const xianyuSide = [
+      '<div class="thumb xianyu-thumb">',
+        thumbMarkup(item.xianyu_image_url, "闲鱼可售样本", "有效样本 " + sampleCount + " 条"),
+      '</div>',
+      '<div class="product">',
+        '<span class="tag xianyu-tag">闲鱼 · 销售侧</span>',
+        liquidityChip(item.liquidity_status),
+        '<h4>' + esc(xianyuTitle) + '</h4>',
+        '<div class="price">' + esc(cny(reference)) + '</div>',
+        '<div class="desc">可比样本 ' + esc(sampleCount) + ' 条 · 已记录样本 ' + esc(sampleRows) + ' 条</div>',
+      '</div>',
+    ].join("");
+    const wameijiSide = [
+      '<div class="thumb market-thumb">',
+        thumbMarkup(item.image_url, "挖煤姬详情页", detailVerified ? "价格已核验" : "等待核验"),
+      '</div>',
+      '<div class="product">',
+        '<span class="tag hot">挖煤姬 · 进货侧</span>',
+        '<span class="tag source-tag">' + esc(typeLabel(item.media_type)) + '</span>',
         '<h4>' + esc(title) + '</h4>',
-        '<p class="discovery-edition">品番 / JAN：' + esc(item.catalog_no || item.jan || "待人工确认") + (item.edition ? " · " + esc(item.edition) : "") + '</p>',
-        '<div class="discovery-price-row">',
-          '<div><small>挖煤姬购入</small><b>' + esc(jpy(item.purchase_price_jpy || item.source_price)) + '</b></div>',
-          '<div><small>闲鱼参考</small><b>' + esc(cny(reference)) + '</b></div>',
-          '<div class="profit"><small>预估净利</small><b>' + esc(cny(item.expected_profit)) + '</b></div>',
+        '<div class="price">' + esc(jpy(purchasePrice)) + '</div>',
+        '<div class="desc">品番 / JAN：' + esc(catalogNo) + (sourceUrl ? ' · 点击进入商品详情' : '') + '</div>',
+      '</div>',
+    ].join("");
+    const reason = detailVerified
+      ? "右侧挖煤姬价格来自已核验的商品详情页；左侧是 " + sampleCount + " 条有效闲鱼可比样本的参考价。下单前仍需人工核对版本、特典和品相。"
+      : "来源详情仍待核验，当前价格不应作为进货依据。";
+    return [
+      '<article class="op-card discovery-op-card" data-discovery-opportunity-id="' + esc(item.id || "") + '">',
+        sideMarkup("xianyu", xianyuUrl, xianyuSide),
+        '<div class="analysis">',
+          '<div class="comparison-rail"><span>闲鱼销售侧</span><i aria-hidden="true">↔</i><span>挖煤姬进货侧</span></div>',
+          '<div class="grid2">',
+            '<div class="metric"><small>预估净利</small><strong>' + esc(cny(expectedProfit)) + '</strong></div>',
+            '<div class="metric"><small>利润率</small><strong>' + esc(percent(item.net_margin)) + '</strong></div>',
+            '<div class="metric"><small>匹配度</small><strong>' + esc(percent(item.match_confidence)) + '</strong></div>',
+            '<div class="metric"><small>判定</small><strong>' + decisionChip(item.decision) + '</strong></div>',
+          '</div>',
+          '<p class="comparison-catalog">品番 / JAN：' + esc(catalogNo) + (item.edition ? ' · ' + esc(item.edition) : '') + '</p>',
+          '<div class="reason">' + esc(reason) + '</div>',
         '</div>',
-        '<div class="discovery-metrics">',
-          '<span>利润率 ' + esc(percent(item.net_margin)) + '</span>',
-          '<span>有效样本 ' + esc(item.valid_xianyu_sample_count || 0) + '</span>',
-          '<span>' + esc(item.liquidity_status === "normal" ? "流动性正常" : (item.liquidity_status || "流动性待验证")) + '</span>',
-        '</div>',
-        safeSourceUrl
-          ? '<a class="discovery-source-link" href="' + esc(safeSourceUrl) + '" target="_blank" rel="noopener">打开挖煤姬商品</a>'
-          : '<span class="discovery-source-link disabled">商品链接待采集</span>',
+        sideMarkup("market", sourceUrl, wameijiSide),
       '</article>',
-    ];
-    return card.join("");
+    ].join("");
+  }
+
+  function itemSearchText(item) {
+    return [
+      item.item_title,
+      item.candidate_title,
+      item.xianyu_item_title,
+      item.catalog_no,
+      item.jan,
+      item.edition,
+    ].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function applyAdvancedFilter(items) {
+    const filter = view.advancedFilter || {};
+    const query = String(view.query || filter.q || "").trim().toLowerCase();
+    return items.filter((item) => {
+      if (query && !itemSearchText(item).includes(query)) return false;
+      if (filter.decision && filter.decision !== "all" && item.decision !== filter.decision) return false;
+      if (filter.min_margin && (Number(item.net_margin) || 0) * 100 < Number(filter.min_margin)) return false;
+      if (filter.min_diff && (Number(item.expected_profit) || 0) < Number(filter.min_diff)) return false;
+      return true;
+    });
   }
 
   function renderFeed() {
     const target = document.getElementById("homeFeed");
     if (!target || !view.board) return;
-    const allItems = Array.isArray(view.board.opportunities) ? view.board.opportunities : [];
-    const items = view.filter === "all" ? allItems : allItems.filter((item) => item.media_type === view.filter);
+    const allItems = Array.isArray(view.board.opportunities) ? view.board.opportunities.slice() : [];
+    let items = allItems;
+    if (view.filter === "match") {
+      items = items.filter((item) => Number(item.match_confidence) >= 0.8);
+    } else if (view.filter === "low-risk") {
+      items = items.filter((item) => (
+        (item.detail_verified === true || Number(item.detail_verified) === 1)
+        && item.liquidity_status === "normal"
+      ));
+    } else if (view.filter !== "all") {
+      items = items.filter((item) => item.media_type === view.filter);
+    }
+    items = applyAdvancedFilter(items);
+    items.sort((left, right) => (
+      (Number(right.expected_profit) || 0) - (Number(left.expected_profit) || 0)
+      || (Number(right.match_confidence) || 0) - (Number(left.match_confidence) || 0)
+    ));
     if (!items.length) {
-      target.innerHTML = '<div class="empty-state">暂时没有通过门槛的机会。点击「让采集电脑立即扫描」即可开始自动发现。</div>';
+      target.innerHTML = '<div class="empty-state">这个筛选暂时没有通过门槛的机会。点击左侧「立即全量扫描」可让采集电脑继续发现。</div>';
       return;
     }
-    target.innerHTML = '<div class="discovery-feed">' + items.map(opportunityCard).join("") + "</div>";
+    target.innerHTML = items.map(opportunityCard).join("");
   }
+
+  function setSelectionBoardQuery(query) {
+    view.query = String(query || "").trim();
+    renderFeed();
+  }
+
+  function applySelectionBoardFilters(filter) {
+    view.advancedFilter = {
+      q: String(filter && filter.q || "").trim(),
+      decision: String(filter && filter.decision || "all"),
+      min_margin: String(filter && filter.min_margin || "").trim(),
+      min_diff: String(filter && filter.min_diff || "").trim(),
+    };
+    view.query = view.advancedFilter.q;
+    renderFeed();
+  }
+
+  window.CD_MONITOR_API.setSelectionBoardQuery = setSelectionBoardQuery;
+  window.CD_MONITOR_API.applySelectionBoardFilters = applySelectionBoardFilters;
 
   function poolCard(pool) {
     const id = Number(pool.id);
@@ -211,7 +356,9 @@
   }
 
   async function queueScan(poolId) {
-    const button = document.querySelector('[data-discovery-action="scan"][data-pool-id="' + String(poolId || "") + '"]') || document.getElementById("scanDiscoveryNowBtn");
+    const button = document.querySelector('[data-discovery-action="scan"][data-pool-id="' + String(poolId || "") + '"]')
+      || document.getElementById("scanDiscoveryNowBtn")
+      || document.getElementById("sideScanDiscoveryBtn");
     if (button) button.disabled = true;
     try {
       const payload = { command_type: "scan_now" };

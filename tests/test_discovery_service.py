@@ -572,6 +572,7 @@ def test_unverified_search_card_cannot_enter_the_profit_board(tmp_path: Path) ->
     summary = discovery_summary(db_path)
     assert summary["active_candidates"] == 0
     assert summary["active_opportunities"] == 0
+    assert summary["total_expected_profit"] == 0
     assert summary["highest_expected_profit"] == 0
 
 

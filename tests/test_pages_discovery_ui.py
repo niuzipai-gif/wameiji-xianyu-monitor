@@ -25,8 +25,12 @@ def test_pages_build_includes_the_automatic_selection_board(tmp_path: Path) -> N
     index = (destination / "index.html").read_text(encoding="utf-8")
     script = (destination / "discovery-ui.js").read_text(encoding="utf-8")
     assert "discovery-ui.js" in index
-    assert 'id="scanDiscoveryNowBtn"' in index
-    assert "采集机状态" in index
+    assert "AI 闲鱼猎手" in index
+    assert "首页机会流" in index
+    assert 'id="sideScanDiscoveryBtn"' in index
     assert "浏览器扩展" not in index
     assert "/api/discovery/board" in script
     assert "/api/discovery/commands" in script
+    assert "闲鱼 · 销售侧" in script
+    assert "挖煤姬 · 进货侧" in script
+    assert 'class="op-card discovery-op-card"' in script

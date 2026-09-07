@@ -1958,12 +1958,27 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
               AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
             """
         ).fetchone()[0]
+        total_profit = conn.execute(
+            """
+            SELECT SUM(o.expected_profit) FROM opportunities o
+            JOIN discovery_candidates c ON c.id = o.discovery_candidate_id
+            JOIN discovery_pools p ON p.id = c.pool_id
+            WHERE c.status = 'active' AND c.detail_verified = 1
+              AND COALESCE(o.status, 'active') = 'active'
+              AND o.decision != 'reject'
+              AND o.expected_profit >= p.min_profit_cny
+              AND o.net_margin >= p.min_margin
+              AND o.match_confidence >= p.min_match_confidence
+              AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
+            """
+        ).fetchone()[0]
         last_scan_at = conn.execute(
             "SELECT MAX(finished_at) FROM discovery_runs WHERE status = 'ok'"
         ).fetchone()[0]
     return {
         "active_candidates": int(active_candidates or 0),
         "active_opportunities": int(active_opportunities or 0),
+        "total_expected_profit": float(total_profit or 0),
         "highest_expected_profit": float(highest_profit or 0),
         "last_scan_at": last_scan_at,
     }

@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>日系实体选品广场 · Kuro Atelier Edition · WAMEIJI-XIANYU</title>
+  <title>AI 闲鱼猎手 · Kuro Atelier Edition · WAMEIJI-XIANYU</title>
   <link rel="stylesheet" href="styles/themes.css" />
   <link rel="stylesheet" href="styles/app.css" />
-  <link rel="stylesheet" href="styles/kuro.css" />
+  <link rel="stylesheet" href="styles/kuro.css?v=20260908-kuro-flow" />
   <script src="runtime-config.js"></script>
-  <script src="app.js" defer></script>
-  <script src="discovery-ui.js" defer></script>
+  <script src="app.js?v=20260908-kuro-flow" defer></script>
+  <script src="discovery-ui.js?v=20260908-kuro-flow" defer></script>
 </head>
 <body class="kuro" data-kuro-theme="rose">
     <button class="feed-new-pill" data-feed-new-pill type="button"></button>
@@ -18,16 +18,16 @@
       <div class="brand">
         <div class="mark"><img src="assets/mascot/kuro_chibi_avatar.png" alt="Kuro 看板娘头像" /></div>
         <div>
-          <h1>日系实体选品广场</h1>
+          <h1>AI 闲鱼猎手</h1>
           <p>WAMEIJI-XIANYU · Kuro Atelier</p>
         </div>
       </div>
       <div class="nav-label">Navigation</div>
       <nav class="nav" id="primaryNav">
-        <button class="active" data-page="home">自动选品广场</button>
-        <button data-page="ranking">利润排行榜</button>
-        <button data-page="tasks">单品监控（可选）</button>
-        <button data-page="accounts">采集机状态</button>
+        <button class="active" data-page="home">首页机会流</button>
+        <button data-page="ranking">每日推荐榜</button>
+        <button data-page="tasks">任务管理</button>
+        <button data-page="accounts">号池管理</button>
         <button data-page="logs">运行日志</button>
         <button data-page="settings">策略设置</button>
       </nav>
@@ -42,9 +42,9 @@
       <div class="side-card">
         <b>操作</b>
         <p style="display:flex;flex-direction:column;gap:6px;">
-          <button id="sideScanDiscoveryBtn" style="border:0;background:var(--kuro-blue);color:white;padding:8px;border-radius:10px;cursor:pointer;font-weight:700;">＋ 立即扫描选品池</button>
-          <button id="sidePoolSettingsBtn" style="border:1px solid var(--kuro-line);background:white;color:var(--kuro-ink);padding:8px;border-radius:10px;cursor:pointer;">选品池设置</button>
-          <button id="sideLegacyToolsBtn" style="border:1px solid var(--kuro-line);background:white;color:var(--kuro-ink);padding:8px;border-radius:10px;cursor:pointer;">单品工具（可选）</button>
+          <button id="sideNewTaskBtn" style="border:0;background:var(--kuro-blue);color:white;padding:8px;border-radius:10px;cursor:pointer;font-weight:700;">＋ 新建监控任务</button>
+          <button id="sideImportBtn" style="border:1px solid var(--kuro-line);background:white;color:var(--kuro-ink);padding:8px;border-radius:10px;cursor:pointer;">导入 HTML / JSON</button>
+          <button id="sideScanDiscoveryBtn" style="border:1px solid var(--kuro-line);background:white;color:var(--kuro-ink);padding:8px;border-radius:10px;cursor:pointer;">立即全量扫描</button>
         </p>
       </div>
       <div class="side-card" id="healthCard">
@@ -60,59 +60,48 @@
           <span>⌕</span>
           <input id="globalSearch" placeholder="搜索商品名、关键词、歌手、专辑、作品名、角色名…" />
         </div>
-        <button id="poolSettingsTopBtn">选品池设置</button>
-        <button id="refreshDiscoveryBoardBtn">刷新结果</button><button id="scanDiscoveryNowBtn">让采集电脑立即扫描</button><button id="legacyTaskBtn">单品监控（可选）</button>
+        <button id="advancedFilterBtn">高级筛选</button>
+        <button id="proBtn">Pro 会员</button>
+        <button id="refreshDiscoveryBoardBtn">立即刷新</button><button id="newTaskBtn">新建任务</button><button class="ai-gen" id="aiGenerateBtn" title="用 AI 自动生成任务" style="background:linear-gradient(135deg,#7c3aed,#ec4899);color:white;border:0;padding:8px 14px;border-radius:10px;cursor:pointer;font-weight:700;margin-left:6px;">✨ AI 生成任务</button>
       </div>
 
       <section id="home" class="page active" data-page="home">
         <div class="hero">
           <div class="hero-copy">
             <div class="eyebrow">Kuro Atelier · Premium Dashboard</div>
-            <h2>自动发现日系 CD 与实体游戏<br/>按可赚净利润从高到低排序</h2>
-            <p class="lead">搜索页只发现商品链接；采集电脑会打开挖煤姬详情页核验实际价格、版本和库存，再用闲鱼可比样本估价。只有详情已核验且通过成本、利润、匹配度和样本数门槛的候选才会进入这里。</p>
+            <h2>智能发现高价值交易机会<br/>用更有设计感的方式做日系 CD 价差监控</h2>
+            <p class="lead">图片优先信息流：左侧闲鱼可售样本使用淡黄色识别，右侧挖煤姬详情页使用淡粉白；中间集中展示成本、净利、版本和匹配证据。只有详情已核验的来源才会进入机会流。</p>
             <div class="stats">
-              <div class="stat"><small>已入池机会</small><strong id="kpiToday">--</strong></div>
-              <div class="stat"><small>最高预估净利</small><strong id="kpiProfit">--</strong></div>
-              <div class="stat"><small>详情已核验候选</small><strong id="kpiMax">--</strong></div>
-              <div class="stat"><small>最近扫描</small><strong id="kpiHitRate">--</strong></div>
+              <div class="stat"><small>今日机会</small><strong id="kpiToday">--</strong></div>
+              <div class="stat"><small>预计利润</small><strong id="kpiProfit">--</strong></div>
+              <div class="stat"><small>最高利润</small><strong id="kpiMax">--</strong></div>
+              <div class="stat"><small>命中率</small><strong id="kpiHitRate">--</strong></div>
             </div>
           </div>
           <div class="mascot-stage">
             <div class="mascot-bubble">
               <b>Kuro says</b>
-              <p>这里不需要你先给具体 CD。先让系统发现，再看版本、特典、腰封和品番；匹配度不足的候选不会进入利润榜。</p>
+              <p>先看首图，再看版本、特典、腰封和品番。利润很好，但同款置信度低于 80% 的不要急着冲。</p>
             </div>
             <img src="assets/mascot/kuro_mascot.png" alt="黑红哥特洛丽塔成年看板娘主视觉" />
           </div>
         </div>
         <div class="section-head">
           <div>
-            <h3>自动选品广场 · 利润由高到低</h3>
-            <p>左侧是挖煤姬购入来源，右侧是闲鱼可比样本；净利润已扣除模型中的换汇、运费和平台成本。</p>
+            <h3>首页机会流 · 图片优先信息流</h3>
+            <p>左侧是闲鱼可售参考，中间是利润分析，右侧是已核验的挖煤姬商品详情。</p>
           </div>
           <div class="filters">
             <button class="pill active" data-discovery-filter="all">全部机会</button>
-            <button class="pill" data-discovery-filter="cd">CD</button>
-            <button class="pill" data-discovery-filter="physical_game">实体游戏</button>
-            <button class="pill" id="discoveryRefreshFeedBtn" title="从 Render 刷新已同步结果">↻ 刷新展示</button>
+            <button class="pill" data-discovery-filter="match">高匹配度</button>
+            <button class="pill" data-discovery-filter="low-risk">低风险</button>
+            <button class="pill" id="discoveryRefreshFeedBtn" title="从 Render 刷新已同步结果">↻ 换一批</button>
             <span class="scraper-status idle" id="discoveryStatus" title="本机采集状态"><span class="dot"></span><span id="discoveryStatusText">等待本机采集</span></span>
           </div>
         </div>
-        <div class="feed" id="homeFeed" data-empty="暂时没有通过门槛的机会。点击「让采集电脑立即扫描」即可开始自动发现。">
+        <div class="feed" id="homeFeed" data-empty="暂时没有通过门槛的机会。点击左侧「立即全量扫描」即可开始自动发现。">
           <div class="empty-state">正在加载机会数据…</div>
         </div>
-        <section class="content-card discovery-control-card" id="discoveryPoolSection">
-          <div class="section-head">
-            <div>
-              <h3>选品池设置</h3>
-              <p>这些设置会发给采集电脑执行；保存后无需在家里的电脑安装浏览器插件。</p>
-            </div>
-            <span class="quiet" id="discoveryCommandStatus">等待读取设置…</span>
-          </div>
-          <div id="discoveryPoolControls" class="discovery-pool-grid">
-            <div class="empty-state">正在加载选品池…</div>
-          </div>
-        </section>
       </section>
 
       <section id="ranking" class="page" data-page="ranking">
@@ -294,6 +283,18 @@
             <button class="primary" id="settingsSaveBtn">保存设置</button>
           </div>
         </div>
+        <section class="content-card discovery-control-card" id="discoveryPoolSection">
+          <div class="section-head">
+            <div>
+              <h3>自动选品池</h3>
+              <p>这些规则会发给采集电脑执行；在家中的电脑只需查看结果和调整策略。</p>
+            </div>
+            <span class="quiet" id="discoveryCommandStatus">等待读取设置…</span>
+          </div>
+          <div id="discoveryPoolControls" class="discovery-pool-grid">
+            <div class="empty-state">正在加载选品池…</div>
+          </div>
+        </section>
         <div class="split-grid">
           <div class="content-card">
             <h3>价格策略</h3>

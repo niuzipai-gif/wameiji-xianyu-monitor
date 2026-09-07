@@ -400,7 +400,21 @@ function buildProductUrl(opp) {
     }
   }
 
+  function automaticSelectionBoardOwnsHome() {
+    return Boolean(window.CD_MONITOR_API && window.CD_MONITOR_API.selectionBoardOwnsHome);
+  }
+
   function renderHome(extraFilter) {
+    // The automatic selection board has the confirmed Kuro left / middle /
+    // right information-flow layout.  The older per-item dashboard remains
+    // available for task, ranking and settings data but must never overwrite
+    // that home feed after its own asynchronous bootstrap finishes.
+    if (automaticSelectionBoardOwnsHome()) {
+      if (extraFilter && typeof window.CD_MONITOR_API.applySelectionBoardFilters === "function") {
+        window.CD_MONITOR_API.applySelectionBoardFilters(extraFilter);
+      }
+      return;
+    }
     const target = document.getElementById("homeFeed");
     if (!target) return;
     let items = state.opportunities.slice();
@@ -423,6 +437,7 @@ function buildProductUrl(opp) {
   }
 
   function renderHomeKpi() {
+    if (automaticSelectionBoardOwnsHome()) return;
     const s = state.summary || {};
     const today = s.opportunity_count ?? state.opportunities.length;
     const profit = s.top_expected_profit ?? 0;
@@ -1641,6 +1656,12 @@ async function refreshAll() {
       clearTimeout(timer);
       timer = setTimeout(async () => {
         const q = input.value.trim();
+        if (automaticSelectionBoardOwnsHome()) {
+          if (typeof window.CD_MONITOR_API.setSelectionBoardQuery === "function") {
+            window.CD_MONITOR_API.setSelectionBoardQuery(q);
+          }
+          return;
+        }
         if (!q) { renderHome(); return; }
         try {
           const resp = await getJson("/api/search?q=" + encodeURIComponent(q));
