@@ -17,6 +17,7 @@ _TITLE_QUERY_EVIDENCE_VERSION_KEY = "discovery_title_query_evidence_version"
 _TITLE_QUERY_EVIDENCE_VERSION = "strict-title-sample-v3"
 _DISCOVERY_UNVERIFIED_QUEUE_EPOCH_KEY = "discovery_unverified_queue_epoch"
 _DISCOVERY_UNVERIFIED_QUEUE_EPOCH = "detail-first-baseline-v1"
+_DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES = 180
 
 
 
@@ -2364,7 +2365,12 @@ def insert_discovery_opportunity(
 
 
 def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[dict[str, object]]:
-    """Return active automatic opportunities in the user's intended ranking."""
+    """Return current, detail-verified opportunities in the intended ranking.
+
+    A board card is a live price comparison, not a permanent recommendation.
+    Keep historical rows in SQLite but hide a card once its Xianyu evidence is
+    older than the normal re-sample window.
+    """
     init_db(db_path)
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
@@ -2390,6 +2396,7 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
             LEFT JOIN market_items m ON m.id = o.wameiji_item_id
             WHERE c.status = 'active' AND c.detail_verified = 1
               AND COALESCE(o.status, 'active') = 'active'
+              AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND o.decision != 'reject'
               AND o.expected_profit >= p.min_profit_cny
               AND o.net_margin >= p.min_margin
@@ -2399,13 +2406,14 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
               o.valid_xianyu_sample_count DESC, c.last_seen_at DESC, o.id DESC
             LIMIT ?
             """,
-            (max(1, int(limit)),),
+            (f"-{_DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES} minutes", max(1, int(limit))),
         ).fetchall()
     return [dict(row) for row in rows]
 
 
 def discovery_summary(db_path: str | Path) -> dict[str, object]:
     init_db(db_path)
+    freshness_window = f"-{_DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES} minutes"
     with sqlite3.connect(db_path) as conn:
         active_candidates = conn.execute(
             """
@@ -2420,12 +2428,14 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
             JOIN discovery_pools p ON p.id = c.pool_id
             WHERE c.status = 'active' AND c.detail_verified = 1
               AND COALESCE(o.status, 'active') = 'active'
+              AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND o.decision != 'reject'
               AND o.expected_profit >= p.min_profit_cny
               AND o.net_margin >= p.min_margin
               AND o.match_confidence >= p.min_match_confidence
               AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
-            """
+            """,
+            (freshness_window,),
         ).fetchone()[0]
         highest_profit = conn.execute(
             """
@@ -2434,12 +2444,14 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
             JOIN discovery_pools p ON p.id = c.pool_id
             WHERE c.status = 'active' AND c.detail_verified = 1
               AND COALESCE(o.status, 'active') = 'active'
+              AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND o.decision != 'reject'
               AND o.expected_profit >= p.min_profit_cny
               AND o.net_margin >= p.min_margin
               AND o.match_confidence >= p.min_match_confidence
               AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
-            """
+            """,
+            (freshness_window,),
         ).fetchone()[0]
         total_profit = conn.execute(
             """
@@ -2448,12 +2460,14 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
             JOIN discovery_pools p ON p.id = c.pool_id
             WHERE c.status = 'active' AND c.detail_verified = 1
               AND COALESCE(o.status, 'active') = 'active'
+              AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND o.decision != 'reject'
               AND o.expected_profit >= p.min_profit_cny
               AND o.net_margin >= p.min_margin
               AND o.match_confidence >= p.min_match_confidence
               AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
-            """
+            """,
+            (freshness_window,),
         ).fetchone()[0]
         last_scan_at = conn.execute(
             "SELECT MAX(finished_at) FROM discovery_runs WHERE status = 'ok'"

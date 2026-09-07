@@ -6,6 +6,7 @@ from pathlib import Path
 from cd_monitor.core.discovery import DiscoveryCandidate, build_identity_key
 from cd_monitor.core.models import MarketItem, Opportunity
 from cd_monitor.storage.sqlite import (
+    discovery_summary,
     init_db,
     insert_discovery_opportunity,
     insert_market_items,
@@ -724,6 +725,75 @@ def test_selection_board_orders_linked_opportunities_by_profit_descending(tmp_pa
     assert all(item["media_type"] == "cd" for item in feed)
     assert feed[0]["purchase_price_jpy"] == 1200.0
     assert feed[0]["xianyu_price_cny"] == 200.0
+
+
+def test_selection_board_hides_stale_xianyu_evaluation(tmp_path: Path) -> None:
+    """A current board must never present an overdue price sample as profit."""
+
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    assert pool.id is not None
+    candidate_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:stale-price",
+            title="Stale Price Album CD",
+            source_item_id="stale-price",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+    item = MarketItem(
+        source="wameiji",
+        title="Stale Price Album CD",
+        price=1200,
+        currency="JPY",
+        external_item_id="stale-price",
+        availability="available",
+    )
+    item_id = insert_market_items(db_path, [item])[0]
+    opportunity_id = insert_discovery_opportunity(
+        db_path,
+        Opportunity(
+            catalog_no="stale-price",
+            item=item,
+            xianyu_reference_price=300,
+            expected_sale_price=250,
+            landed_cost=70,
+            expected_revenue=180,
+            expected_profit=110,
+            net_margin=0.61,
+            turnover_adjusted_roi=0.61,
+            match_confidence=0.9,
+            valid_xianyu_sample_count=3,
+            liquidity_status="normal",
+            decision="strong_alert",
+            opportunity_hash="stale-price",
+        ),
+        wameiji_item_id=item_id,
+        discovery_candidate_id=candidate_id,
+        media_type="cd",
+        identity_key="source:stale-price",
+    )
+
+    assert len(list_discovery_opportunities(db_path)) == 1
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE opportunities
+            SET last_seen_at = datetime(CURRENT_TIMESTAMP, '-181 minutes')
+            WHERE id = ?
+            """,
+            (opportunity_id,),
+        )
+
+    assert list_discovery_opportunities(db_path) == []
+    assert discovery_summary(db_path)["active_opportunities"] == 0
 
 
 def test_selection_board_retires_a_previous_evaluation_for_the_same_candidate(
