@@ -12,6 +12,7 @@ from cd_monitor.storage.sqlite import (
     list_discovery_keywords,
     list_discovery_opportunities,
     list_discovery_pools,
+    mark_discovery_keyword_scanned,
     replace_discovery_keywords,
     update_discovery_pool,
     update_discovery_pool_last_scan,
@@ -141,6 +142,51 @@ def test_pool_next_run_tracks_the_earliest_due_keyword(tmp_path: Path) -> None:
     update_discovery_pool_last_scan(db_path, pool_id)
 
     assert list_discovery_pools(db_path)[0].next_run_at == "2026-09-07 00:25:00"
+
+
+def test_marking_a_keyword_scanned_refreshes_its_pool_next_run(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(db_path, pool_id, {"scan_interval_minutes": 25})
+    replace_discovery_keywords(
+        db_path,
+        pool_id,
+        [
+            {"keyword": "first", "weight": 2, "enabled": True},
+            {"keyword": "second", "weight": 1, "enabled": True},
+        ],
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE discovery_keywords SET last_scanned_at = datetime('now', '-30 minutes') WHERE pool_id = ? AND keyword = ?",
+            (pool_id, "first"),
+        )
+        conn.execute(
+            "UPDATE discovery_keywords SET last_scanned_at = datetime('now', '-5 minutes') WHERE pool_id = ? AND keyword = ?",
+            (pool_id, "second"),
+        )
+    update_discovery_pool_last_scan(db_path, pool_id)
+    first_keyword = next(
+        keyword
+        for keyword in list_discovery_keywords(db_path, pool_id)
+        if keyword.keyword == "first"
+    )
+
+    mark_discovery_keyword_scanned(db_path, first_keyword.id or 0)
+
+    with sqlite3.connect(db_path) as conn:
+        expected = conn.execute(
+            """
+            SELECT MIN(datetime(k.last_scanned_at, '+' || p.scan_interval_minutes || ' minutes'))
+            FROM discovery_keywords AS k
+            JOIN discovery_pools AS p ON p.id = k.pool_id
+            WHERE k.pool_id = ? AND k.enabled = 1
+            """,
+            (pool_id,),
+        ).fetchone()[0]
+    assert list_discovery_pools(db_path)[0].next_run_at == expected
 
 
 def test_selection_board_orders_linked_opportunities_by_profit_descending(tmp_path: Path) -> None:

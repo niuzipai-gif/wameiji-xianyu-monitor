@@ -1234,6 +1234,9 @@ def list_due_discovery_keywords(db_path: str | Path, pool_id: int) -> list[Disco
 def mark_discovery_keyword_scanned(db_path: str | Path, keyword_id: int) -> None:
     init_db(db_path)
     with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT pool_id FROM discovery_keywords WHERE id = ?", (keyword_id,)
+        ).fetchone()
         conn.execute(
             """
             UPDATE discovery_keywords
@@ -1242,6 +1245,8 @@ def mark_discovery_keyword_scanned(db_path: str | Path, keyword_id: int) -> None
             """,
             (keyword_id,),
         )
+        if row is not None:
+            _refresh_discovery_pool_next_run(conn, int(row[0]))
 
 
 def update_discovery_pool(
