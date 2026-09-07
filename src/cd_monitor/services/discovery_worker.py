@@ -9,12 +9,18 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 from cd_monitor.config import ProjectConfig
 from cd_monitor.core.models import MarketItem, WatchItem, XianyuPriceSample
-from cd_monitor.services.discovery import FetchWameiji, FetchXianyu, scan_discovery_keyword
-from cd_monitor.services.live_browser_capture import capture_search_html
+from cd_monitor.services.discovery import (
+    FetchWameiji,
+    FetchWameijiDetail,
+    FetchXianyu,
+    scan_discovery_keyword,
+)
+from cd_monitor.services.live_browser_capture import capture_page_html, capture_search_html
 from cd_monitor.sources.wameiji_browser import WameijiBrowserAdapter
 from cd_monitor.sources.xianyu_browser import XianyuBrowserAdapter
 from cd_monitor.storage.sqlite import (
@@ -58,12 +64,14 @@ class DiscoveryWorker:
         *,
         db_path: str | Path,
         fetch_wameiji: FetchWameiji,
+        fetch_wameiji_detail: FetchWameijiDetail,
         fetch_xianyu: FetchXianyu,
         command_client: CollectorCommandClient | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.fetch_wameiji = fetch_wameiji
         self.fetch_xianyu = fetch_xianyu
+        self.fetch_wameiji_detail = fetch_wameiji_detail
         self.command_client = command_client
 
     async def run_once(self) -> WorkerRunResult:
@@ -104,6 +112,7 @@ class DiscoveryWorker:
                     pool_id=pool.id,
                     keyword=keyword.keyword,
                     fetch_wameiji=self.fetch_wameiji,
+                    fetch_wameiji_detail=self.fetch_wameiji_detail,
                     fetch_xianyu=self.fetch_xianyu,
                 )
                 scan_results.append(result)
@@ -261,7 +270,7 @@ def _command_pool_id(command: dict[str, Any]) -> int | None:
 def build_browser_fetchers(
     config: ProjectConfig,
     snapshot_root: str | Path,
-) -> tuple[FetchWameiji, FetchXianyu]:
+) -> tuple[FetchWameiji, FetchWameijiDetail, FetchXianyu]:
     """Bind a worker to the local, logged-in visible browser profiles."""
     root = Path(snapshot_root)
 
@@ -271,11 +280,14 @@ def build_browser_fetchers(
         )
         return [item for item in result if isinstance(item, MarketItem)]
 
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem | None:
+        return await _capture_and_parse_wameiji_detail(item, config, root / "wameiji-detail")
+
     async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
         result = await _capture_and_parse("xianyu", query, config, root / "xianyu")
         return [item for item in result if isinstance(item, XianyuPriceSample)]
 
-    return fetch_wameiji, fetch_xianyu
+    return fetch_wameiji, fetch_wameiji_detail, fetch_xianyu
 
 
 async def _capture_and_parse(
@@ -318,6 +330,51 @@ async def _capture_and_parse(
     if parsed.status != "ok":
         raise BrowserCaptureBlocked(f"{source}:{parsed.error_type or parsed.status}")
     return list(parsed.items)
+
+
+async def _capture_and_parse_wameiji_detail(
+    search_item: MarketItem,
+    config: ProjectConfig,
+    output_root: Path,
+) -> MarketItem | None:
+    """Open a Wameiji listing URL and return only a detail-verified item."""
+    if not search_item.url:
+        raise BrowserCaptureBlocked("wameiji_detail:missing_listing_url")
+    target_url = urljoin("https://meruki.cn/", search_item.url)
+    safe = re.sub(r"[^0-9A-Za-z_-]+", "_", str(search_item.external_item_id or "detail"))[:80]
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    output = output_root / f"{timestamp}-{safe or 'detail'}.html"
+    screenshot = output.with_suffix(".png")
+    network = output.with_suffix(".network.json")
+    browser = config.browser
+    result = await capture_page_html(
+        "wameiji",
+        target_url,
+        output,
+        profile_dir=browser.wameiji_profile_dir,
+        wameiji_state_file=browser.wameiji_state_file,
+        screenshot_path=screenshot,
+        network_log_path=network,
+        timeout_seconds=max(1, browser.wameiji_result_timeout_ms // 1000),
+        headless=browser.wameiji_headless,
+    )
+    if result.get("status") != "ok":
+        raise BrowserCaptureBlocked(
+            f"wameiji_detail:{result.get('error_type') or result.get('status')}"
+        )
+    final_url = str(result.get("final_url") or "")
+    if "/detail/" not in final_url:
+        raise BrowserCaptureBlocked("wameiji_detail:redirected_away_from_listing")
+    html = output.read_text(encoding="utf-8")
+    parsed = WameijiBrowserAdapter(enabled=True).parse_detail_html(html, search_item)
+    if parsed.status != "ok" or not parsed.items:
+        raise BrowserCaptureBlocked(
+            f"wameiji_detail:{parsed.error_type or parsed.status}"
+        )
+    item = parsed.items[0]
+    if not isinstance(item, MarketItem) or not item.detail_verified:
+        raise BrowserCaptureBlocked("wameiji_detail:unverified_item")
+    return item
 
 
 def command_client_from_environment() -> RenderCollectorCommandClient | None:

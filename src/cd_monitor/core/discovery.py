@@ -16,7 +16,7 @@ class DiscoveryPool:
     scan_interval_minutes: int = 30
     keyword_budget: int = 2
     page_budget: int = 1
-    candidate_budget: int = 12
+    candidate_budget: int = 2
     min_profit_cny: float = 35.0
     min_margin: float = 0.25
     min_match_confidence: float = 0.75
@@ -57,6 +57,7 @@ class DiscoveryCandidate:
     missing_scan_count: int = 0
     last_xianyu_checked_at: str | None = None
     raw_text: str | None = None
+    detail_verified: bool = False
 
 
 @dataclass(slots=True)
@@ -97,15 +98,15 @@ def build_identity_key(
 ) -> str:
     """Return a stable candidate key, favouring exact matching evidence."""
 
+    source_id = str(external_item_id or "").strip()
+    if source_id:
+        return f"source:{source_id}"
     compact_catalog = normalize_catalog_no_compact(catalog_no)
     if compact_catalog:
         return f"catalog:{compact_catalog}"
     normalized_jan = normalize_jan(jan)
     if normalized_jan:
         return f"jan:{normalized_jan}"
-    source_id = str(external_item_id or "").strip()
-    if source_id:
-        return f"source:{source_id}"
     normalized = "|".join(
         text for value in (artist, title, edition) if (text := _normalized_text(value))
     )

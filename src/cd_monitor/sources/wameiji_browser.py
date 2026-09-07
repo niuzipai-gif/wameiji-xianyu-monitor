@@ -68,6 +68,31 @@ class WameijiBrowserAdapter(BrowserHarnessAdapter):
             parser.items = _extract_generic_items(html, watch_item)
         return AdapterStatus(status="ok", items=parser.items)
 
+    def parse_detail_html(self, html: str, search_item: MarketItem) -> AdapterStatus:
+        """Parse one Wameiji listing detail page into a verified purchase item.
+
+        Search cards can truncate a title, omit an identifier, and display a
+        stale price.  The caller supplies the card only to retain its stable
+        source URL/id; title, price, availability and identifiers must all be
+        obtained again from the opened detail page.
+        """
+        if _requires_human(html):
+            return AdapterStatus(
+                status="human_required",
+                error_type="security_check",
+                error_message="Captcha, security check, or login challenge detected.",
+            )
+        parser = _WameijiDetailParser()
+        parser.feed(html)
+        item = _detail_item_from_parser(parser, search_item)
+        if item is None:
+            return AdapterStatus(
+                status="human_required",
+                error_type="detail_parse_failed",
+                error_message="Wameiji detail page did not expose a product title and JPY price.",
+            )
+        return AdapterStatus(status="ok", items=[item])
+
 
 class _WameijiCardParser(HTMLParser):
     def __init__(self) -> None:
@@ -169,6 +194,106 @@ class _WameijiCardParser(HTMLParser):
             self._capture_tag = None
             self._current = {}
             self._text_buf = []
+
+
+class _WameijiDetailParser(HTMLParser):
+    """Extract title, price and visible evidence from the rendered detail DOM."""
+
+    _TITLE_CLASSES = {"goods-name", "goods-title", "item-title", "product-title"}
+    _PRICE_CLASSES = {"price-com", "goods-price", "goods-price-value", "price"}
+    _IGNORED_TAGS = {"noscript", "script", "style", "svg", "template"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.text_parts: list[str] = []
+        self._title_parts: list[str] = []
+        self._price_parts: list[str] = []
+        self._title_tags: list[str] = []
+        self._price_tags: list[str] = []
+        self._ignored_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._IGNORED_TAGS:
+            self._ignored_depth += 1
+            return
+        if self._ignored_depth:
+            return
+        attr = dict(attrs)
+        classes = set(str(attr.get("class") or "").split())
+        if tag == "h1" or classes.intersection(self._TITLE_CLASSES):
+            self._title_tags.append(tag)
+        if classes.intersection(self._PRICE_CLASSES):
+            self._price_tags.append(tag)
+
+    def handle_data(self, data: str) -> None:
+        if self._ignored_depth:
+            return
+        value = data.strip()
+        if not value:
+            return
+        self.text_parts.append(value)
+        if self._title_tags:
+            self._title_parts.append(value)
+        if self._price_tags:
+            self._price_parts.append(value)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._IGNORED_TAGS and self._ignored_depth:
+            self._ignored_depth -= 1
+            return
+        if self._ignored_depth:
+            return
+        if self._title_tags and tag == self._title_tags[-1]:
+            self._title_tags.pop()
+        if self._price_tags and tag == self._price_tags[-1]:
+            self._price_tags.pop()
+
+
+def _detail_item_from_parser(
+    parser: _WameijiDetailParser, search_item: MarketItem
+) -> MarketItem | None:
+    title = " ".join(parser._title_parts).strip()
+    price = _parse_price(" ".join(parser._price_parts))
+    raw_text = " ".join(parser.text_parts)
+    if not title or price <= 0:
+        return None
+    # A search-card identifier is only a hint. Do not carry it into the
+    # comparison record when the opened detail page does not confirm it.
+    catalog_no = _first_detail_catalog_no(raw_text)
+    jan = _first_detail_jan(raw_text)
+    return MarketItem(
+        source="wameiji",
+        title=title,
+        price=price,
+        currency="JPY",
+        source_site=search_item.source_site or _detect_source_site(raw_text),
+        external_item_id=search_item.external_item_id,
+        catalog_no=catalog_no,
+        jan=jan,
+        price_cny_display=search_item.price_cny_display,
+        url=search_item.url,
+        image_url=search_item.image_url,
+        availability=_detect_availability(raw_text),
+        condition_text=_detect_condition_from_text(raw_text),
+        fees_hint=_detect_fees_hint(raw_text),
+        raw_text=raw_text,
+        detail_verified=True,
+    )
+
+
+def _first_detail_catalog_no(text: str) -> str | None:
+    for candidate in extract_catalog_candidates(text):
+        prefix, _, suffix = candidate.partition("-")
+        if len(prefix) >= 3 and len(suffix) >= 3:
+            return candidate
+    return None
+
+
+def _first_detail_jan(text: str) -> str | None:
+    for candidate in extract_jan_candidates(text):
+        if len(candidate) == 13 and candidate.startswith(("45", "49")):
+            return candidate
+    return None
 
 
 def _parse_price(value: str) -> float:
@@ -369,6 +494,7 @@ def _detect_availability(text: str) -> str:
             "可購入",
             "出品中",
             "在售",
+            "在库",
         ]
     ):
         return "available"

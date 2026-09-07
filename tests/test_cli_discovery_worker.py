@@ -14,12 +14,15 @@ def test_discovery_worker_once_uses_local_browser_bindings(tmp_path: Path, monke
     async def fetch_wameiji(_keyword: str):
         return []
 
+    async def fetch_wameiji_detail(_item):
+        return None
+
     async def fetch_xianyu(_query: str):
         return []
 
     def build_fetchers(_config, supplied_snapshot_root):
         calls["snapshot_root"] = Path(supplied_snapshot_root)
-        return fetch_wameiji, fetch_xianyu
+        return fetch_wameiji, fetch_wameiji_detail, fetch_xianyu
 
     class FakeWorker:
         def __init__(self, **kwargs) -> None:
@@ -59,6 +62,9 @@ def test_discovery_worker_once_reports_unexpected_worker_failure(
     async def fetch_wameiji(_keyword: str):
         return []
 
+    async def fetch_wameiji_detail(_item):
+        return None
+
     async def fetch_xianyu(_query: str):
         return []
 
@@ -72,7 +78,7 @@ def test_discovery_worker_once_reports_unexpected_worker_failure(
     monkeypatch.setattr(
         cli,
         "build_browser_fetchers",
-        lambda _config, _root: (fetch_wameiji, fetch_xianyu),
+        lambda _config, _root: (fetch_wameiji, fetch_wameiji_detail, fetch_xianyu),
         raising=False,
     )
     monkeypatch.setattr(cli, "DiscoveryWorker", FailingWorker, raising=False)

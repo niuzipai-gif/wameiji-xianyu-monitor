@@ -100,6 +100,9 @@ class MarketItem:
     fees_hint: str | None = None
     raw_text: str | None = None
     screenshot_path: str | None = None
+    # Search cards are discovery hints only.  Automatic comparison is allowed
+    # only after the item was read from its own Wameiji detail page.
+    detail_verified: bool = False
 
 
 @dataclass(slots=True)

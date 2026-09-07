@@ -680,6 +680,9 @@ body.kuro .discovery-card-head, body.kuro .discovery-pool-title, body.kuro .disc
 body.kuro .discovery-card h4, body.kuro .discovery-pool h4 { margin: 0; color: var(--kuro-ink); line-height: 1.45; }
 body.kuro .discovery-edition, body.kuro .discovery-pool-title p { color: var(--kuro-muted); font-size: 12px; line-height: 1.5; margin: 0; }
 body.kuro .discovery-confidence { color: #6f3e94; background: #f1e7fb; padding: 4px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+body.kuro .discovery-verification { margin-left: auto; padding: 4px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+body.kuro .discovery-verification.verified { color: #2a8053; background: rgba(76, 175, 122, 0.16); }
+body.kuro .discovery-verification.pending { color: #8a6500; background: rgba(255, 193, 7, 0.18); }
 body.kuro .discovery-price-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 body.kuro .discovery-price-row > div { display: grid; gap: 3px; padding: 9px; border-radius: 11px; background: #f7f9fe; }
 body.kuro .discovery-price-row small, body.kuro .discovery-metrics { color: var(--kuro-muted); font-size: 11px; }

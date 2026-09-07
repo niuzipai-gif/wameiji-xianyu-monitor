@@ -340,7 +340,7 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
           scan_interval_minutes INTEGER NOT NULL DEFAULT 30,
           keyword_budget INTEGER NOT NULL DEFAULT 2,
           page_budget INTEGER NOT NULL DEFAULT 1,
-          candidate_budget INTEGER NOT NULL DEFAULT 12,
+          candidate_budget INTEGER NOT NULL DEFAULT 2,
           min_profit_cny REAL NOT NULL DEFAULT 35,
           min_margin REAL NOT NULL DEFAULT 0.25,
           min_match_confidence REAL NOT NULL DEFAULT 0.75,
@@ -412,6 +412,7 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
           missing_scan_count INTEGER NOT NULL DEFAULT 0,
           last_xianyu_checked_at TIMESTAMP,
           raw_text TEXT,
+          detail_verified INTEGER NOT NULL DEFAULT 0,
           first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -447,6 +448,13 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
     }
     if "remote_command_id" not in collector_columns:
         conn.execute("ALTER TABLE collector_commands ADD COLUMN remote_command_id TEXT")
+    candidate_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(discovery_candidates)").fetchall()
+    }
+    if "detail_verified" not in candidate_columns:
+        conn.execute(
+            "ALTER TABLE discovery_candidates ADD COLUMN detail_verified INTEGER NOT NULL DEFAULT 0"
+        )
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_collector_commands_remote_id "
         "ON collector_commands(remote_command_id)"
@@ -475,8 +483,8 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
           slug, name, media_type, enabled, scan_interval_minutes,
           keyword_budget, page_budget, candidate_budget
         ) VALUES
-          ('cd', 'CD 选品池', 'cd', 1, 30, 2, 1, 12),
-          ('physical-game', '实体游戏选品池', 'physical_game', 1, 30, 2, 1, 12)
+          ('cd', 'CD 选品池', 'cd', 1, 30, 2, 1, 2),
+          ('physical-game', '实体游戏选品池', 'physical_game', 1, 30, 2, 1, 2)
         """
     )
     conn.executescript(
@@ -1306,7 +1314,7 @@ def get_discovery_candidate(db_path: str | Path, candidate_id: int) -> Discovery
             SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
               artist, edition, source_item_id, source_url, source_price,
               source_currency, availability, status, observation_count,
-              missing_scan_count, last_xianyu_checked_at, raw_text
+              missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified
             FROM discovery_candidates WHERE id = ?
             """,
             (candidate_id,),
@@ -1337,6 +1345,7 @@ def _discovery_candidate_from_row(row: sqlite3.Row) -> DiscoveryCandidate:
         missing_scan_count=int(row["missing_scan_count"]),
         last_xianyu_checked_at=row["last_xianyu_checked_at"],
         raw_text=row["raw_text"],
+        detail_verified=bool(row["detail_verified"]),
     )
 
 
@@ -1348,7 +1357,7 @@ def _select_discovery_candidate_by_identity(
         SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
           artist, edition, source_item_id, source_url, source_price,
           source_currency, availability, status, observation_count,
-          missing_scan_count, last_xianyu_checked_at, raw_text
+          missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified
         FROM discovery_candidates
         WHERE pool_id = ? AND identity_key = ?
         """,
@@ -1554,27 +1563,41 @@ def _upsert_discovery_candidate(
           pool_id, media_type, identity_key, catalog_no, jan, title, artist,
           edition, source_item_id, source_url, source_price, source_currency,
           availability, status, observation_count, missing_scan_count,
-          last_xianyu_checked_at, raw_text
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+          last_xianyu_checked_at, raw_text, detail_verified
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
         ON CONFLICT(pool_id, identity_key) DO UPDATE SET
           media_type = excluded.media_type,
-          catalog_no = COALESCE(excluded.catalog_no, discovery_candidates.catalog_no),
-          jan = COALESCE(excluded.jan, discovery_candidates.jan),
-          title = excluded.title,
-          artist = COALESCE(excluded.artist, discovery_candidates.artist),
-          edition = COALESCE(excluded.edition, discovery_candidates.edition),
+          catalog_no = CASE WHEN discovery_candidates.detail_verified = 1
+            AND excluded.detail_verified = 0 THEN discovery_candidates.catalog_no
+            ELSE excluded.catalog_no END,
+          jan = CASE WHEN discovery_candidates.detail_verified = 1
+            AND excluded.detail_verified = 0 THEN discovery_candidates.jan
+            ELSE excluded.jan END,
+          title = CASE WHEN discovery_candidates.detail_verified = 1
+            AND excluded.detail_verified = 0 THEN discovery_candidates.title
+            ELSE excluded.title END,
+          artist = CASE WHEN discovery_candidates.detail_verified = 1
+            AND excluded.detail_verified = 0 THEN discovery_candidates.artist
+            ELSE excluded.artist END,
+          edition = CASE WHEN discovery_candidates.detail_verified = 1
+            AND excluded.detail_verified = 0 THEN discovery_candidates.edition
+            ELSE excluded.edition END,
           source_item_id = COALESCE(excluded.source_item_id, discovery_candidates.source_item_id),
           source_url = COALESCE(excluded.source_url, discovery_candidates.source_url),
           source_price = excluded.source_price,
           source_currency = excluded.source_currency,
-          availability = excluded.availability,
-          status = CASE
-            WHEN excluded.availability IN ('sold_out', 'unavailable') THEN 'expired'
-            ELSE 'active'
-          END,
+          availability = CASE WHEN discovery_candidates.detail_verified = 1
+            AND excluded.detail_verified = 0 THEN discovery_candidates.availability
+            ELSE excluded.availability END,
+          status = CASE WHEN discovery_candidates.detail_verified = 1
+            AND excluded.detail_verified = 0 THEN discovery_candidates.status
+            ELSE excluded.status END,
           observation_count = discovery_candidates.observation_count + 1,
           missing_scan_count = 0,
-          raw_text = COALESCE(excluded.raw_text, discovery_candidates.raw_text),
+          raw_text = CASE WHEN discovery_candidates.detail_verified = 1
+            AND excluded.detail_verified = 0 THEN discovery_candidates.raw_text
+            ELSE excluded.raw_text END,
+          detail_verified = MAX(discovery_candidates.detail_verified, excluded.detail_verified),
           last_seen_at = CURRENT_TIMESTAMP,
           updated_at = CURRENT_TIMESTAMP
         """,
@@ -1596,6 +1619,7 @@ def _upsert_discovery_candidate(
             candidate.missing_scan_count,
             candidate.last_xianyu_checked_at,
             candidate.raw_text,
+            int(candidate.detail_verified),
         ),
     )
     row = conn.execute(
@@ -1646,7 +1670,7 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
               c.id AS candidate_id, c.media_type, c.identity_key,
               c.title AS candidate_title, c.catalog_no, c.jan, c.edition,
               c.source_url, c.source_price, c.source_currency,
-              c.availability, c.status AS candidate_status,
+              c.availability, c.status AS candidate_status, c.detail_verified,
               c.last_seen_at AS candidate_last_seen_at,
               c.source_price AS purchase_price_jpy,
               o.xianyu_reference_price AS xianyu_price_cny,
@@ -1656,7 +1680,8 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
             JOIN discovery_candidates c ON c.id = o.discovery_candidate_id
             JOIN discovery_pools p ON p.id = c.pool_id
             LEFT JOIN market_items m ON m.id = o.wameiji_item_id
-            WHERE c.status = 'active' AND COALESCE(o.status, 'active') = 'active'
+            WHERE c.status = 'active' AND c.detail_verified = 1
+              AND COALESCE(o.status, 'active') = 'active'
               AND o.decision != 'reject'
               AND o.expected_profit >= p.min_profit_cny
               AND o.net_margin >= p.min_margin
@@ -1675,14 +1700,18 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
     init_db(db_path)
     with sqlite3.connect(db_path) as conn:
         active_candidates = conn.execute(
-            "SELECT COUNT(*) FROM discovery_candidates WHERE status = 'active'"
+            """
+            SELECT COUNT(*) FROM discovery_candidates
+            WHERE status = 'active' AND detail_verified = 1
+            """
         ).fetchone()[0]
         active_opportunities = conn.execute(
             """
             SELECT COUNT(*) FROM opportunities o
             JOIN discovery_candidates c ON c.id = o.discovery_candidate_id
             JOIN discovery_pools p ON p.id = c.pool_id
-            WHERE c.status = 'active' AND COALESCE(o.status, 'active') = 'active'
+            WHERE c.status = 'active' AND c.detail_verified = 1
+              AND COALESCE(o.status, 'active') = 'active'
               AND o.decision != 'reject'
               AND o.expected_profit >= p.min_profit_cny
               AND o.net_margin >= p.min_margin
@@ -1695,7 +1724,8 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
             SELECT MAX(o.expected_profit) FROM opportunities o
             JOIN discovery_candidates c ON c.id = o.discovery_candidate_id
             JOIN discovery_pools p ON p.id = c.pool_id
-            WHERE c.status = 'active' AND COALESCE(o.status, 'active') = 'active'
+            WHERE c.status = 'active' AND c.detail_verified = 1
+              AND COALESCE(o.status, 'active') = 'active'
               AND o.decision != 'reject'
               AND o.expected_profit >= p.min_profit_cny
               AND o.net_margin >= p.min_margin

@@ -146,6 +146,138 @@ async def capture_search_html(
     )
 
 
+async def capture_page_html(
+    source: str,
+    target_url: str,
+    output_path: str | Path,
+    *,
+    state_file: str | Path | None = None,
+    profile_dir: str | Path | None = None,
+    xianyu_profile_dir: str | Path | None = None,
+    wameiji_state_file: str | Path | None = None,
+    screenshot_path: str | Path | None = None,
+    network_log_path: str | Path | None = None,
+    timeout_seconds: int = 30,
+    headless: bool = False,
+    playwright_factory: Callable[[], Any] | None = None,
+) -> dict[str, Any]:
+    """Capture one already-known listing URL without returning to a search page.
+
+    The discovery worker uses this for Wameiji product details.  It deliberately
+    shares the same visible browser/profile rules as search capture while not
+    treating a search-card parser as evidence that a detail page was opened.
+    """
+    if source not in {"wameiji", "xianyu"}:
+        raise ValueError("source must be 'wameiji' or 'xianyu'")
+    url = str(target_url or "").strip()
+    if not url:
+        raise ValueError("target_url is required")
+
+    output = Path(output_path)
+    screenshot = Path(screenshot_path) if screenshot_path else None
+    network_log = Path(network_log_path) if network_log_path else None
+    network_entries: list[dict[str, Any]] = []
+    network_tasks: list[asyncio.Task] = []
+    source_profile_dir = xianyu_profile_dir if source == "xianyu" and xianyu_profile_dir else profile_dir
+    profile = Path(source_profile_dir) if source_profile_dir else None
+    use_persistent_profile = bool(
+        profile and not (source == "xianyu" and state_file and not xianyu_profile_dir)
+    )
+    browser = None
+    context = None
+    final_url = url
+    playwright_context = _resolve_playwright_factory(playwright_factory)
+    try:
+        async with _maybe_async_context(playwright_context) as playwright:
+            try:
+                if use_persistent_profile:
+                    profile.mkdir(parents=True, exist_ok=True)
+                    context = await playwright.chromium.launch_persistent_context(
+                        user_data_dir=str(profile),
+                        headless=headless,
+                    )
+                else:
+                    browser = await playwright.chromium.launch(headless=headless)
+                    context_kwargs: dict[str, Any] = {}
+                    if source == "xianyu" and state_file:
+                        context_kwargs["storage_state"] = str(state_file)
+                    elif source == "wameiji" and wameiji_state_file:
+                        context_kwargs["storage_state"] = str(wameiji_state_file)
+                    context = await browser.new_context(**context_kwargs)
+                page = await context.new_page()
+                if network_log is not None:
+                    page.on(
+                        "response",
+                        lambda response: network_tasks.append(
+                            asyncio.create_task(_capture_network_response(source, response, network_entries))
+                        ),
+                    )
+                await page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=max(1, timeout_seconds) * 1000,
+                )
+                await _wait_for_detail_surface(page, source, timeout_seconds)
+                html = await _read_page_content(page)
+                final_url = str(getattr(page, "url", None) or url)
+                if screenshot is not None:
+                    screenshot.parent.mkdir(parents=True, exist_ok=True)
+                    await page.screenshot(path=str(screenshot), full_page=True)
+                if network_tasks:
+                    await asyncio.gather(*network_tasks)
+            finally:
+                if use_persistent_profile and context is not None:
+                    await context.close()
+                elif browser is not None:
+                    await browser.close()
+    except Exception as exc:
+        return {
+            "source": source,
+            "status": "human_required",
+            "error_type": "runner_error",
+            "error_message": f"{type(exc).__name__}: {exc}",
+            "target_url": url,
+            "final_url": final_url,
+            "snapshot_path": str(output),
+            "screenshot_path": str(screenshot) if screenshot else None,
+            "network_log_path": str(network_log) if network_log else None,
+            "network_response_count": len(network_entries),
+        }
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(html, encoding="utf-8")
+    if network_log is not None:
+        network_log.parent.mkdir(parents=True, exist_ok=True)
+        network_log.write_text(
+            json.dumps(network_entries, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    # Search parsers already recognize the shared challenge/login surfaces. A
+    # successful empty detail page remains ``ok`` here; its own parser decides
+    # whether title and price evidence are sufficient.
+    adapter = _adapter_for_source(
+        source,
+        state_file,
+        profile_dir=profile_dir,
+        wameiji_state_file=wameiji_state_file,
+        snapshot_dir=output.parent,
+        headless=headless,
+    )
+    status = adapter.parse_search_html(html, WatchItem(catalog_no="detail"))
+    return {
+        "source": source,
+        "status": status.status,
+        "error_type": status.error_type,
+        "error_message": status.error_message,
+        "target_url": url,
+        "final_url": final_url,
+        "snapshot_path": str(output),
+        "screenshot_path": str(screenshot) if screenshot else None,
+        "network_log_path": str(network_log) if network_log else None,
+        "network_response_count": len(network_entries),
+    }
+
+
 async def _read_page_content(page: Any) -> str:
     """Read content after redirects settle, without hiding navigation errors."""
     last_error: Exception | None = None
@@ -183,6 +315,24 @@ async def _wait_for_result_surface(page: Any, source: str, timeout_seconds: int)
             # challenge, an empty result set, or a slow network response.
             pass
     await page.wait_for_timeout(5000 if source == "wameiji" else min(max(1, timeout_seconds) * 1000, 2000))
+
+
+async def _wait_for_detail_surface(page: Any, source: str, timeout_seconds: int) -> None:
+    selectors = {
+        "wameiji": ".goods-detail, .goods-info, .goods-name, .price-com, h1",
+        "xianyu": ".item-detail, .item-title, h1",
+    }
+    selector = selectors.get(source)
+    wait_for_selector = getattr(page, "wait_for_selector", None)
+    if selector and callable(wait_for_selector):
+        try:
+            timeout_ms = min(max(1, timeout_seconds) * 1000, 20000)
+            await wait_for_selector(selector, state="attached", timeout=timeout_ms)
+            await page.wait_for_timeout(300)
+            return
+        except Exception:
+            pass
+    await page.wait_for_timeout(1000)
 
 
 def _adapter_for_source(

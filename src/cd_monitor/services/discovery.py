@@ -32,6 +32,7 @@ from cd_monitor.storage.sqlite import (
 )
 
 FetchWameiji = Callable[[str], Awaitable[list[MarketItem]]]
+FetchWameijiDetail = Callable[[MarketItem], Awaitable[MarketItem | None]]
 FetchXianyu = Callable[[str], Awaitable[list[XianyuPriceSample]]]
 
 
@@ -75,6 +76,7 @@ _GAME_HARDWARE_MARKERS = (
     "ケースのみ",
 )
 _XIANYU_SECURITY_COOLDOWN_SECONDS = 30 * 60
+_NOT_PURCHASABLE_AVAILABILITY = {"sold_out", "unavailable", "reserved"}
 
 
 @dataclass(slots=True)
@@ -85,6 +87,7 @@ class DiscoveryScanResult:
     run_id: int
     discovered_count: int = 0
     candidate_count: int = 0
+    detail_query_count: int = 0
     evaluated_count: int = 0
     xianyu_query_count: int = 0
     opportunity_ids: list[int] | None = None
@@ -102,13 +105,15 @@ async def scan_discovery_keyword(
     pool_id: int,
     keyword: str,
     fetch_wameiji: FetchWameiji,
+    fetch_wameiji_detail: FetchWameijiDetail,
     fetch_xianyu: FetchXianyu,
 ) -> DiscoveryScanResult:
     """Discover a bounded set of purchase listings for one pool keyword.
 
-    A candidate is only estimated on its first observation or after a visible
-    price/availability change.  This keeps the source-side discovery cadence
-    separate from the more expensive Xianyu lookup cadence.
+    Search cards only discover candidate URLs. Each candidate must first pass
+    its Wameiji detail page before it can use the bounded Xianyu lookup budget.
+    Later scans revisit details only for unverified, new, or visibly changed
+    listings.
     """
 
     pool = get_discovery_pool(db_path, pool_id)
@@ -145,6 +150,7 @@ async def scan_discovery_keyword(
 
     discovered_count = len(purchase_items)
     candidate_count = 0
+    detail_query_count = 0
     evaluated_count = 0
     xianyu_query_count = 0
     cooldown_until = get_discovery_source_cooldown(db_path, "xianyu")
@@ -186,13 +192,58 @@ async def scan_discovery_keyword(
     for (item, candidate), (previous, candidate_id) in zip(
         candidate_items, persisted, strict=True
     ):
-        if candidate.availability in {"sold_out", "unavailable"}:
+        if candidate.availability in _NOT_PURCHASABLE_AVAILABILITY:
             continue
         if xianyu_blocked:
             continue
-        if not _needs_xianyu_refresh(previous, candidate):
+        needs_detail = (
+            previous is None
+            or not previous.detail_verified
+            or _needs_xianyu_refresh(previous, candidate)
+        )
+        if not needs_detail:
             continue
-        if xianyu_query_count >= pool.candidate_budget:
+        if (
+            detail_query_count >= pool.candidate_budget
+            or xianyu_query_count >= pool.candidate_budget
+        ):
+            continue
+        detail_query_count += 1
+        try:
+            detail_item = await fetch_wameiji_detail(item)
+        except Exception as exc:  # noqa: BLE001 - a blocked detail is not comparable
+            record_discovery_run(
+                db_path,
+                pool_id=pool_id,
+                source="wameiji_detail",
+                status="human_required",
+                keyword=item.url or item.title,
+                candidate_count=1,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+            continue
+        if detail_item is None or not detail_item.detail_verified:
+            record_discovery_run(
+                db_path,
+                pool_id=pool_id,
+                source="wameiji_detail",
+                status="human_required",
+                keyword=item.url or item.title,
+                candidate_count=1,
+                error_type="detail_parse_failed",
+                error_message="Detail page did not yield a verified purchasable item.",
+            )
+            continue
+        item = detail_item
+        candidate = _candidate_from_market_item(pool_id, pool.media_type, item)
+        if not _is_media_relevant(item, pool.media_type):
+            ignored_candidate = replace(candidate, status="ignored")
+            upsert_discovery_candidates_with_previous(db_path, [ignored_candidate])
+            continue
+        detail_persisted = upsert_discovery_candidates_with_previous(db_path, [candidate])
+        _, candidate_id = detail_persisted[0]
+        if candidate.availability in _NOT_PURCHASABLE_AVAILABILITY:
             continue
 
         query = _xianyu_query(candidate)
@@ -266,6 +317,7 @@ async def scan_discovery_keyword(
         run_id,
         discovered_count=discovered_count,
         candidate_count=candidate_count,
+        detail_query_count=detail_query_count,
         evaluated_count=evaluated_count,
         xianyu_query_count=xianyu_query_count,
         opportunity_ids=opportunity_ids,
@@ -298,8 +350,9 @@ def _candidate_from_market_item(
         source_price=item.price,
         source_currency=item.currency,
         availability=item.availability,
-        status="expired" if item.availability in {"sold_out", "unavailable"} else "active",
+        status="expired" if item.availability in _NOT_PURCHASABLE_AVAILABILITY else "active",
         raw_text=item.raw_text,
+        detail_verified=item.detail_verified,
     )
 
 
@@ -350,9 +403,19 @@ def _is_xianyu_security_check(exc: Exception) -> bool:
 def _needs_xianyu_refresh(
     previous: DiscoveryCandidate | None, current: DiscoveryCandidate
 ) -> bool:
-    if previous is None or previous.last_xianyu_checked_at is None:
+    if previous is None:
         return True
-    if previous.status != "active":
+    if previous.detail_verified and previous.status == "ignored":
+        return False
+    if previous.detail_verified and previous.status != "active":
+        # A generic search card often says only that a link is visible. It is
+        # not evidence that a detail-confirmed reservation or sold listing is
+        # purchasable again. Revisit only when the card explicitly becomes
+        # available or its visible price changes.
+        return current.availability == "available" or abs(
+            previous.source_price - current.source_price
+        ) > 0.001
+    if previous.last_xianyu_checked_at is None:
         return True
     if previous.availability != current.availability:
         return True

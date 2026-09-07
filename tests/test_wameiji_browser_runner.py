@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from cd_monitor.core.models import WatchItem
+from cd_monitor.core.models import MarketItem, WatchItem
 from cd_monitor.sources.wameiji_browser import (
     DEFAULT_SEARCH_URL,
     MAX_CONSECUTIVE_FAILURES,
@@ -106,6 +106,88 @@ def test_legacy_constructor_still_works() -> None:
     """live_browser_capture.py 现有调用：WameijiBrowserAdapter(enabled=True)。"""
     adapter = WameijiBrowserAdapter(enabled=True)
     assert adapter.enabled is True
+
+
+def test_parse_detail_html_uses_detail_page_values_and_marks_item_verified() -> None:
+    """A search card cannot be promoted until its own detail page is parsed."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card title that is incomplete",
+        price=9999,
+        currency="JPY",
+        external_item_id="listing-3520",
+        url="/mall/mercari/detail/listing-3520",
+        availability="unknown_but_visible",
+    )
+    detail_html = """
+    <main class="goods-detail">
+      <h1 class="goods-name">Artist Album SRCL-3520 初回限定盤 CD+DVD</h1>
+      <section class="goods-info">
+        <p>品番：SRCL-3520</p>
+        <p>JAN：4547366123456</p>
+        <p class="price-com">1,280 <span class="unit">日元</span></p>
+        <p>二手 在库</p>
+      </section>
+    </main>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert len(status.items) == 1
+    item = status.items[0]
+    assert item.detail_verified is True
+    assert item.title == "Artist Album SRCL-3520 初回限定盤 CD+DVD"
+    assert item.price == 1280
+    assert item.catalog_no == "SRCL-3520"
+    assert item.jan == "4547366123456"
+    assert item.availability == "available"
+
+
+def test_parse_detail_html_does_not_promote_page_metadata_as_a_product_title() -> None:
+    """A generic site title plus a number is not sufficient purchase evidence."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card",
+        price=500,
+        currency="JPY",
+        external_item_id="metadata-only",
+        url="/mall/mercari/detail/metadata-only",
+    )
+    detail_html = """
+    <meta property="og:title" content="Doorzo - Japanese Online Shop Proxy Service">
+    <main><p class="price-com">1,280 日元</p></main>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "human_required"
+    assert status.error_type == "detail_parse_failed"
+
+
+def test_parse_detail_html_does_not_copy_catalog_from_the_search_card() -> None:
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card with a possibly unrelated code",
+        price=500,
+        currency="JPY",
+        catalog_no="FAKE-999",
+        external_item_id="detail-without-code",
+        url="/mall/mercari/detail/detail-without-code",
+    )
+    detail_html = """
+    <main class="goods-detail">
+      <h1 class="goods-name">Artist Album 初回限定盤 CD</h1>
+      <p class="price-com">1,280 日元</p>
+    </main>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    item = status.items[0]
+    assert item.catalog_no is None
+    assert item.jan is None
 
 
 def test_extended_constructor_profile_dir_optional() -> None:

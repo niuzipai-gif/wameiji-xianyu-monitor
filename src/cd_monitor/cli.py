@@ -910,10 +910,13 @@ def main(argv: list[str] | None = None) -> int:
         snapshot_root = Path(
             args.snapshot_dir or Path(config.app.snapshot_dir) / "discovery"
         )
-        fetch_wameiji, fetch_xianyu = build_browser_fetchers(config, snapshot_root)
+        fetch_wameiji, fetch_wameiji_detail, fetch_xianyu = build_browser_fetchers(
+            config, snapshot_root
+        )
         worker = DiscoveryWorker(
             db_path=db_path,
             fetch_wameiji=fetch_wameiji,
+            fetch_wameiji_detail=fetch_wameiji_detail,
             fetch_xianyu=fetch_xianyu,
             command_client=command_client_from_environment(),
         )

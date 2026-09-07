@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 from cd_monitor.core.models import MarketItem, XianyuPriceSample
@@ -10,8 +11,8 @@ from cd_monitor.storage.sqlite import (
     init_db,
     list_collector_commands,
     list_discovery_pools,
-    upsert_remote_collector_command,
     update_discovery_pool,
+    upsert_remote_collector_command,
 )
 
 
@@ -26,6 +27,10 @@ class _FakeCommandClient:
     def complete(self, command_id: int, *, status: str, result: dict) -> dict:
         self.completions.append((command_id, status, result))
         return {"id": command_id, "status": status, "result": result}
+
+
+async def _verified_detail(item: MarketItem) -> MarketItem:
+    return replace(item, detail_verified=True)
 
 
 def test_worker_executes_remote_scan_once_command_and_acknowledges(tmp_path: Path) -> None:
@@ -64,6 +69,7 @@ def test_worker_executes_remote_scan_once_command_and_acknowledges(tmp_path: Pat
     worker = DiscoveryWorker(
         db_path=db_path,
         fetch_wameiji=fetch_wameiji,
+        fetch_wameiji_detail=_verified_detail,
         fetch_xianyu=fetch_xianyu,
         command_client=command_client,
     )
@@ -80,6 +86,66 @@ def test_worker_executes_remote_scan_once_command_and_acknowledges(tmp_path: Pat
     mirrored = list_collector_commands(db_path)
     assert mirrored[0]["remote_command_id"] == "91"
     assert mirrored[0]["status"] == "completed"
+
+
+def test_worker_uses_detail_fetcher_before_it_queries_xianyu(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(db_path, pool_id, {"keyword_budget": 1})
+    calls: list[str] = []
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        calls.append("search")
+        return [
+            MarketItem(
+                source="wameiji",
+                title="Artist CD card",
+                price=9999,
+                currency="JPY",
+                external_item_id="worker-detail-1",
+                url="/mall/mercari/detail/worker-detail-1",
+                availability="available",
+            )
+        ]
+
+    async def fetch_wameiji_detail(item: MarketItem) -> MarketItem:
+        calls.append("detail")
+        return MarketItem(
+            source="wameiji",
+            title="Artist SRCL-3520 CD",
+            price=1200,
+            currency="JPY",
+            catalog_no="SRCL-3520",
+            external_item_id=item.external_item_id,
+            url=item.url,
+            availability="available",
+            detail_verified=True,
+        )
+
+    async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
+        calls.append(f"xianyu:{query}")
+        return [
+            XianyuPriceSample(catalog_no=query, title="SRCL-3520 CD", price_cny=280),
+            XianyuPriceSample(catalog_no=query, title="SRCL-3520 CD", price_cny=300),
+            XianyuPriceSample(catalog_no=query, title="SRCL-3520 CD", price_cny=320),
+        ]
+
+    worker = DiscoveryWorker(
+        db_path=db_path,
+        fetch_wameiji=fetch_wameiji,
+        fetch_wameiji_detail=fetch_wameiji_detail,
+        fetch_xianyu=fetch_xianyu,
+        command_client=_FakeCommandClient(
+            [{"id": 93, "command_type": "scan_now", "payload": {"pool_id": pool_id}}]
+        ),
+    )
+
+    result = asyncio.run(worker.run_once())
+
+    assert result.scan_count == 1
+    assert calls == ["search", "detail", "xianyu:SRCL-3520"]
 
 
 def test_worker_respects_disabled_pool_even_when_commanded(tmp_path: Path) -> None:
@@ -104,6 +170,7 @@ def test_worker_respects_disabled_pool_even_when_commanded(tmp_path: Path) -> No
     worker = DiscoveryWorker(
         db_path=db_path,
         fetch_wameiji=fetch_wameiji,
+        fetch_wameiji_detail=_verified_detail,
         fetch_xianyu=fetch_xianyu,
         command_client=command_client,
     )

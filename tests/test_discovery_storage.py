@@ -33,21 +33,22 @@ def test_init_db_seeds_cd_and_physical_game_pools(tmp_path: Path) -> None:
     ]
     assert all(pool.enabled for pool in pools)
     assert all(pool.scan_interval_minutes == 30 for pool in pools)
+    assert all(pool.candidate_budget == 2 for pool in pools)
 
 
-def test_identity_key_prefers_catalog_then_jan_then_source_then_title() -> None:
+def test_identity_key_prefers_source_listing_then_catalog_jan_then_title() -> None:
     assert build_identity_key(
         catalog_no=" SRCL-3520 ",
         jan="4988000000000",
         external_item_id="wameiji-7",
         title="ignored",
-    ) == "catalog:SRCL3520"
+    ) == "source:wameiji-7"
     assert build_identity_key(
         catalog_no=None,
         jan="4988000000000",
         external_item_id="wameiji-7",
         title="ignored",
-    ) == "jan:4988000000000"
+    ) == "source:wameiji-7"
     assert build_identity_key(
         catalog_no=None,
         jan=None,
@@ -261,6 +262,7 @@ def test_selection_board_orders_linked_opportunities_by_profit_descending(tmp_pa
                 source_price=1200,
                 source_currency="JPY",
                 availability="available",
+                detail_verified=True,
             ),
         )
         item_id = insert_market_items(

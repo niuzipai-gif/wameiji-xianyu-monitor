@@ -97,10 +97,12 @@
     const safeSourceUrl = /^https?:\/\//i.test(sourceUrl) ? sourceUrl : "";
     const title = item.item_title || item.candidate_title || "未命名候选";
     const reference = Number(item.xianyu_price_cny || item.xianyu_reference_price || 0);
+    const detailVerified = item.detail_verified === true || Number(item.detail_verified) === 1;
     const card = [
       '<article class="discovery-card">',
         '<div class="discovery-card-head">',
           '<span class="tag hot">挖煤姬 · ' + esc(typeLabel(item.media_type)) + '</span>',
+          '<span class="discovery-verification ' + (detailVerified ? "verified" : "pending") + '">' + (detailVerified ? "详情已核验" : "详情待核验") + '</span>',
           '<span class="discovery-confidence">匹配 ' + esc(percent(item.match_confidence)) + '</span>',
         '</div>',
         '<h4>' + esc(title) + '</h4>',
@@ -237,7 +239,7 @@
       enabled: Boolean(root.querySelector('[data-discovery-field="enabled"]')?.checked),
       scan_interval_minutes: numberValue(root, "scan_interval_minutes", 30, 5, 1440),
       keyword_budget: numberValue(root, "keyword_budget", 2, 1, 10),
-      candidate_budget: numberValue(root, "candidate_budget", 12, 1, 50),
+      candidate_budget: numberValue(root, "candidate_budget", 2, 1, 50),
       min_profit_cny: numberValue(root, "min_profit_cny", 35, 0, 100000),
       min_margin: numberValue(root, "min_margin_percent", 25, 0, 100) / 100,
     };

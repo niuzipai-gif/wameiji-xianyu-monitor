@@ -1,6 +1,6 @@
 import asyncio
 
-from cd_monitor.services.live_browser_capture import capture_search_html
+from cd_monitor.services.live_browser_capture import capture_page_html, capture_search_html
 
 
 def test_capture_search_html_writes_xianyu_html_and_parses_samples(tmp_path) -> None:
@@ -142,6 +142,32 @@ def test_xianyu_explicit_profile_wins_over_state_file(tmp_path) -> None:
     assert fake_playwright.chromium.persistent_context.closed is True
 
 
+def test_capture_page_html_opens_a_wameiji_detail_url_without_search_parsing(tmp_path) -> None:
+    """Detail capture must navigate to the listing URL, not back to search."""
+    output = tmp_path / "wameiji-detail.html"
+    detail_url = "https://meruki.cn/mall/mercari/detail/listing-3520"
+    fake_playwright = _FakePlaywright(
+        "<main class='goods-detail'><h1>Artist SRCL-3520</h1><p class='price-com'>1,280 日元</p></main>"
+    )
+
+    result = asyncio.run(
+        capture_page_html(
+            "wameiji",
+            detail_url,
+            output,
+            profile_dir=tmp_path / "wameiji-profile",
+            timeout_seconds=1,
+            playwright_factory=lambda: fake_playwright,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["target_url"] == detail_url
+    assert result["final_url"] == detail_url
+    assert output.read_text(encoding="utf-8").startswith("<main class='goods-detail'>")
+    assert fake_playwright.chromium.persistent_context.page.goto_urls == [detail_url]
+
+
 class _FakePlaywright:
     def __init__(self, html: str) -> None:
         self.chromium = _FakeChromium(html)
@@ -193,11 +219,15 @@ class _FakePage:
     def __init__(self, html: str) -> None:
         self.html = html
         self.handlers = {}
+        self.goto_urls = []
+        self.url = None
 
     def on(self, event: str, handler) -> None:
         self.handlers[event] = handler
 
     async def goto(self, _url: str, **_kwargs) -> None:
+        self.goto_urls.append(_url)
+        self.url = _url
         if "response" in self.handlers:
             self.handlers["response"](_FakeResponse())
         return None
