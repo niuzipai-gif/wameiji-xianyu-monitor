@@ -14,7 +14,9 @@ from cd_monitor.storage.sqlite import (
     list_discovery_keywords,
     list_discovery_opportunities,
     list_discovery_pools,
+    list_discovery_resale_queue,
     mark_discovery_keyword_scanned,
+    record_discovery_candidate_detail_attempt,
     record_discovery_title_alias_evidence,
     replace_discovery_keywords,
     update_discovery_pool,
@@ -790,6 +792,130 @@ def test_selection_board_hides_stale_xianyu_evaluation(tmp_path: Path) -> None:
             WHERE id = ?
             """,
             (opportunity_id,),
+        )
+
+    assert list_discovery_opportunities(db_path) == []
+    assert discovery_summary(db_path)["active_opportunities"] == 0
+
+
+def test_stale_source_detail_requeues_before_any_xianyu_resale_lookup(
+    tmp_path: Path,
+) -> None:
+    """A stale purchase price must be re-opened before it can use a resale price."""
+
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    assert pool.id is not None
+    candidate_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:stale-detail",
+            title="Stale Detail Album CD",
+            source_item_id="stale-detail",
+            source_url="/mall/market/detail/stale-detail",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE discovery_candidates
+            SET detail_verified_at = datetime(CURRENT_TIMESTAMP, '-181 minutes'),
+                last_xianyu_checked_at = datetime(CURRENT_TIMESTAMP, '-181 minutes'),
+                pipeline_stage = 'evaluated'
+            WHERE id = ?
+            """,
+            (candidate_id,),
+        )
+
+    assert [candidate.id for candidate in list_discovery_detail_queue(db_path, pool.id, limit=10)] == [
+        candidate_id
+    ]
+    assert list_discovery_resale_queue(db_path, pool.id, limit=10) == []
+
+    record_discovery_candidate_detail_attempt(
+        db_path,
+        candidate_id,
+        pipeline_stage="resale_queued",
+        detail_verified=True,
+        increment_attempt=False,
+    )
+
+    assert list_discovery_detail_queue(db_path, pool.id, limit=10) == []
+    assert [candidate.id for candidate in list_discovery_resale_queue(db_path, pool.id, limit=10)] == [
+        candidate_id
+    ]
+
+
+def test_selection_board_hides_stale_source_detail_even_with_fresh_xianyu_price(
+    tmp_path: Path,
+) -> None:
+    """Both sides of a profit card must have fresh evidence."""
+
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    assert pool.id is not None
+    candidate_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:stale-source-board",
+            title="Stale Source Board Album CD",
+            source_item_id="stale-source-board",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+    item = MarketItem(
+        source="wameiji",
+        title="Stale Source Board Album CD",
+        price=1200,
+        currency="JPY",
+        external_item_id="stale-source-board",
+        availability="available",
+    )
+    item_id = insert_market_items(db_path, [item])[0]
+    insert_discovery_opportunity(
+        db_path,
+        Opportunity(
+            catalog_no="stale-source-board",
+            item=item,
+            xianyu_reference_price=300,
+            expected_sale_price=250,
+            landed_cost=70,
+            expected_revenue=180,
+            expected_profit=110,
+            net_margin=0.61,
+            turnover_adjusted_roi=0.61,
+            match_confidence=0.9,
+            valid_xianyu_sample_count=3,
+            liquidity_status="normal",
+            decision="strong_alert",
+            opportunity_hash="stale-source-board",
+        ),
+        wameiji_item_id=item_id,
+        discovery_candidate_id=candidate_id,
+        media_type="cd",
+        identity_key="source:stale-source-board",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE discovery_candidates
+            SET detail_verified_at = datetime(CURRENT_TIMESTAMP, '-181 minutes')
+            WHERE id = ?
+            """,
+            (candidate_id,),
         )
 
     assert list_discovery_opportunities(db_path) == []

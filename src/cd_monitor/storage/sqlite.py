@@ -18,6 +18,7 @@ _TITLE_QUERY_EVIDENCE_VERSION = "strict-title-sample-v3"
 _DISCOVERY_UNVERIFIED_QUEUE_EPOCH_KEY = "discovery_unverified_queue_epoch"
 _DISCOVERY_UNVERIFIED_QUEUE_EPOCH = "detail-first-baseline-v1"
 _DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES = 180
+_DISCOVERY_SOURCE_DETAIL_FRESHNESS_MINUTES = 180
 
 
 
@@ -1797,18 +1798,31 @@ def list_discovery_detail_queue(
             FROM discovery_candidates
             WHERE pool_id = ?
               AND status = 'active'
-              AND detail_verified = 0
               AND (
                 COALESCE(TRIM(source_url), '') != ''
                 OR COALESCE(TRIM(source_item_id), '') != ''
               )
-              AND COALESCE(pipeline_stage, 'search_discovered') IN (
-                'search_discovered', 'detail_queued'
+              AND (
+                (
+                  detail_verified = 0
+                  AND COALESCE(pipeline_stage, 'search_discovered') IN (
+                    'search_discovered', 'detail_queued'
+                  )
+                )
+                OR (
+                  detail_verified = 1
+                  AND detail_verified_at IS NOT NULL
+                  AND datetime(detail_verified_at) <= datetime(CURRENT_TIMESTAMP, ?)
+                )
               )
             ORDER BY datetime(first_seen_at) ASC, id ASC
             LIMIT ?
             """,
-            (pool_id, max(0, int(limit))),
+            (
+                pool_id,
+                f"-{_DISCOVERY_SOURCE_DETAIL_FRESHNESS_MINUTES} minutes",
+                max(0, int(limit)),
+            ),
         ).fetchall()
     return [_discovery_candidate_from_row(row) for row in rows]
 
@@ -1838,6 +1852,8 @@ def list_discovery_resale_queue(
             WHERE pool_id = ?
               AND status = 'active'
               AND detail_verified = 1
+              AND detail_verified_at IS NOT NULL
+              AND datetime(detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND (
                 last_xianyu_checked_at IS NULL
                 OR datetime(last_xianyu_checked_at) <= datetime(CURRENT_TIMESTAMP, ?)
@@ -1850,7 +1866,12 @@ def list_discovery_resale_queue(
               id ASC
             LIMIT ?
             """,
-            (pool_id, f"-{refresh_window} minutes", max(0, int(limit))),
+            (
+                pool_id,
+                f"-{_DISCOVERY_SOURCE_DETAIL_FRESHNESS_MINUTES} minutes",
+                f"-{refresh_window} minutes",
+                max(0, int(limit)),
+            ),
         ).fetchall()
     return [_discovery_candidate_from_row(row) for row in rows]
 
@@ -2003,7 +2024,7 @@ def record_discovery_candidate_detail_attempt(
                 last_detail_error = ?,
                 detail_verified = CASE WHEN ? THEN 1 ELSE detail_verified END,
                 detail_verified_at = CASE
-                  WHEN ? THEN COALESCE(detail_verified_at, CURRENT_TIMESTAMP)
+                  WHEN ? THEN CURRENT_TIMESTAMP
                   ELSE detail_verified_at
                 END,
                 pipeline_stage = ?,
@@ -2396,6 +2417,7 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
             LEFT JOIN market_items m ON m.id = o.wameiji_item_id
             WHERE c.status = 'active' AND c.detail_verified = 1
               AND COALESCE(o.status, 'active') = 'active'
+              AND datetime(c.detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND o.decision != 'reject'
               AND o.expected_profit >= p.min_profit_cny
@@ -2406,7 +2428,11 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
               o.valid_xianyu_sample_count DESC, c.last_seen_at DESC, o.id DESC
             LIMIT ?
             """,
-            (f"-{_DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES} minutes", max(1, int(limit))),
+            (
+                f"-{_DISCOVERY_SOURCE_DETAIL_FRESHNESS_MINUTES} minutes",
+                f"-{_DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES} minutes",
+                max(1, int(limit)),
+            ),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -2414,6 +2440,7 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
 def discovery_summary(db_path: str | Path) -> dict[str, object]:
     init_db(db_path)
     freshness_window = f"-{_DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES} minutes"
+    source_freshness_window = f"-{_DISCOVERY_SOURCE_DETAIL_FRESHNESS_MINUTES} minutes"
     with sqlite3.connect(db_path) as conn:
         active_candidates = conn.execute(
             """
@@ -2428,6 +2455,7 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
             JOIN discovery_pools p ON p.id = c.pool_id
             WHERE c.status = 'active' AND c.detail_verified = 1
               AND COALESCE(o.status, 'active') = 'active'
+              AND datetime(c.detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND o.decision != 'reject'
               AND o.expected_profit >= p.min_profit_cny
@@ -2435,7 +2463,7 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
               AND o.match_confidence >= p.min_match_confidence
               AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
             """,
-            (freshness_window,),
+            (source_freshness_window, freshness_window),
         ).fetchone()[0]
         highest_profit = conn.execute(
             """
@@ -2444,6 +2472,7 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
             JOIN discovery_pools p ON p.id = c.pool_id
             WHERE c.status = 'active' AND c.detail_verified = 1
               AND COALESCE(o.status, 'active') = 'active'
+              AND datetime(c.detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND o.decision != 'reject'
               AND o.expected_profit >= p.min_profit_cny
@@ -2451,7 +2480,7 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
               AND o.match_confidence >= p.min_match_confidence
               AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
             """,
-            (freshness_window,),
+            (source_freshness_window, freshness_window),
         ).fetchone()[0]
         total_profit = conn.execute(
             """
@@ -2460,6 +2489,7 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
             JOIN discovery_pools p ON p.id = c.pool_id
             WHERE c.status = 'active' AND c.detail_verified = 1
               AND COALESCE(o.status, 'active') = 'active'
+              AND datetime(c.detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND o.decision != 'reject'
               AND o.expected_profit >= p.min_profit_cny
@@ -2467,7 +2497,7 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
               AND o.match_confidence >= p.min_match_confidence
               AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
             """,
-            (freshness_window,),
+            (source_freshness_window, freshness_window),
         ).fetchone()[0]
         last_scan_at = conn.execute(
             "SELECT MAX(finished_at) FROM discovery_runs WHERE status = 'ok'"
