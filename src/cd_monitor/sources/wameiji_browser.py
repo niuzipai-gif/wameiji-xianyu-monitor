@@ -53,11 +53,12 @@ class WameijiBrowserAdapter(BrowserHarnessAdapter):
         parser = _WameijiCardParser()
         parser.feed(html)
         had_card_items = bool(parser.items)
-        if had_card_items:
-            # A precise product lookup should reject related cards. Candidate
-            # discovery also searches ordinary keywords such as 初回限定盤, so
-            # use text matching for those rather than treating them as an
-            # ASCII catalog number and dropping every card.
+        if had_card_items and _is_precise_identifier_query(watch_item.catalog_no):
+            # A precise product lookup should reject related cards. A generic
+            # discovery search is different: its result cards often use a
+            # shorter title that does not repeat every search token. Keep
+            # those cards and let the pool-specific media gate decide whether
+            # they are relevant before any Xianyu lookup is made.
             parser.items = [
                 item
                 for item in parser.items

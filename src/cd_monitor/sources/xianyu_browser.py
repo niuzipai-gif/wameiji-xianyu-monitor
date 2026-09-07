@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
-import json
 from pathlib import Path
-import re
 from urllib.parse import quote_plus
 
 from cd_monitor.core.identifiers import (
@@ -12,8 +12,8 @@ from cd_monitor.core.identifiers import (
     extract_jan_candidates,
     normalize_catalog_no_compact,
 )
-from cd_monitor.core.models import AdapterStatus, WatchItem
-from cd_monitor.core.models import XianyuPriceSample
+from cd_monitor.core.models import AdapterStatus, WatchItem, XianyuPriceSample
+from cd_monitor.core.title_query import matches_title_search_query
 from cd_monitor.sources.base import BrowserHarnessAdapter
 
 
@@ -257,9 +257,7 @@ def _is_precise_identifier_query(query: str) -> bool:
 def _matches_search_query(text: str, query: str) -> bool:
     if _is_precise_identifier_query(query):
         return _catalog_in_text(text, query)
-    normalized_query = " ".join((query or "").casefold().split())
-    normalized_text = " ".join((text or "").casefold().split())
-    return bool(normalized_query) and normalized_query in normalized_text
+    return matches_title_search_query(text, query)
 
 
 def _extract_generic_samples(html: str, watch_item: WatchItem) -> list[XianyuPriceSample]:

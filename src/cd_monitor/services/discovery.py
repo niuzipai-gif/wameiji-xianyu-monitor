@@ -16,6 +16,7 @@ from cd_monitor.core.evaluator import evaluate_opportunity
 from cd_monitor.core.identifiers import extract_catalog_candidates, extract_jan_candidates
 from cd_monitor.core.matcher import compute_match_confidence
 from cd_monitor.core.models import MarketItem, WatchItem, XianyuPriceSample
+from cd_monitor.core.title_query import clean_title_search_query
 from cd_monitor.core.xianyu_cleaner import estimate_xianyu_price
 from cd_monitor.storage.sqlite import (
     get_discovery_candidate_by_identity,
@@ -31,6 +32,47 @@ from cd_monitor.storage.sqlite import (
 
 FetchWameiji = Callable[[str], Awaitable[list[MarketItem]]]
 FetchXianyu = Callable[[str], Awaitable[list[XianyuPriceSample]]]
+
+
+_CD_HARD_MEDIA_MARKERS = (
+    "cd",
+    "dvd",
+    "blu-ray",
+    "bluray",
+    "sacd",
+    "音楽cd",
+    "サウンドトラック",
+    "サントラ",
+)
+_CD_SOFT_MEDIA_MARKERS = ("album", "single", "アルバム", "シングル")
+_CD_BONUS_ONLY_MARKERS = ("トレカ", "フォトカード", "生写真", "アクリル", "缶バッジ")
+_GAME_MEDIA_MARKERS = (
+    "switch",
+    "nintendo",
+    "ニンテンドー",
+    "ゲーム",
+    "game",
+    "playstation",
+    "ps vita",
+    "psp",
+    "ps4",
+    "ps5",
+    "3ds",
+    "wii",
+    "xbox",
+    "ソフト",
+)
+_GAME_HARDWARE_MARKERS = (
+    "本体",
+    "コントローラー",
+    "ジョイコン",
+    "joy-con",
+    "充電器",
+    "充電スタンド",
+    "ドック",
+    "保護フィルム",
+    "ケースのみ",
+)
 
 
 @dataclass(slots=True)
@@ -102,11 +144,19 @@ async def scan_discovery_keyword(
     discovered_count = len(purchase_items)
     candidate_count = 0
     evaluated_count = 0
+    xianyu_query_count = 0
+    xianyu_blocked = False
     opportunity_ids: list[int] = []
     seen_identity_keys: set[str] = set()
+    # Wameiji can return over one hundred visible cards for a broad keyword.
+    # Ingest enough of them for cache hits at the front not to hide later
+    # listings, while keeping the local SQLite growth bounded.
+    listing_budget = max(pool.candidate_budget * 10, 100)
     for item in purchase_items:
-        if candidate_count >= pool.candidate_budget:
+        if candidate_count >= listing_budget:
             break
+        if not _is_media_relevant(item, pool.media_type):
+            continue
         candidate = _candidate_from_market_item(pool_id, pool.media_type, item)
         if candidate.identity_key in seen_identity_keys:
             continue
@@ -118,10 +168,17 @@ async def scan_discovery_keyword(
         candidate_count += 1
         if candidate.availability in {"sold_out", "unavailable"}:
             continue
+        if xianyu_blocked:
+            continue
         if not _needs_xianyu_refresh(previous, candidate):
+            continue
+        if xianyu_query_count >= pool.candidate_budget:
             continue
 
         query = _xianyu_query(candidate)
+        if not query:
+            continue
+        xianyu_query_count += 1
         try:
             raw_samples = await fetch_xianyu(query)
         except Exception as exc:  # noqa: BLE001 - browser adapters expose heterogeneous failures
@@ -135,6 +192,8 @@ async def scan_discovery_keyword(
                 error_type=type(exc).__name__,
                 error_message=str(exc),
             )
+            if _is_xianyu_security_check(exc):
+                xianyu_blocked = True
             continue
 
         samples = [replace(sample, catalog_no=query) for sample in raw_samples]
@@ -182,7 +241,7 @@ async def scan_discovery_keyword(
         discovered_count=discovered_count,
         candidate_count=candidate_count,
         evaluated_count=evaluated_count,
-        xianyu_query_count=evaluated_count,
+        xianyu_query_count=xianyu_query_count,
         opportunity_ids=opportunity_ids,
     )
 
@@ -190,11 +249,12 @@ async def scan_discovery_keyword(
 def _candidate_from_market_item(
     pool_id: int, media_type: str, item: MarketItem
 ) -> DiscoveryCandidate:
-    text = " ".join(
-        value for value in (item.title, item.raw_text, item.condition_text) if value
+    # Raw card payloads include listing URLs and the visible price. Do not mine
+    # them for identifiers: for example, ``CD 300`` is not catalog ``CD-300``.
+    catalog_no = _first_plausible_catalog_no(item.catalog_no) or _first_plausible_catalog_no(
+        item.title
     )
-    catalog_no = item.catalog_no or next(iter(extract_catalog_candidates(text)), None)
-    jan = item.jan or next(iter(extract_jan_candidates(text)), None)
+    jan = _first_japanese_jan(item.jan) or _first_japanese_jan(item.title)
     return DiscoveryCandidate(
         pool_id=pool_id,
         media_type=media_type,
@@ -217,6 +277,50 @@ def _candidate_from_market_item(
     )
 
 
+def _is_media_relevant(item: MarketItem, media_type: str) -> bool:
+    """Keep broad Wameiji searches from spending Xianyu reads on other goods."""
+
+    title = str(item.title or "").casefold()
+    if media_type == "physical_game" and any(
+        marker in title for marker in _GAME_HARDWARE_MARKERS
+    ):
+        return False
+    if _first_plausible_catalog_no(item.catalog_no) or _first_japanese_jan(item.jan):
+        return True
+    if media_type == "cd":
+        has_hard_media_marker = any(marker in title for marker in _CD_HARD_MEDIA_MARKERS)
+        has_soft_media_marker = any(marker in title for marker in _CD_SOFT_MEDIA_MARKERS)
+        is_bonus_only = any(marker in title for marker in _CD_BONUS_ONLY_MARKERS)
+        return has_hard_media_marker or (has_soft_media_marker and not is_bonus_only)
+    if media_type == "physical_game":
+        return any(marker in title for marker in _GAME_MEDIA_MARKERS)
+    return bool(title.strip())
+
+
+def _first_japanese_jan(text: str | None) -> str | None:
+    """Return only a plausible Japanese retail JAN, never an incidental ID."""
+
+    for candidate in extract_jan_candidates(text):
+        if len(candidate) == 13 and candidate.startswith(("45", "49")):
+            return candidate
+    return None
+
+
+def _first_plausible_catalog_no(text: str | None) -> str | None:
+    """Return a catalog code, excluding price-adjacent text such as CD-300."""
+
+    for candidate in extract_catalog_candidates(text):
+        prefix, _, suffix = candidate.partition("-")
+        if len(prefix) >= 3 and len(suffix) >= 3:
+            return candidate
+    return None
+
+
+def _is_xianyu_security_check(exc: Exception) -> bool:
+    message = str(exc).casefold()
+    return any(marker in message for marker in ("security_check", "captcha", "安全验证"))
+
+
 def _needs_xianyu_refresh(
     previous: DiscoveryCandidate | None, current: DiscoveryCandidate
 ) -> bool:
@@ -229,8 +333,8 @@ def _needs_xianyu_refresh(
     return abs(previous.source_price - current.source_price) > 0.001
 
 
-def _xianyu_query(candidate: DiscoveryCandidate) -> str:
-    return candidate.catalog_no or candidate.jan or candidate.title
+def _xianyu_query(candidate: DiscoveryCandidate) -> str | None:
+    return candidate.catalog_no or candidate.jan or clean_title_search_query(candidate.title)
 
 
 def _watch_for_candidate(candidate: DiscoveryCandidate, query: str) -> WatchItem:
