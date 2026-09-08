@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib.error
 import urllib.request
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -49,6 +50,20 @@ def make_observation(**changes: object) -> ListingObservation:
 def request_json(url: str) -> tuple[int, dict[str, object]]:
     with urllib.request.urlopen(url, timeout=5) as response:
         return response.status, json.loads(response.read().decode("utf-8"))
+
+
+def post_json(url: str, payload: dict[str, object]) -> tuple[int, dict[str, object]]:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read().decode("utf-8"))
 
 
 def test_dual_market_board_returns_exact_ready_and_waiting_streams(tmp_path: Path, monkeypatch) -> None:
@@ -127,3 +142,24 @@ def test_dual_market_board_hides_stale_evidence(tmp_path: Path, monkeypatch) -> 
 
     assert code == 200
     assert payload["summary"]["waiting_xianyu_count"] == 0
+
+
+def test_dual_market_pause_rejects_scan_commands(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ACCESS_TOKEN", "viewer-secret")
+    monkeypatch.delenv("DUAL_MARKET_COLLECTION_PAUSED", raising=False)
+    db_path = tmp_path / "monitor.db"
+    server = create_server("127.0.0.1", 0, db_path, static_dir="web")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        code, payload = post_json(
+            f"{base_url}/api/discovery/commands?access_token=viewer-secret",
+            {"command_type": "scan_now"},
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert code == 409
+    assert payload == {"error": "collector_paused"}

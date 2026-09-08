@@ -277,6 +277,11 @@ DEFAULT_XIANYU = PROJECT_ROOT / "data/mock/xianyu_samples.sample.json"
 DUAL_MARKET_OBSERVATION_FRESHNESS_MINUTES = 180
 
 
+def _dual_market_collection_paused() -> bool:
+    value = os.getenv("DUAL_MARKET_COLLECTION_PAUSED", "1").strip().casefold()
+    return value not in {"0", "false", "no", "off"}
+
+
 class BadJsonRequest(ValueError):
     pass
 
@@ -1114,6 +1119,17 @@ def _build_handler(
                 command_type = str(payload.get("command_type") or "").strip()
                 if command_type not in {"scan_now", "set_pool", "set_keywords"}:
                     self._json({"error": "unsupported_command_type"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                updates = payload.get("updates")
+                resume_requested = (
+                    command_type == "set_pool"
+                    and isinstance(updates, dict)
+                    and updates.get("capture_state") == "active"
+                )
+                if _dual_market_collection_paused() and (
+                    command_type == "scan_now" or resume_requested
+                ):
+                    self._json({"error": "collector_paused"}, status=HTTPStatus.CONFLICT)
                     return
                 command_payload = {
                     key: value
@@ -2683,7 +2699,9 @@ def _dual_market_board(db_path: str | Path) -> dict[str, object]:
         "cost_pending": cost_pending,
         "waiting_wameiji": waiting_wameiji,
         "waiting_xianyu": waiting_xianyu,
-        "collector": {"state": "paused"},
+        "collector": {
+            "state": "paused" if _dual_market_collection_paused() else "active"
+        },
     }
 
 

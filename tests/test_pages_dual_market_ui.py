@@ -34,3 +34,10 @@ def test_dual_market_ui_fails_closed_when_its_board_is_unavailable() -> None:
     assert "unavailable: true" in javascript
     assert "双边证据流暂不可用" in javascript
     assert "不展示旧机会卡" in javascript
+
+
+def test_dual_market_ui_does_not_submit_scan_or_resume_while_collection_is_paused() -> None:
+    javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+
+    assert "采集已暂停，未提交扫描命令" in javascript
+    assert "采集已暂停，未提交恢复命令" in javascript

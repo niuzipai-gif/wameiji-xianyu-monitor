@@ -29,6 +29,7 @@ def _request(url: str, method: str = "GET", payload: dict | None = None, headers
 def test_selection_board_and_remote_command_acknowledgement(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("WEB_ACCESS_TOKEN", "viewer-secret")
     monkeypatch.setenv("CD_SYNC_TOKEN", "collector-secret")
+    monkeypatch.setenv("DUAL_MARKET_COLLECTION_PAUSED", "0")
     db_path = tmp_path / "selection.db"
     init_db(db_path)
     pool_id = list_discovery_pools(db_path)[0].id

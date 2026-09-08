@@ -631,6 +631,11 @@
   }
 
   async function queueScan(poolId) {
+    if (view.dualMarketBoard && view.dualMarketBoard.collector
+      && view.dualMarketBoard.collector.state === "paused") {
+      setCommandMessage("采集已暂停，未提交扫描命令。", true);
+      return;
+    }
     const button = document.querySelector('[data-discovery-action="scan"][data-pool-id="' + String(poolId || "") + '"]')
       || document.getElementById("scanDiscoveryNowBtn")
       || document.getElementById("sideScanDiscoveryBtn");
@@ -676,6 +681,11 @@
   }
 
   async function resumePool(root) {
+    if (view.dualMarketBoard && view.dualMarketBoard.collector
+      && view.dualMarketBoard.collector.state === "paused") {
+      setCommandMessage("采集已暂停，未提交恢复命令。", true);
+      return;
+    }
     const poolId = Number(root.getAttribute("data-pool-id"));
     try {
       await apiPost("/api/discovery/commands", {
