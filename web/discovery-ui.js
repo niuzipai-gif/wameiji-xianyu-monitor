@@ -83,7 +83,15 @@
       );
       return;
     }
+    const xianyuLoginState = String(summary.xianyu_login_state || "").trim();
     const resaleReady = Number(summary.resale_ready_candidates) || 0;
+    if (xianyuLoginState === "login_required") {
+      const detailSuffix = resaleReady > 0
+        ? " · 已核验 " + resaleReady + " 条挖煤姬详情"
+        : "";
+      setDiscoveryStatus("闲鱼需要扫码登录" + detailSuffix, "idle");
+      return;
+    }
     const freshDetails = Number(summary.fresh_source_details) || 0;
     const staleDetails = Number(summary.stale_source_details) || 0;
     if (resaleReady > 0) {
@@ -181,13 +189,14 @@
 
   function safeHttpUrl(value) {
     const url = String(value || "").trim();
-    return /^https?:\/\/[^\s]+$/i.test(url) ? url : "";
+    const absoluteUrl = url.startsWith("//") ? "https:" + url : url;
+    return /^https?:\/\/[^\s]+$/i.test(absoluteUrl) ? absoluteUrl : "";
   }
 
   function usableProductImage(value) {
     const url = safeHttpUrl(value);
     if (!url) return "";
-    return /searchlist|placeholder|\/logo(?:[._/]|$)|paypaay|mokaki\.cn\/sigimage\/icon/i.test(url) ? "" : url;
+    return /searchlist|placeholder|\/logo(?:[._/]|$)|sigmerchantimg\/logo|paypaay|mokaki\.cn\/sigimage\/icon/i.test(url) ? "" : url;
   }
 
   function liquidityChip(value) {
@@ -302,7 +311,14 @@
     if (allItemCount > 0) {
       return "这个筛选暂时没有通过门槛的机会。调整筛选条件后可查看其他已核验卡片。";
     }
+    const xianyuLoginState = String(summary.xianyu_login_state || "").trim();
     const resaleReady = Number(summary.resale_ready_candidates) || 0;
+    if (xianyuLoginState === "login_required") {
+      const detailCount = resaleReady || Number(summary.fresh_source_details) || 0;
+      return detailCount > 0
+        ? "闲鱼需要扫码登录；已核验 " + detailCount + " 条挖煤姬商品详情，登录后才会采集价格样本并计算利润。"
+        : "闲鱼需要扫码登录；登录后采集器才会开始价格比对。";
+    }
     if (resaleReady > 0) {
       return "已核验 " + resaleReady + " 条挖煤姬商品详情，等待闲鱼价格样本后才计算并展示利润。";
     }

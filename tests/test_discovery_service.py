@@ -381,6 +381,7 @@ def test_keyword_scan_creates_a_ranked_opportunity_and_skips_unchanged_requery(
                 catalog_no="SRCL-3520",
                 external_item_id="wameiji-3520",
                 url="https://meruki.cn/item/3520",
+                image_url="https://images.example.invalid/wameiji/srcl-3520.webp",
                 availability="available",
             )
         ]
@@ -388,9 +389,27 @@ def test_keyword_scan_creates_a_ranked_opportunity_and_skips_unchanged_requery(
     async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
         calls.append(("xianyu", query))
         return [
-            XianyuPriceSample(catalog_no=query, title="Artist SRCL-3520 初回限定盤", price_cny=280),
-            XianyuPriceSample(catalog_no=query, title="Artist SRCL-3520 初回限定盤", price_cny=300),
-            XianyuPriceSample(catalog_no=query, title="Artist SRCL-3520 初回限定盤", price_cny=320),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="Artist SRCL-3520 初回限定盤 · 280",
+                price_cny=280,
+                url="https://www.goofish.com/item?id=280",
+                image_url="https://images.example.invalid/xianyu/srcl-3520-280.webp",
+            ),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="Artist SRCL-3520 初回限定盤 · 300",
+                price_cny=300,
+                url="https://www.goofish.com/item?id=300",
+                image_url="https://images.example.invalid/xianyu/srcl-3520-300.webp",
+            ),
+            XianyuPriceSample(
+                catalog_no=query,
+                title="Artist SRCL-3520 初回限定盤 · 320",
+                price_cny=320,
+                url="https://www.goofish.com/item?id=320",
+                image_url="https://images.example.invalid/xianyu/srcl-3520-320.webp",
+            ),
         ]
 
     pool_id = list_discovery_pools(db_path)[0].id
@@ -430,6 +449,10 @@ def test_keyword_scan_creates_a_ranked_opportunity_and_skips_unchanged_requery(
     assert len(feed) == 1
     assert feed[0]["identity_key"] == "source:wameiji-3520"
     assert feed[0]["expected_profit"] > 0
+    assert feed[0]["image_url"] == "https://images.example.invalid/wameiji/srcl-3520.webp"
+    assert feed[0]["xianyu_item_title"] == "Artist SRCL-3520 初回限定盤 · 300"
+    assert feed[0]["xianyu_url"] == "https://www.goofish.com/item?id=300"
+    assert feed[0]["xianyu_image_url"] == "https://images.example.invalid/xianyu/srcl-3520-300.webp"
     with sqlite3.connect(db_path) as conn:
         # First run saves the search-card discovery and its verified detail;
         # the unchanged second run only refreshes the search-card observation.
@@ -1236,15 +1259,16 @@ def test_legacy_unverified_candidate_is_excluded_from_the_profit_board(tmp_path:
                 currency="JPY",
                 catalog_no="SRCL-3520",
                 external_item_id="legacy-card",
+                image_url="https://images.example.invalid/wameiji/legacy-card.webp",
                 availability="available",
             )
         ]
 
     async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
         return [
-            XianyuPriceSample(catalog_no=query, title="SRCL-3520 CD", price_cny=300),
-            XianyuPriceSample(catalog_no=query, title="SRCL-3520 CD", price_cny=320),
-            XianyuPriceSample(catalog_no=query, title="SRCL-3520 CD", price_cny=340),
+            XianyuPriceSample(catalog_no=query, title="SRCL-3520 CD", price_cny=300, image_url="https://images.example.invalid/xianyu/legacy-300.webp"),
+            XianyuPriceSample(catalog_no=query, title="SRCL-3520 CD", price_cny=320, image_url="https://images.example.invalid/xianyu/legacy-320.webp"),
+            XianyuPriceSample(catalog_no=query, title="SRCL-3520 CD", price_cny=340, image_url="https://images.example.invalid/xianyu/legacy-340.webp"),
         ]
 
     pool_id = list_discovery_pools(db_path)[0].id
@@ -1283,14 +1307,15 @@ def test_title_only_candidate_with_strict_samples_can_enter_profit_board(tmp_pat
                 price=1200,
                 currency="JPY",
                 external_item_id="title-only-1",
+                image_url="https://images.example.invalid/wameiji/title-only.webp",
                 availability="available",
             )
         ]
 
     async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
         return [
-            XianyuPriceSample(catalog_no=query, title="Artist Album 初回限定盤", price_cny=300),
-            XianyuPriceSample(catalog_no=query, title="Artist Album 初回限定盤", price_cny=320),
+            XianyuPriceSample(catalog_no=query, title="Artist Album 初回限定盤", price_cny=300, image_url="https://images.example.invalid/xianyu/title-only-300.webp"),
+            XianyuPriceSample(catalog_no=query, title="Artist Album 初回限定盤", price_cny=320, image_url="https://images.example.invalid/xianyu/title-only-320.webp"),
         ]
 
     pool_id = list_discovery_pools(db_path)[0].id
@@ -2313,15 +2338,16 @@ def test_pool_profit_threshold_filters_existing_evaluations_without_a_new_source
                 currency="JPY",
                 catalog_no="SRCL-3520",
                 external_item_id="threshold-1",
+                image_url="https://images.example.invalid/wameiji/threshold.webp",
                 availability="available",
             )
         ]
 
     async def fetch_xianyu(query: str) -> list[XianyuPriceSample]:
         return [
-            XianyuPriceSample(catalog_no=query, title="Artist SRCL-3520 初回限定盤", price_cny=280),
-            XianyuPriceSample(catalog_no=query, title="Artist SRCL-3520 初回限定盤", price_cny=300),
-            XianyuPriceSample(catalog_no=query, title="Artist SRCL-3520 初回限定盤", price_cny=320),
+            XianyuPriceSample(catalog_no=query, title="Artist SRCL-3520 初回限定盤", price_cny=280, image_url="https://images.example.invalid/xianyu/threshold-280.webp"),
+            XianyuPriceSample(catalog_no=query, title="Artist SRCL-3520 初回限定盤", price_cny=300, image_url="https://images.example.invalid/xianyu/threshold-300.webp"),
+            XianyuPriceSample(catalog_no=query, title="Artist SRCL-3520 初回限定盤", price_cny=320, image_url="https://images.example.invalid/xianyu/threshold-320.webp"),
         ]
 
     result = asyncio.run(

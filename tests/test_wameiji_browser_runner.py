@@ -144,6 +144,34 @@ def test_parse_detail_html_uses_detail_page_values_and_marks_item_verified() -> 
     assert item.availability == "available"
 
 
+def test_parse_detail_html_uses_scoped_product_image_not_search_card_logo() -> None:
+    """A verified detail record must not inherit a merchant logo from search."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card title",
+        price=9999,
+        currency="JPY",
+        external_item_id="listing-image-3520",
+        url="/mall/mercari/detail/listing-image-3520",
+        image_url="https://imgoss.mokaki.cn/sigmerchantimg/logo/merchant.webp",
+        availability="unknown_but_visible",
+    )
+    detail_html = """
+    <main class="goods-detail">
+      <img class="merchant-logo" src="https://imgoss.mokaki.cn/sigmerchantimg/logo/merchant.webp">
+      <img class="goods-image" data-src="https://images.example.invalid/detail/album-3520.webp">
+      <h1 class="goods-name">Artist Album SRCL-3520 初回限定盤 CD+DVD</h1>
+      <p class="price-com">1,280 日元</p>
+      <p>二手 在库</p>
+    </main>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert status.items[0].image_url == "https://images.example.invalid/detail/album-3520.webp"
+
+
 def test_parse_detail_html_does_not_promote_page_metadata_as_a_product_title() -> None:
     """A generic site title plus a number is not sufficient purchase evidence."""
     search_item = MarketItem(

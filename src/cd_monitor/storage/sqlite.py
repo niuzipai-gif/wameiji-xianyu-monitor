@@ -10,6 +10,7 @@ from uuid import uuid4
 from cd_monitor.core.discovery import DiscoveryCandidate, DiscoveryKeyword, DiscoveryPool
 from cd_monitor.core.identifiers import normalize_catalog_no_compact
 from cd_monitor.core.models import MarketItem, Opportunity, WatchItem, XianyuPriceSample
+from cd_monitor.core.product_images import is_usable_product_image
 from cd_monitor.storage.migrations import SCHEMA_SQL
 
 
@@ -19,6 +20,7 @@ _DISCOVERY_UNVERIFIED_QUEUE_EPOCH_KEY = "discovery_unverified_queue_epoch"
 _DISCOVERY_UNVERIFIED_QUEUE_EPOCH = "detail-first-baseline-v1"
 _DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES = 180
 _DISCOVERY_SOURCE_DETAIL_FRESHNESS_MINUTES = 180
+_DISCOVERY_XIANYU_LOGIN_STATE_KEY = "discovery_xianyu_login_state"
 
 
 
@@ -400,6 +402,7 @@ def _migrate_opportunity_p55_columns(conn: sqlite3.Connection) -> None:
     * ``seller_nickname``   — xianyu seller handle, surfaced for filtering.
     * ``publish_time``      — wameiji publish_time, surfaced for "new" only.
     * ``xianyu_display_sample_id`` — explicit market_items reference for display.
+    * ``xianyu_price_sample_id`` — explicit automatic-discovery sample for display.
     """
     existing = {row[1] for row in conn.execute("PRAGMA table_info(opportunities)").fetchall()}
     additions: list[tuple[str, str]] = []
@@ -415,6 +418,8 @@ def _migrate_opportunity_p55_columns(conn: sqlite3.Connection) -> None:
         additions.append(("publish_time", "TEXT"))
     if "xianyu_display_sample_id" not in existing:
         additions.append(("xianyu_display_sample_id", "INTEGER"))
+    if "xianyu_price_sample_id" not in existing:
+        additions.append(("xianyu_price_sample_id", "INTEGER"))
     for col, decl in additions:
         conn.execute(f"ALTER TABLE opportunities ADD COLUMN {col} {decl}")
     conn.execute(
@@ -425,6 +430,10 @@ def _migrate_opportunity_p55_columns(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_opportunities_status"
         " ON opportunities(status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_opportunities_xianyu_price_sample"
+        " ON opportunities(xianyu_price_sample_id)"
     )
 
 
@@ -597,6 +606,7 @@ def _migrate_discovery_selection_board(conn: sqlite3.Connection) -> None:
           edition TEXT,
           source_item_id TEXT,
           source_url TEXT,
+          source_image_url TEXT,
           source_price REAL NOT NULL DEFAULT 0,
           source_currency TEXT NOT NULL DEFAULT 'JPY',
           availability TEXT NOT NULL DEFAULT 'unknown_but_visible',
@@ -788,6 +798,7 @@ def _migrate_detail_first_discovery(conn: sqlite3.Connection) -> None:
         for row in conn.execute("PRAGMA table_info(discovery_candidates)").fetchall()
     }
     for name, declaration in (
+        ("source_image_url", "TEXT"),
         ("pipeline_stage", "TEXT NOT NULL DEFAULT 'search_discovered'"),
         ("product_key", "TEXT"),
         ("detail_attempt_count", "INTEGER NOT NULL DEFAULT 0"),
@@ -1760,7 +1771,7 @@ def get_discovery_candidate(db_path: str | Path, candidate_id: int) -> Discovery
         row = conn.execute(
             """
             SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
-              artist, edition, source_item_id, source_url, source_price,
+              artist, edition, source_item_id, source_url, source_image_url, source_price,
               source_currency, availability, status, observation_count,
               missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified,
               pipeline_stage, product_key, detail_attempt_count,
@@ -1790,7 +1801,7 @@ def list_discovery_detail_queue(
         rows = conn.execute(
             """
             SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
-              artist, edition, source_item_id, source_url, source_price,
+              artist, edition, source_item_id, source_url, source_image_url, source_price,
               source_currency, availability, status, observation_count,
               missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified,
               pipeline_stage, product_key, detail_attempt_count,
@@ -1843,7 +1854,7 @@ def list_discovery_resale_queue(
         rows = conn.execute(
             """
             SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
-              artist, edition, source_item_id, source_url, source_price,
+              artist, edition, source_item_id, source_url, source_image_url, source_price,
               source_currency, availability, status, observation_count,
               missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified,
               pipeline_stage, product_key, detail_attempt_count,
@@ -1889,6 +1900,7 @@ def _discovery_candidate_from_row(row: sqlite3.Row) -> DiscoveryCandidate:
         edition=row["edition"],
         source_item_id=row["source_item_id"],
         source_url=row["source_url"],
+        source_image_url=row["source_image_url"],
         source_price=float(row["source_price"]),
         source_currency=row["source_currency"],
         availability=row["availability"],
@@ -1913,7 +1925,7 @@ def _select_discovery_candidate_by_identity(
     return conn.execute(
         """
         SELECT id, pool_id, media_type, identity_key, catalog_no, jan, title,
-          artist, edition, source_item_id, source_url, source_price,
+          artist, edition, source_item_id, source_url, source_image_url, source_price,
           source_currency, availability, status, observation_count,
           missing_scan_count, last_xianyu_checked_at, raw_text, detail_verified,
           pipeline_stage, product_key, detail_attempt_count,
@@ -2268,10 +2280,10 @@ def _upsert_discovery_candidate(
         """
         INSERT INTO discovery_candidates (
           pool_id, media_type, identity_key, catalog_no, jan, title, artist,
-          edition, source_item_id, source_url, source_price, source_currency,
+          edition, source_item_id, source_url, source_image_url, source_price, source_currency,
           availability, status, observation_count, missing_scan_count,
           last_xianyu_checked_at, raw_text, detail_verified
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
         ON CONFLICT(pool_id, identity_key) DO UPDATE SET
           media_type = excluded.media_type,
           catalog_no = CASE WHEN discovery_candidates.detail_verified = 1
@@ -2291,6 +2303,9 @@ def _upsert_discovery_candidate(
             ELSE excluded.edition END,
           source_item_id = COALESCE(excluded.source_item_id, discovery_candidates.source_item_id),
           source_url = COALESCE(excluded.source_url, discovery_candidates.source_url),
+          source_image_url = CASE WHEN discovery_candidates.detail_verified = 1
+            AND excluded.detail_verified = 0 THEN discovery_candidates.source_image_url
+            ELSE COALESCE(excluded.source_image_url, discovery_candidates.source_image_url) END,
           source_price = excluded.source_price,
           source_currency = excluded.source_currency,
           availability = CASE WHEN discovery_candidates.detail_verified = 1
@@ -2329,6 +2344,7 @@ def _upsert_discovery_candidate(
             candidate.edition,
             candidate.source_item_id,
             candidate.source_url,
+            candidate.source_image_url,
             candidate.source_price,
             candidate.source_currency,
             candidate.availability,
@@ -2356,6 +2372,7 @@ def insert_discovery_opportunity(
     discovery_candidate_id: int,
     media_type: str,
     identity_key: str,
+    xianyu_price_sample_id: int | None = None,
 ) -> int:
     """Persist an evaluated automatic candidate and retain legacy compatibility."""
     opportunity_id = insert_opportunity(db_path, opportunity, wameiji_item_id=wameiji_item_id)
@@ -2377,10 +2394,17 @@ def insert_discovery_opportunity(
             """
             UPDATE opportunities
             SET discovery_candidate_id = ?, media_type = ?, identity_key = ?,
-              last_seen_at = CURRENT_TIMESTAMP, status = 'active'
+              xianyu_price_sample_id = ?, last_seen_at = CURRENT_TIMESTAMP,
+              status = 'active'
             WHERE id = ?
             """,
-            (discovery_candidate_id, media_type, identity_key, opportunity_id),
+            (
+                discovery_candidate_id,
+                media_type,
+                identity_key,
+                xianyu_price_sample_id,
+                opportunity_id,
+            ),
         )
     return opportunity_id
 
@@ -2410,13 +2434,25 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
               c.source_price AS purchase_price_jpy,
               o.xianyu_reference_price AS xianyu_price_cny,
               o.valid_xianyu_sample_count AS xianyu_sample_rows,
-              m.title AS item_title, m.image_url, COALESCE(m.url, c.source_url) AS url
+              m.title AS item_title,
+              COALESCE(NULLIF(c.source_image_url, ''), NULLIF(m.image_url, '')) AS image_url,
+              COALESCE(m.url, c.source_url) AS url,
+              CASE WHEN xs.id IS NOT NULL THEN 'xianyu' END AS xianyu_source,
+              CASE WHEN xs.id IS NOT NULL THEN 'goofish' END AS xianyu_source_site,
+              xs.title AS xianyu_item_title,
+              xs.price_cny AS xianyu_display_price_cny,
+              xs.url AS xianyu_url,
+              xs.image_url AS xianyu_image_url,
+              CASE WHEN xs.id IS NOT NULL THEN 'available' END AS xianyu_availability
             FROM opportunities o
             JOIN discovery_candidates c ON c.id = o.discovery_candidate_id
             JOIN discovery_pools p ON p.id = c.pool_id
             LEFT JOIN market_items m ON m.id = o.wameiji_item_id
+            LEFT JOIN xianyu_price_samples xs ON xs.id = o.xianyu_price_sample_id
             WHERE c.status = 'active' AND c.detail_verified = 1
               AND COALESCE(o.status, 'active') = 'active'
+              AND NULLIF(TRIM(COALESCE(c.source_image_url, m.image_url)), '') IS NOT NULL
+              AND NULLIF(TRIM(xs.image_url), '') IS NOT NULL
               AND datetime(c.detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND o.decision != 'reject'
@@ -2434,13 +2470,27 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
                 max(1, int(limit)),
             ),
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [
+        dict(row)
+        for row in rows
+        if is_usable_product_image(row["image_url"])
+        and is_usable_product_image(row["xianyu_image_url"])
+    ]
 
 
 def discovery_summary(db_path: str | Path) -> dict[str, object]:
     init_db(db_path)
     freshness_window = f"-{_DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES} minutes"
     source_freshness_window = f"-{_DISCOVERY_SOURCE_DETAIL_FRESHNESS_MINUTES} minutes"
+    visible_opportunities = list_discovery_opportunities(db_path, limit=10_000)
+    active_opportunities = len(visible_opportunities)
+    highest_profit = max(
+        (float(opportunity["expected_profit"] or 0) for opportunity in visible_opportunities),
+        default=0.0,
+    )
+    total_profit = sum(
+        float(opportunity["expected_profit"] or 0) for opportunity in visible_opportunities
+    )
     with sqlite3.connect(db_path) as conn:
         active_candidates = conn.execute(
             """
@@ -2478,60 +2528,20 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
                 freshness_window,
             ),
         ).fetchone()
-        active_opportunities = conn.execute(
-            """
-            SELECT COUNT(*) FROM opportunities o
-            JOIN discovery_candidates c ON c.id = o.discovery_candidate_id
-            JOIN discovery_pools p ON p.id = c.pool_id
-            WHERE c.status = 'active' AND c.detail_verified = 1
-              AND COALESCE(o.status, 'active') = 'active'
-              AND datetime(c.detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
-              AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
-              AND o.decision != 'reject'
-              AND o.expected_profit >= p.min_profit_cny
-              AND o.net_margin >= p.min_margin
-              AND o.match_confidence >= p.min_match_confidence
-              AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
-            """,
-            (source_freshness_window, freshness_window),
-        ).fetchone()[0]
-        highest_profit = conn.execute(
-            """
-            SELECT MAX(o.expected_profit) FROM opportunities o
-            JOIN discovery_candidates c ON c.id = o.discovery_candidate_id
-            JOIN discovery_pools p ON p.id = c.pool_id
-            WHERE c.status = 'active' AND c.detail_verified = 1
-              AND COALESCE(o.status, 'active') = 'active'
-              AND datetime(c.detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
-              AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
-              AND o.decision != 'reject'
-              AND o.expected_profit >= p.min_profit_cny
-              AND o.net_margin >= p.min_margin
-              AND o.match_confidence >= p.min_match_confidence
-              AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
-            """,
-            (source_freshness_window, freshness_window),
-        ).fetchone()[0]
-        total_profit = conn.execute(
-            """
-            SELECT SUM(o.expected_profit) FROM opportunities o
-            JOIN discovery_candidates c ON c.id = o.discovery_candidate_id
-            JOIN discovery_pools p ON p.id = c.pool_id
-            WHERE c.status = 'active' AND c.detail_verified = 1
-              AND COALESCE(o.status, 'active') = 'active'
-              AND datetime(c.detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
-              AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
-              AND o.decision != 'reject'
-              AND o.expected_profit >= p.min_profit_cny
-              AND o.net_margin >= p.min_margin
-              AND o.match_confidence >= p.min_match_confidence
-              AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
-            """,
-            (source_freshness_window, freshness_window),
-        ).fetchone()[0]
         last_scan_at = conn.execute(
             "SELECT MAX(finished_at) FROM discovery_runs WHERE status = 'ok'"
         ).fetchone()[0]
+        login_state_row = conn.execute(
+            "SELECT value, updated_at FROM user_settings WHERE key = ?",
+            (_DISCOVERY_XIANYU_LOGIN_STATE_KEY,),
+        ).fetchone()
+    xianyu_login_state = "unknown"
+    xianyu_login_checked_at = None
+    if login_state_row is not None:
+        candidate_state = str(login_state_row[0]).strip()
+        if candidate_state in {"ready", "login_required"}:
+            xianyu_login_state = candidate_state
+            xianyu_login_checked_at = login_state_row[1]
     return {
         "active_candidates": int(active_candidates or 0),
         "fresh_source_details": int(detail_pipeline[0] or 0),
@@ -2541,6 +2551,8 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
         "total_expected_profit": float(total_profit or 0),
         "highest_expected_profit": float(highest_profit or 0),
         "last_scan_at": last_scan_at,
+        "xianyu_login_state": xianyu_login_state,
+        "xianyu_login_checked_at": xianyu_login_checked_at,
     }
 
 

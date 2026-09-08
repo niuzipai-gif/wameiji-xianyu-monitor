@@ -7,7 +7,7 @@ exercise the full candidate, matching and profit flow without network access.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from math import isfinite
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -18,6 +18,7 @@ from cd_monitor.core.evaluator import evaluate_opportunity
 from cd_monitor.core.identifiers import extract_catalog_candidates, extract_jan_candidates
 from cd_monitor.core.matcher import compute_match_confidence
 from cd_monitor.core.models import MarketItem, MatchResult, WatchItem, XianyuPriceSample
+from cd_monitor.core.product_images import is_usable_product_image
 from cd_monitor.core.title_query import (
     build_alias_search_query,
     clean_title_search_query,
@@ -192,6 +193,7 @@ class _XianyuEvidence:
     rejected_title_samples: list[XianyuPriceSample]
     query_count: int
     used_title_alias: bool
+    stored_sample_ids: dict[tuple[object, ...], int] = field(default_factory=dict)
     lookup_failed: bool = False
     security_blocked: bool = False
 
@@ -822,16 +824,25 @@ def _persist_discovery_evaluation(
             require_new_condition=_source_is_factory_new(item),
         )
     if persist_samples:
-        insert_xianyu_samples(
-            db_path,
-            [
-                *estimate.valid_samples,
-                *estimate.invalid_samples,
-                *evidence.rejected_title_samples,
-            ],
+        samples_to_persist = [
+            *estimate.valid_samples,
+            *estimate.invalid_samples,
+            *evidence.rejected_title_samples,
+        ]
+        stored_sample_ids = insert_xianyu_samples(db_path, samples_to_persist)
+        evidence.stored_sample_ids.update(
+            {
+                _xianyu_sample_storage_key(sample): sample_id
+                for sample, sample_id in zip(samples_to_persist, stored_sample_ids)
+            }
         )
     cost = compute_landed_cost(item, expected_holding_days=watch.expected_holding_days)
     opportunity = evaluate_opportunity(watch, item, match, estimate, cost)
+    xianyu_price_sample_id = _display_xianyu_sample_id(
+        estimate.valid_samples,
+        opportunity.xianyu_reference_price,
+        evidence.stored_sample_ids,
+    )
     opportunity_id = insert_discovery_opportunity(
         db_path,
         opportunity,
@@ -839,9 +850,51 @@ def _persist_discovery_evaluation(
         discovery_candidate_id=candidate_id,
         media_type=pool.media_type,
         identity_key=candidate.identity_key,
+        xianyu_price_sample_id=xianyu_price_sample_id,
     )
     mark_discovery_candidate_xianyu_checked(db_path, candidate_id)
     return opportunity_id
+
+
+def _xianyu_sample_storage_key(sample: XianyuPriceSample) -> tuple[object, ...]:
+    """Identify the exact captured listing after cleaner copies its dataclass."""
+
+    return (
+        sample.catalog_no,
+        sample.title,
+        float(sample.price_cny),
+        sample.url or "",
+        sample.image_url or "",
+        sample.raw_text or "",
+        bool(sample.is_valid),
+        sample.invalid_reason or "",
+    )
+
+
+def _display_xianyu_sample_id(
+    samples: list[XianyuPriceSample],
+    reference_price_cny: float,
+    stored_sample_ids: dict[tuple[object, ...], int],
+) -> int | None:
+    """Choose an image-bearing valid listing nearest the calculated reference."""
+
+    candidates = [
+        (sample, stored_sample_ids.get(_xianyu_sample_storage_key(sample)))
+        for sample in samples
+        if is_usable_product_image(sample.image_url)
+    ]
+    candidates = [(sample, sample_id) for sample, sample_id in candidates if sample_id is not None]
+    if not candidates:
+        return None
+    _, sample_id = min(
+        candidates,
+        key=lambda pair: (
+            abs(float(pair[0].price_cny) - float(reference_price_cny)),
+            -float(pair[0].price_cny),
+            str(pair[0].url or ""),
+        ),
+    )
+    return sample_id
 
 
 async def _drain_persistent_resale_queue(
@@ -1022,6 +1075,7 @@ def _candidate_from_market_item(
         title=item.title,
         source_item_id=item.external_item_id,
         source_url=item.url,
+        source_image_url=item.image_url,
         source_price=item.price,
         source_currency=item.currency,
         availability=item.availability,
@@ -1043,6 +1097,7 @@ def _market_item_from_candidate(candidate: DiscoveryCandidate) -> MarketItem:
         jan=candidate.jan,
         external_item_id=candidate.source_item_id,
         url=candidate.source_url,
+        image_url=candidate.source_image_url,
         availability=candidate.availability,
         raw_text=candidate.raw_text,
         detail_verified=candidate.detail_verified,

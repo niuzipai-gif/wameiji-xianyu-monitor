@@ -55,6 +55,7 @@ class DiscoveryCandidate:
     edition: str | None = None
     source_item_id: str | None = None
     source_url: str | None = None
+    source_image_url: str | None = None
     source_price: float = 0.0
     source_currency: str = "JPY"
     availability: str = "unknown_but_visible"

@@ -10,6 +10,7 @@ from cd_monitor.core.identifiers import (
     normalize_catalog_no_compact,
 )
 from cd_monitor.core.models import AdapterStatus, MarketItem, WatchItem
+from cd_monitor.core.product_images import is_usable_product_image, normalize_product_image_url
 from cd_monitor.sources.base import BrowserHarnessAdapter
 
 
@@ -248,6 +249,17 @@ class _WameijiDetailParser(HTMLParser):
     }
     _IGNORED_TAGS = {"noscript", "script", "style", "svg", "template"}
     _PURCHASE_ACTION_CLASSES = {"buy-now", "cart", "add-to-cart", "purchase"}
+    _IMAGE_ATTRIBUTE_ORDER = ("data-original", "data-src", "data-lazy-src", "src")
+    _NON_PRODUCT_IMAGE_CLASS_TOKENS = (
+        "logo",
+        "avatar",
+        "placeholder",
+        "icon",
+        "sold",
+        "badge",
+        "qrcode",
+        "qr-code",
+    )
     _AVAILABLE_TEXT_TOKENS = (
         "available",
         "贩売中",
@@ -278,6 +290,7 @@ class _WameijiDetailParser(HTMLParser):
         self._status_parts: list[str] = []
         self._availability_signals: list[str] = []
         self._has_purchase_action = False
+        self._product_image_urls: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in self._IGNORED_TAGS:
@@ -320,6 +333,8 @@ class _WameijiDetailParser(HTMLParser):
             )
 
         class_text = " ".join(classes).lower()
+        if tag == "img":
+            self._capture_product_image(attr, class_text)
         if any(token in class_text for token in ("sold", "unavailable", "out-of-stock")):
             self._availability_signals.append("sold out")
         elif "reserved" in class_text:
@@ -341,6 +356,28 @@ class _WameijiDetailParser(HTMLParser):
             for token in ("availability", "stock", "sale-status", "sell-status")
         ):
             self._status_capture_parts[depth] = []
+
+    def _capture_product_image(self, attr: dict[str, str | None], class_text: str) -> None:
+        """Keep only image candidates inside the verified detail component."""
+
+        if any(token in class_text for token in self._NON_PRODUCT_IMAGE_CLASS_TOKENS):
+            return
+        for name in self._IMAGE_ATTRIBUTE_ORDER:
+            value = str(attr.get(name) or "").strip()
+            if value and value not in self._product_image_urls:
+                self._product_image_urls.append(value)
+
+    def product_image_url(self, detail_url: str | None) -> str | None:
+        """Return the first non-chrome image supplied by the detail component."""
+
+        base_url = str(detail_url or "").strip()
+        if base_url.startswith("/"):
+            base_url = "https://meruki.cn" + base_url
+        for value in self._product_image_urls:
+            normalized = normalize_product_image_url(value, base_url=base_url or None)
+            if normalized and is_usable_product_image(normalized):
+                return normalized
+        return None
 
     def handle_data(self, data: str) -> None:
         if self._ignored_depth or not self._in_scope() or self._excluded_depth is not None:
@@ -430,7 +467,7 @@ def _detail_item_from_parser(
         # record: it may be stale and does not include page-specific fees.
         price_cny_display=None,
         url=search_item.url,
-        image_url=search_item.image_url,
+        image_url=parser.product_image_url(search_item.url),
         availability=parser.availability(),
         condition_text=_detect_condition_from_text(raw_text),
         fees_hint=_detect_fees_hint(raw_text),

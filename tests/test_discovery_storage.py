@@ -4,12 +4,13 @@ import sqlite3
 from pathlib import Path
 
 from cd_monitor.core.discovery import DiscoveryCandidate, build_identity_key
-from cd_monitor.core.models import MarketItem, Opportunity
+from cd_monitor.core.models import MarketItem, Opportunity, XianyuPriceSample
 from cd_monitor.storage.sqlite import (
     discovery_summary,
     init_db,
     insert_discovery_opportunity,
     insert_market_items,
+    insert_xianyu_samples,
     list_discovery_detail_queue,
     list_discovery_keywords,
     list_discovery_opportunities,
@@ -19,6 +20,7 @@ from cd_monitor.storage.sqlite import (
     record_discovery_candidate_detail_attempt,
     record_discovery_title_alias_evidence,
     replace_discovery_keywords,
+    set_user_settings,
     update_discovery_pool,
     update_discovery_pool_last_scan,
     upsert_discovery_candidate,
@@ -690,7 +692,20 @@ def test_selection_board_orders_linked_opportunities_by_profit_descending(tmp_pa
                     price=1200,
                     currency="JPY",
                     external_item_id=number,
+                    image_url=f"https://images.example.invalid/wameiji/{number}.webp",
                     availability="available",
+                )
+            ],
+        )[0]
+        xianyu_sample_id = insert_xianyu_samples(
+            db_path,
+            [
+                XianyuPriceSample(
+                    catalog_no=f"selection-query:{number}",
+                    title=f"Album {number} Xianyu listing",
+                    price_cny=200,
+                    url=f"https://www.goofish.com/item?id={number}",
+                    image_url=f"https://images.example.invalid/xianyu/{number}.webp",
                 )
             ],
         )[0]
@@ -717,6 +732,7 @@ def test_selection_board_orders_linked_opportunities_by_profit_descending(tmp_pa
             discovery_candidate_id=candidate_id,
             media_type="cd",
             identity_key=f"source:{number}",
+            xianyu_price_sample_id=xianyu_sample_id,
         )
         candidate_ids.append(candidate_id)
 
@@ -727,6 +743,243 @@ def test_selection_board_orders_linked_opportunities_by_profit_descending(tmp_pa
     assert all(item["media_type"] == "cd" for item in feed)
     assert feed[0]["purchase_price_jpy"] == 1200.0
     assert feed[0]["xianyu_price_cny"] == 200.0
+
+
+def test_selection_board_returns_the_persisted_xianyu_picture_for_an_automatic_candidate(
+    tmp_path: Path,
+) -> None:
+    """An automatic card must expose its real Xianyu listing, not a blank left side."""
+
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    candidate_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="physical_game",
+            identity_key="source:macross-switch",
+            title="Macross Shooting Insight Limited Edition",
+            source_item_id="macross-switch",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+    purchase_id = insert_market_items(
+        db_path,
+        [
+            MarketItem(
+                source="wameiji",
+                title="Macross Shooting Insight Limited Edition",
+                price=1200,
+                currency="JPY",
+                image_url="https://images.example.invalid/wameiji/macross.webp",
+                availability="available",
+            )
+        ],
+    )[0]
+    resale_id = insert_xianyu_samples(
+        db_path,
+        [
+            XianyuPriceSample(
+                # A title query is valid when the Wameiji listing has no JAN.
+                # It must not prevent the saved listing from being displayed.
+                catalog_no="Macross Shooting Insight Switch",
+                title="Switch Macross Shooting Insight Japanese Limited Edition",
+                price_cny=418,
+                url="https://www.goofish.com/item?id=example",
+                image_url="https://images.example.invalid/xianyu/macross.webp",
+            )
+        ],
+    )[0]
+    insert_discovery_opportunity(
+        db_path,
+        Opportunity(
+            catalog_no="source:macross-switch",
+            item=MarketItem(source="wameiji", title="Macross Shooting Insight Limited Edition", price=1200),
+            xianyu_reference_price=418,
+            expected_sale_price=400,
+            landed_cost=100,
+            expected_revenue=280,
+            expected_profit=180,
+            net_margin=0.64,
+            turnover_adjusted_roi=0.64,
+            match_confidence=0.9,
+            valid_xianyu_sample_count=3,
+            liquidity_status="normal",
+            decision="strong_alert",
+            opportunity_hash="source:macross-switch",
+        ),
+        wameiji_item_id=purchase_id,
+        discovery_candidate_id=candidate_id,
+        media_type="physical_game",
+        identity_key="source:macross-switch",
+        xianyu_price_sample_id=resale_id,
+    )
+
+    [card] = list_discovery_opportunities(db_path)
+
+    assert card["image_url"] == "https://images.example.invalid/wameiji/macross.webp"
+    assert card["xianyu_item_title"] == "Switch Macross Shooting Insight Japanese Limited Edition"
+    assert card["xianyu_price_cny"] == 418.0
+    assert card["xianyu_url"] == "https://www.goofish.com/item?id=example"
+    assert card["xianyu_image_url"] == "https://images.example.invalid/xianyu/macross.webp"
+
+
+def test_selection_board_hides_an_automatic_card_without_both_listing_images(
+    tmp_path: Path,
+) -> None:
+    """A visual comparison must not render a blank side as if it were evidence."""
+
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    candidate_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:missing-wameiji-image",
+            title="Album Without Verified Image",
+            source_item_id="missing-wameiji-image",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+    purchase_id = insert_market_items(
+        db_path,
+        [
+            MarketItem(
+                source="wameiji",
+                title="Album Without Verified Image",
+                price=1200,
+                currency="JPY",
+                availability="available",
+            )
+        ],
+    )[0]
+    resale_id = insert_xianyu_samples(
+        db_path,
+        [
+            XianyuPriceSample(
+                catalog_no="Album Without Verified Image",
+                title="Album Without Verified Image Xianyu listing",
+                price_cny=300,
+                image_url="https://images.example.invalid/xianyu/available.webp",
+            )
+        ],
+    )[0]
+    insert_discovery_opportunity(
+        db_path,
+        Opportunity(
+            catalog_no="source:missing-wameiji-image",
+            item=MarketItem(source="wameiji", title="Album Without Verified Image", price=1200),
+            xianyu_reference_price=300,
+            expected_sale_price=250,
+            landed_cost=70,
+            expected_revenue=180,
+            expected_profit=110,
+            net_margin=0.61,
+            turnover_adjusted_roi=0.61,
+            match_confidence=0.9,
+            valid_xianyu_sample_count=3,
+            liquidity_status="normal",
+            decision="strong_alert",
+            opportunity_hash="source:missing-wameiji-image",
+        ),
+        wameiji_item_id=purchase_id,
+        discovery_candidate_id=candidate_id,
+        media_type="cd",
+        identity_key="source:missing-wameiji-image",
+        xianyu_price_sample_id=resale_id,
+    )
+
+    assert list_discovery_opportunities(db_path) == []
+    summary = discovery_summary(db_path)
+    assert summary["active_opportunities"] == 0
+    assert summary["total_expected_profit"] == 0
+
+
+def test_selection_board_hides_a_merchant_logo_instead_of_a_product_image(
+    tmp_path: Path,
+) -> None:
+    """A merchant avatar/logo is not evidence for the Wameiji product side."""
+
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    candidate_id = upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id,
+            media_type="cd",
+            identity_key="source:merchant-logo",
+            title="Album With Merchant Logo Only",
+            source_item_id="merchant-logo",
+            source_image_url="https://imgoss.mokaki.cn/sigmerchantimg/logo/merchant.webp",
+            source_price=1200,
+            source_currency="JPY",
+            availability="available",
+            detail_verified=True,
+        ),
+    )
+    purchase_id = insert_market_items(
+        db_path,
+        [
+            MarketItem(
+                source="wameiji",
+                title="Album With Merchant Logo Only",
+                price=1200,
+                currency="JPY",
+                image_url="https://imgoss.mokaki.cn/sigmerchantimg/logo/merchant.webp",
+                availability="available",
+            )
+        ],
+    )[0]
+    resale_id = insert_xianyu_samples(
+        db_path,
+        [
+            XianyuPriceSample(
+                catalog_no="Album With Merchant Logo Only",
+                title="Album With Merchant Logo Only Xianyu listing",
+                price_cny=300,
+                image_url="//img.alicdn.com/xianyu-product.webp",
+            )
+        ],
+    )[0]
+    insert_discovery_opportunity(
+        db_path,
+        Opportunity(
+            catalog_no="source:merchant-logo",
+            item=MarketItem(source="wameiji", title="Album With Merchant Logo Only", price=1200),
+            xianyu_reference_price=300,
+            expected_sale_price=250,
+            landed_cost=70,
+            expected_revenue=180,
+            expected_profit=110,
+            net_margin=0.61,
+            turnover_adjusted_roi=0.61,
+            match_confidence=0.9,
+            valid_xianyu_sample_count=3,
+            liquidity_status="normal",
+            decision="strong_alert",
+            opportunity_hash="source:merchant-logo",
+        ),
+        wameiji_item_id=purchase_id,
+        discovery_candidate_id=candidate_id,
+        media_type="cd",
+        identity_key="source:merchant-logo",
+        xianyu_price_sample_id=resale_id,
+    )
+
+    assert list_discovery_opportunities(db_path) == []
+    summary = discovery_summary(db_path)
+    assert summary["active_opportunities"] == 0
+    assert summary["total_expected_profit"] == 0
 
 
 def test_selection_board_hides_stale_xianyu_evaluation(tmp_path: Path) -> None:
@@ -744,6 +997,7 @@ def test_selection_board_hides_stale_xianyu_evaluation(tmp_path: Path) -> None:
             identity_key="source:stale-price",
             title="Stale Price Album CD",
             source_item_id="stale-price",
+            source_image_url="https://images.example.invalid/wameiji/stale-price.webp",
             source_price=1200,
             source_currency="JPY",
             availability="available",
@@ -756,9 +1010,21 @@ def test_selection_board_hides_stale_xianyu_evaluation(tmp_path: Path) -> None:
         price=1200,
         currency="JPY",
         external_item_id="stale-price",
+        image_url="https://images.example.invalid/wameiji/stale-price.webp",
         availability="available",
     )
     item_id = insert_market_items(db_path, [item])[0]
+    xianyu_sample_id = insert_xianyu_samples(
+        db_path,
+        [
+            XianyuPriceSample(
+                catalog_no="stale-price",
+                title="Stale Price Album CD Xianyu listing",
+                price_cny=300,
+                image_url="https://images.example.invalid/xianyu/stale-price.webp",
+            )
+        ],
+    )[0]
     opportunity_id = insert_discovery_opportunity(
         db_path,
         Opportunity(
@@ -781,6 +1047,7 @@ def test_selection_board_hides_stale_xianyu_evaluation(tmp_path: Path) -> None:
         discovery_candidate_id=candidate_id,
         media_type="cd",
         identity_key="source:stale-price",
+        xianyu_price_sample_id=xianyu_sample_id,
     )
 
     assert len(list_discovery_opportunities(db_path)) == 1
@@ -980,6 +1247,21 @@ def test_discovery_summary_exposes_detail_first_pipeline_state(tmp_path: Path) -
     assert summary["fresh_source_details"] == 1
     assert summary["stale_source_details"] == 1
     assert summary["resale_ready_candidates"] == 1
+
+
+def test_discovery_summary_exposes_xianyu_login_requirement(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+
+    set_user_settings(
+        db_path,
+        {"discovery_xianyu_login_state": "login_required"},
+    )
+
+    summary = discovery_summary(db_path)
+
+    assert summary["xianyu_login_state"] == "login_required"
+    assert summary["xianyu_login_checked_at"]
 
 
 def test_selection_board_retires_a_previous_evaluation_for_the_same_candidate(
