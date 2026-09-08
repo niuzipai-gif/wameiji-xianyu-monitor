@@ -180,15 +180,28 @@
     const dualSummary = view.dualMarketBoard && view.dualMarketBoard.summary;
     if (dualSummary) {
       const readyItems = Array.isArray(view.dualMarketBoard.ready) ? view.dualMarketBoard.ready : [];
+      const negativeItems = Array.isArray(view.dualMarketBoard.negative_profit) ? view.dualMarketBoard.negative_profit : [];
       const readyCount = Number(dualSummary.ready_count) || 0;
-      const pendingCount = (Number(dualSummary.cost_pending_count) || 0)
-        + (Number(dualSummary.waiting_wameiji_count) || 0)
-        + (Number(dualSummary.waiting_xianyu_count) || 0);
-      const profits = readyItems.map((item) => Number(item.calculation && item.calculation.expected_profit_cny) || 0);
-      setText("kpiToday", String(readyCount));
-      setText("kpiProfit", cny(profits.reduce((total, value) => total + value, 0)));
-      setText("kpiMax", cny(profits.reduce((maximum, value) => Math.max(maximum, value), 0)));
-      setText("kpiHitRate", (readyCount + pendingCount ? Math.round(readyCount / (readyCount + pendingCount) * 100) : 0) + "%");
+      const negativeCount = Number(dualSummary.negative_profit_count) || 0;
+      const costPendingCount = Number(dualSummary.cost_pending_count) || 0;
+      const verifiedPairCount = readyCount + negativeCount + costPendingCount;
+      const computedItems = readyItems.concat(negativeItems);
+      const profits = computedItems.map((item) => Number(item.calculation && item.calculation.expected_profit_cny) || 0);
+      setText("kpiToday", String(verifiedPairCount));
+      if (!verifiedPairCount) {
+        setText("kpiProfit", "--");
+        setText("kpiMax", "--");
+        setText("kpiHitRate", "--");
+      } else if (costPendingCount) {
+        setText("kpiProfit", "待算");
+        setText("kpiMax", "待算");
+        setText("kpiHitRate", "待算");
+      } else {
+        setText("kpiProfit", cny(profits.reduce((total, value) => total + value, 0)));
+        setText("kpiMax", cny(profits.reduce((maximum, value) => Math.max(maximum, value), 0)));
+        const computedCount = readyCount + negativeCount;
+        setText("kpiHitRate", (computedCount ? Math.round(readyCount / computedCount * 100) : 0) + "%");
+      }
       renderDiscoveryStatus(summary);
       return;
     }

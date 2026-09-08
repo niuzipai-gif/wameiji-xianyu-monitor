@@ -25,6 +25,7 @@ def test_homepage_names_cd_and_galgame_physical_media() -> None:
     homepage = Path("web/index.html").read_text(encoding="utf-8")
 
     assert "CD 与 GalGame 实体" in homepage
+    assert "已核验双边" in homepage
 
 
 def test_homepage_distinguishes_xianyu_search_evidence_from_wameiji_detail() -> None:
@@ -58,3 +59,14 @@ def test_dual_market_ui_does_not_coerce_missing_landed_cost_to_zero() -> None:
     currency_formatter = javascript[start:end]
 
     assert 'value === null || value === undefined || value === ""' in currency_formatter
+
+
+def test_dual_market_kpis_label_cost_pending_pairs_without_zero_profit() -> None:
+    javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    start = javascript.index("function renderKpis")
+    end = javascript.index("function safeHttpUrl")
+    renderer = javascript[start:end]
+
+    assert "verifiedPairCount" in renderer
+    assert "costPendingCount" in renderer
+    assert '"待算"' in renderer
