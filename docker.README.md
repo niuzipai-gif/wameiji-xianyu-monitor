@@ -17,7 +17,7 @@ docker compose logs -f app
 # http://127.0.0.1:9890
 ```
 
-Docker 只运行 Web 服务，不启动市场直采进程。挖煤姬和闲鱼的真实浏览器采集需要在宿主机使用用户授权的 Chrome profile / storage state，再用 `capture-live-html` 或 `scan-live-html` 写入快照和数据库；这样不会把宿主机登录态塞进容器，也不会误把煤炉、Yahoo 等底层平台当成日本侧主采集源。
+Docker 只运行 API、比价计算、导出和备份，不启动市场直采进程。它固定使用 `./data/cd_monitor.db`；浏览器 Profile、Cookie、storage state 均不挂载进容器。双边采集仍保持暂停，未来得到明确授权后，宿主机的可见浏览器适配器只能经 API 提交证据，不能直接写 Docker 正在使用的 SQLite。
 
 ## 端口
 
@@ -28,12 +28,7 @@ Docker 只运行 Web 服务，不启动市场直采进程。挖煤姬和闲鱼�
 
 | 宿主机路径 | 容器内路径 | 用途 |
 |---|---|---|
-| `./data` | `/app/data` | SQLite 数据库、登录态、截图、快照 |
-| `./state` | `/app/state` | 浏览器持久化状态 |
-| `./logs` | `/app/logs` | 应用日志 |
-| `./jsonl` | `/app/jsonl` | JSONL 检索记录 |
-| `./price_history` | `/app/price_history` | 历史价格 |
-| `./.env` | `/app/.env` (ro) | 环境变量 |
+| `./data` | `/app/data` | 唯一 SQLite 数据库、已导入的截图、快照和商品图片 |
 
 ## 常用命令
 
@@ -44,23 +39,11 @@ docker compose build --no-cache
 # 进入容器调试
 docker compose exec app bash
 
-# 跑一次离线扫描（参考 ai-goofish-monitor 的 scan 入口）
-docker compose exec app cd-monitor scan --help
-
 # 看健康检查
 docker compose ps
 ```
 
-宿主机单品实采示例（PowerShell）：
-
-```powershell
-.\.venv\Scripts\python.exe -m cd_monitor.cli scan-live-html `
-  --db data\local\takeover.db `
-  --catalog-no <品番> `
-  --profile-dir data\browser_profiles\wameiji `
-  --state-file data\xianyu_state.json `
-  --snapshot-dir data\snapshots
-```
+当前 Docker 阶段没有开放主机浏览器到 API 的证据导入入口，因此不要把 `scan-live-html` 当作 Docker 的配套命令，也不要通过共享 SQLite 或目录绕过单写者规则。
 
 ## 与 ai-goofish-monitor 的差异
 
