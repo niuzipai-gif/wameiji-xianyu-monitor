@@ -38,6 +38,11 @@ from cd_monitor.storage.sqlite import (
 LOGGER = logging.getLogger(__name__)
 
 
+def _dual_market_collection_paused() -> bool:
+    value = os.getenv("DUAL_MARKET_COLLECTION_PAUSED", "1").strip().casefold()
+    return value not in {"0", "false", "no", "off"}
+
+
 class CollectorCommandClient(Protocol):
     def fetch_pending(self) -> list[dict[str, Any]]: ...
 
@@ -81,6 +86,9 @@ class DiscoveryWorker:
 
     async def run_once(self) -> WorkerRunResult:
         commands = self._fetch_commands()
+        if _dual_market_collection_paused():
+            self._complete_commands(commands, [], paused=True)
+            return WorkerRunResult(scan_count=0, command_count=len(commands))
         forced_pool_ids, force_all = self._apply_non_scan_commands(commands)
         scan_commands = [
             command for command in commands if command.get("command_type") == "scan_now"
@@ -198,13 +206,29 @@ class DiscoveryWorker:
                 continue
         return forced_pool_ids, force_all
 
-    def _complete_commands(self, commands: list[dict[str, Any]], scan_results: list[Any]) -> None:
+    def _complete_commands(
+        self,
+        commands: list[dict[str, Any]],
+        scan_results: list[Any],
+        *,
+        paused: bool = False,
+    ) -> None:
         if self.command_client is None:
             return
         runs = len(scan_results)
         has_human_required = any(result.status == "human_required" for result in scan_results)
         default_status = "human_required" if has_human_required else "completed"
-        default_result = {"runs": runs, "status": "human_required" if has_human_required else "ok"}
+        default_result: dict[str, object] = {
+            "runs": runs,
+            "status": "human_required" if has_human_required else "ok",
+        }
+        if paused:
+            default_status = "completed"
+            default_result = {
+                "runs": 0,
+                "status": "paused",
+                "reason": "collector_paused",
+            }
         for command in commands:
             command_id = command.get("id")
             if not isinstance(command_id, int):

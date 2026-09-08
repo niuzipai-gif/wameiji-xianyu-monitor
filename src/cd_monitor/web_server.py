@@ -1120,13 +1120,7 @@ def _build_handler(
                 if command_type not in {"scan_now", "set_pool", "set_keywords"}:
                     self._json({"error": "unsupported_command_type"}, status=HTTPStatus.BAD_REQUEST)
                     return
-                updates = payload.get("updates")
-                resume_requested = (
-                    command_type == "set_pool"
-                    and isinstance(updates, dict)
-                    and updates.get("capture_state") == "active"
-                )
-                if (command_type == "scan_now" or resume_requested) and self._reject_paused_collection():
+                if self._reject_paused_collection():
                     return
                 command_payload = {
                     key: value
