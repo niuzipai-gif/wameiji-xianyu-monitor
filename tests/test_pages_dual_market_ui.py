@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 
@@ -20,6 +21,35 @@ def test_dual_market_ui_renders_source_specific_images_and_waiting_state() -> No
     assert "waiting_xianyu" in renderer
     assert "/api/dual-market/board" in loader
     assert "xianyu_reference_price" not in renderer
+
+
+def test_static_snapshot_product_images_resolve_from_the_pages_base_url() -> None:
+    javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    start = javascript.index("function safeHttpUrl")
+    end = javascript.index("function liquidityChip")
+    image_helpers = javascript[start:end]
+    harness = f"""
+const document = {{ baseURI: "https://example.github.io/project/" }};
+{image_helpers}
+const result = usableProductImage(
+  "assets/dual-market/snapshot/4-xianyu.webp"
+);
+if (result !== "https://example.github.io/project/assets/dual-market/snapshot/4-xianyu.webp") {{
+  throw new Error("unexpected image URL: " + result);
+}}
+if (usableProductImage("../private.png") !== "") {{
+  throw new Error("relative paths outside the published asset tree must be rejected");
+}}
+"""
+
+    result = subprocess.run(
+        ["node", "-e", harness],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_homepage_names_cd_and_galgame_physical_media() -> None:
@@ -64,6 +94,15 @@ def test_dual_market_ui_does_not_coerce_missing_landed_cost_to_zero() -> None:
     assert 'value === null || value === undefined || value === ""' in currency_formatter
 
 
+def test_wameiji_price_is_explicitly_labeled_as_japanese_yen() -> None:
+    javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    start = javascript.index("function jpy")
+    end = javascript.index("function percent")
+    currency_formatter = javascript[start:end]
+
+    assert "日元" in currency_formatter
+
+
 def test_dual_market_kpis_label_cost_pending_pairs_without_zero_profit() -> None:
     javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
     start = javascript.index("function renderKpis")
@@ -80,6 +119,12 @@ def test_homepage_loads_snapshot_loader_before_the_board_renderer() -> None:
 
     assert "dual-market-data.js" in homepage
     assert homepage.index("dual-market-data.js") < homepage.index("discovery-ui.js")
+
+
+def test_homepage_busts_cached_renderer_after_yen_and_image_fix() -> None:
+    homepage = Path("web/index.html").read_text(encoding="utf-8")
+
+    assert "discovery-ui.js?v=20260909-yen-image-fix" in homepage
 
 
 def test_board_refresh_decouples_legacy_api_failures_from_dual_market_data() -> None:

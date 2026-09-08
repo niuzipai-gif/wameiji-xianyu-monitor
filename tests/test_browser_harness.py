@@ -111,6 +111,28 @@ def test_xianyu_current_goofish_feed_cards_parse_title_price_and_image() -> None
     assert status.items[0].image_url == "//img.example.invalid/item.webp"
 
 
+def test_xianyu_feed_card_keeps_product_image_instead_of_later_avatar() -> None:
+    html = """
+    <main class="feeds-list-container--hash">
+      <a class="feeds-item-wrap--hash" href="https://www.goofish.com/item?id=1064270240099">
+        <img class="feeds-image--hash" src="//img.example.invalid/product.webp" />
+        <div class="row1-wrap-title--hash" title="古内东子 Hourglass SRCL 3520"></div>
+        <div class="row3-wrap-price--hash"><span class="number--hash">27</span></div>
+        <img class="avatar--hash" src="//img.example.invalid/seller-avatar.webp" />
+      </a>
+    </main>
+    """
+
+    status = XianyuBrowserAdapter(enabled=True).parse_search_html(
+        html,
+        WatchItem("SRCL-3520"),
+    )
+
+    assert status.status == "ok"
+    assert len(status.items) == 1
+    assert status.items[0].image_url == "//img.example.invalid/product.webp"
+
+
 def test_browser_harness_parses_nested_visible_cards() -> None:
     wameiji_html = """
     <div data-item-card>

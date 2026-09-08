@@ -36,7 +36,7 @@
   function jpy(value) {
     if (value === null || value === undefined || value === "") return "--";
     const number = Number(value);
-    return Number.isFinite(number) ? "¥" + number.toLocaleString("ja-JP", { maximumFractionDigits: 0 }) : "--";
+    return Number.isFinite(number) ? number.toLocaleString("ja-JP", { maximumFractionDigits: 0 }) + " 日元" : "--";
   }
 
   function percent(value) {
@@ -250,7 +250,11 @@
   }
 
   function usableProductImage(value) {
-    const url = safeHttpUrl(value);
+    const relative = String(value || "").trim();
+    let url = safeHttpUrl(relative);
+    if (!url && /^assets\/dual-market\/[A-Za-z0-9+._/-]+$/.test(relative) && !relative.includes("..")) {
+      url = new URL(relative, document.baseURI).toString();
+    }
     if (!url) return "";
     return /searchlist|placeholder|\/logo(?:[._/]|$)|sigmerchantimg\/logo|paypaay|mokaki\.cn\/sigimage\/icon/i.test(url) ? "" : url;
   }

@@ -156,7 +156,10 @@ class _XianyuCardParser(HTMLParser):
             self._current["url"] = attr["href"] or ""
         if tag == "img":
             image_url = _first_attr_text(attr, "src", "data-src", "data-original")
-            if image_url:
+            if image_url and (
+                "image_url" not in self._current
+                or _has_class_prefix(classes, "feeds-image-")
+            ):
                 self._current["image_url"] = image_url
 
         if _has_class_prefix(classes, "row1-wrap-title-"):

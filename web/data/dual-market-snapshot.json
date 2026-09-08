@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-09T01:08:43.236583+08:00",
+  "generated_at": "2026-09-09T01:20:55.036080+08:00",
   "mode": "verified_static_snapshot",
   "summary": {
     "ready_count": 0,
@@ -28,7 +28,7 @@
         "completeness": "complete",
         "evidence_level": "search_card",
         "captured_at": "2026-09-08T23:31:06.741894+08:00",
-        "image_url": "assets/dual-market/20260909T010843+0800/6-xianyu.webp"
+        "image_url": "assets/dual-market/20260909T012055+0800/6-xianyu.webp"
       },
       "wameiji": {
         "listing_id": 11,
@@ -43,7 +43,7 @@
         "completeness": "complete",
         "evidence_level": "detail_verified",
         "captured_at": "2026-09-08T23:31:00.994164+08:00",
-        "image_url": "assets/dual-market/20260909T010843+0800/6-wameiji.jpg"
+        "image_url": "assets/dual-market/20260909T012055+0800/6-wameiji.jpg"
       },
       "calculation": {
         "status": "cost_pending",
@@ -70,7 +70,7 @@
         "completeness": "complete",
         "evidence_level": "search_card",
         "captured_at": "2026-09-08T23:30:01.598907+08:00",
-        "image_url": "assets/dual-market/20260909T010843+0800/5-xianyu.webp"
+        "image_url": "assets/dual-market/20260909T012055+0800/5-xianyu.webp"
       },
       "wameiji": {
         "listing_id": 9,
@@ -85,7 +85,7 @@
         "completeness": "complete",
         "evidence_level": "detail_verified",
         "captured_at": "2026-09-08T23:29:55.991464+08:00",
-        "image_url": "assets/dual-market/20260909T010843+0800/5-wameiji.jpg"
+        "image_url": "assets/dual-market/20260909T012055+0800/5-wameiji.jpg"
       },
       "calculation": {
         "status": "cost_pending",
@@ -112,7 +112,7 @@
         "completeness": "complete",
         "evidence_level": "search_card",
         "captured_at": "2026-09-08T23:28:24.249867+08:00",
-        "image_url": "assets/dual-market/20260909T010843+0800/4-xianyu.webp"
+        "image_url": "assets/dual-market/20260909T012055+0800/4-xianyu.webp"
       },
       "wameiji": {
         "listing_id": 7,
@@ -127,7 +127,7 @@
         "completeness": "complete",
         "evidence_level": "detail_verified",
         "captured_at": "2026-09-08T23:28:19.065621+08:00",
-        "image_url": "assets/dual-market/20260909T010843+0800/4-wameiji.jpg"
+        "image_url": "assets/dual-market/20260909T012055+0800/4-wameiji.jpg"
       },
       "calculation": {
         "status": "cost_pending",
