@@ -4,7 +4,7 @@
 
 **Goal:** Replace the asymmetric Wameiji-candidate/Xianyu-price-pool flow with a verifiable dual-market stream that selects the lowest eligible listing on each side and calculates conservative resale profit.
 
-**Architecture:** Treat a rendered, user-authorized page as the only source of product facts. Each site produces immutable `ListingObservation` records with HTML/screenshot provenance; a product-key resolver groups only demonstrated same-product listings; a comparison snapshot references exactly one eligible Wameiji purchase observation and one eligible Xianyu resale observation. The existing browser worker remains disabled throughout implementation and all collection tests use static fixtures.
+**Architecture:** Treat a rendered, user-authorized page as the only source of product facts. Each site produces immutable `ListingObservation` records with HTML/screenshot provenance; a product-key resolver groups only demonstrated same-product listings; a comparison snapshot references exactly one eligible Wameiji purchase observation and one eligible Xianyu resale observation. The existing browser worker remains disabled throughout implementation and all collection tests use static fixtures. Docker is deferred until the offline flow passes: it will own one `/app/data/cd_monitor.db` and the local API, while the Windows visible-browser adapter submits evidence through that API rather than sharing a browser profile or writing SQLite directly.
 
 **Tech Stack:** Python 3.11 dataclasses, SQLite migrations, existing Playwright capture boundary, stdlib HTTP server, static GitHub Pages JavaScript, pytest.
 
