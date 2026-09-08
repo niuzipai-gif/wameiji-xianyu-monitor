@@ -97,6 +97,23 @@ CREATE TABLE IF NOT EXISTS listing_observations (
 CREATE INDEX IF NOT EXISTS idx_listing_observations_product
 ON listing_observations(canonical_product_key, source, captured_at DESC);
 
+CREATE TABLE IF NOT EXISTS price_comparisons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  canonical_product_key TEXT NOT NULL,
+  wameiji_observation_id INTEGER NOT NULL REFERENCES listing_observations(id),
+  xianyu_observation_id INTEGER NOT NULL REFERENCES listing_observations(id),
+  cost_config_json TEXT NOT NULL,
+  landed_cost_cny REAL,
+  sale_price_cny REAL NOT NULL,
+  expected_profit_cny REAL,
+  net_margin REAL,
+  status TEXT NOT NULL CHECK(status IN ('ready', 'negative_profit', 'cost_pending')),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_comparisons_product_time
+ON price_comparisons(canonical_product_key, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS opportunities (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   catalog_no TEXT NOT NULL,

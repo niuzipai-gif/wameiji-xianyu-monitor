@@ -44,6 +44,60 @@ class ListingObservation:
     raw_snapshot_path: str | None = None
     screenshot_path: str | None = None
     source_detail_fee: float | None = None
+    id: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DualMarketCostConfig:
+    """Explicit user-supplied inputs for a conservative resale calculation.
+
+    All fields intentionally default to ``None``.  A zero is valid only when
+    the user explicitly supplies it (for example a legally applicable tax
+    exemption), which lets the service distinguish zero from unknown.
+    """
+
+    exchange_rate_cny_per_jpy: float | None = None
+    japan_domestic_shipping_jpy: float | None = None
+    proxy_fee_jpy: float | None = None
+    international_shipping_per_item_cny: float | None = None
+    china_reship_cny: float | None = None
+    packaging_cny: float | None = None
+    after_sale_reserve_cny: float | None = None
+    risk_reserve_cny: float | None = None
+    tax_cny: float | None = None
+    sales_fee_rate: float | None = None
+    sales_fee_cap_cny: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PriceComparison:
+    """A frozen calculation tied to exactly one listing from each market."""
+
+    canonical_product_key: str
+    wameiji_observation_id: int
+    xianyu_observation_id: int
+    cost_config_json: str
+    landed_cost_cny: float | None
+    sale_price_cny: float
+    expected_profit_cny: float | None
+    net_margin: float | None
+    status: Literal["ready", "negative_profit", "cost_pending"]
+    id: int | None = None
+    created_at: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ComparisonOutcome:
+    """A board-safe result: waiting states never invent a profit card."""
+
+    status: Literal[
+        "ready",
+        "negative_profit",
+        "cost_pending",
+        "waiting_wameiji",
+        "waiting_xianyu",
+    ]
+    comparison: PriceComparison | None = None
 
 
 def is_eligible(observation: ListingObservation, *, source: MarketSource) -> bool:

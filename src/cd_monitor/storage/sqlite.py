@@ -9,7 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from cd_monitor.core.discovery import DiscoveryCandidate, DiscoveryKeyword, DiscoveryPool
-from cd_monitor.core.dual_market import ListingObservation, MarketSource
+from cd_monitor.core.dual_market import ListingObservation, MarketSource, PriceComparison
 from cd_monitor.core.identifiers import normalize_catalog_no_compact
 from cd_monitor.core.models import MarketItem, Opportunity, WatchItem, XianyuPriceSample
 from cd_monitor.core.product_images import is_usable_product_image
@@ -1544,6 +1544,85 @@ def _listing_observation_from_row(row: sqlite3.Row) -> ListingObservation:
         raw_snapshot_path=row["raw_snapshot_path"],
         screenshot_path=row["screenshot_path"],
         source_detail_fee=row["source_detail_fee"],
+        id=int(row["id"]),
+    )
+
+
+def insert_price_comparison(db_path: str | Path, comparison: PriceComparison) -> int:
+    """Append a comparison snapshot; never overwrite an older calculation."""
+
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO price_comparisons (
+              canonical_product_key, wameiji_observation_id, xianyu_observation_id,
+              cost_config_json, landed_cost_cny, sale_price_cny, expected_profit_cny,
+              net_margin, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                comparison.canonical_product_key,
+                comparison.wameiji_observation_id,
+                comparison.xianyu_observation_id,
+                comparison.cost_config_json,
+                comparison.landed_cost_cny,
+                comparison.sale_price_cny,
+                comparison.expected_profit_cny,
+                comparison.net_margin,
+                comparison.status,
+            ),
+        )
+    return int(cur.lastrowid)
+
+
+def list_price_comparisons(
+    db_path: str | Path,
+    *,
+    canonical_product_key: str | None = None,
+    limit: int = 100,
+) -> list[PriceComparison]:
+    """List persisted comparison snapshots newest first for board/API readers."""
+
+    init_db(db_path)
+    where_sql = ""
+    parameters: tuple[object, ...] = (max(1, int(limit)),)
+    if canonical_product_key is not None:
+        where_sql = "WHERE canonical_product_key = ?"
+        parameters = (canonical_product_key, max(1, int(limit)))
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT * FROM price_comparisons
+            {where_sql}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            parameters,
+        ).fetchall()
+    return [_price_comparison_from_row(row) for row in rows]
+
+
+def _price_comparison_from_row(row: sqlite3.Row) -> PriceComparison:
+    return PriceComparison(
+        id=int(row["id"]),
+        canonical_product_key=row["canonical_product_key"],
+        wameiji_observation_id=int(row["wameiji_observation_id"]),
+        xianyu_observation_id=int(row["xianyu_observation_id"]),
+        cost_config_json=row["cost_config_json"],
+        landed_cost_cny=(
+            float(row["landed_cost_cny"]) if row["landed_cost_cny"] is not None else None
+        ),
+        sale_price_cny=float(row["sale_price_cny"]),
+        expected_profit_cny=(
+            float(row["expected_profit_cny"])
+            if row["expected_profit_cny"] is not None
+            else None
+        ),
+        net_margin=float(row["net_margin"]) if row["net_margin"] is not None else None,
+        status=row["status"],
+        created_at=row["created_at"],
     )
 
 
