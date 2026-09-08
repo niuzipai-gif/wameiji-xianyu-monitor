@@ -1494,6 +1494,7 @@ def list_current_observations(
     *,
     canonical_product_key: str | None = None,
     source: MarketSource | None = None,
+    captured_since: str | None = None,
 ) -> list[ListingObservation]:
     """Return the newest capture per source-local listing without deleting history."""
 
@@ -1506,6 +1507,9 @@ def list_current_observations(
     if source is not None:
         conditions.append("source = ?")
         parameters.append(source)
+    if captured_since is not None:
+        conditions.append("datetime(captured_at) >= datetime(?)")
+        parameters.append(captured_since)
     where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     sql = f"""
         WITH current_per_listing AS (

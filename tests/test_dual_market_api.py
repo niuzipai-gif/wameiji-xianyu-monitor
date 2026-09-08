@@ -4,6 +4,7 @@ import json
 import threading
 import urllib.request
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from cd_monitor.core.dual_market import DualMarketCostConfig, ListingObservation
@@ -40,7 +41,7 @@ def make_observation(**changes: object) -> ListingObservation:
         condition_group="complete_used",
         completeness="complete",
         evidence_level="detail_verified",
-        captured_at="2026-09-08T00:00:00Z",
+        captured_at=datetime.now(UTC).isoformat(),
     )
     return replace(observation, **changes)
 
@@ -103,3 +104,26 @@ def test_dual_market_board_returns_exact_ready_and_waiting_streams(tmp_path: Pat
     assert ready["wameiji"]["image_url"] == "https://images.example/wameiji/m-1.jpg"
     assert ready["calculation"]["status"] == "ready"
     assert payload["waiting_xianyu"][0]["wameiji"]["listing_id"] is not None
+
+
+def test_dual_market_board_hides_stale_evidence(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WEB_ACCESS_TOKEN", "viewer-secret")
+    db_path = tmp_path / "monitor.db"
+    insert_listing_observation(
+        db_path,
+        make_observation(captured_at="2000-01-01T00:00:00Z"),
+    )
+    server = create_server("127.0.0.1", 0, db_path, static_dir="web")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        code, payload = request_json(
+            f"{base_url}/api/dual-market/board?access_token=viewer-secret"
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert code == 200
+    assert payload["summary"]["waiting_xianyu_count"] == 0

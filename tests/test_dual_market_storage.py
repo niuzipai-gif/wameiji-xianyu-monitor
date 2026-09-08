@@ -63,6 +63,21 @@ def test_current_observations_keep_history_but_return_each_listing_latest_snapsh
     assert [observation.price for observation in current] == [1080]
 
 
+def test_current_observations_exclude_stale_evidence_when_a_freshness_boundary_is_given(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "monitor.db"
+    insert_listing_observation(db_path, make_observation(captured_at="2026-09-08T00:00:00Z"))
+
+    current = list_current_observations(
+        db_path,
+        canonical_product_key="catalog:srcl3520",
+        captured_since="2026-09-08T03:00:00Z",
+    )
+
+    assert current == []
+
+
 def test_initialize_database_preserves_legacy_market_items_when_adding_observations(
     tmp_path: Path,
 ) -> None:

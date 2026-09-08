@@ -274,6 +274,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "web"
 DEFAULT_WAMEIJI = PROJECT_ROOT / "data/mock/wameiji_items.sample.json"
 DEFAULT_XIANYU = PROJECT_ROOT / "data/mock/xianyu_samples.sample.json"
+DUAL_MARKET_OBSERVATION_FRESHNESS_MINUTES = 180
 
 
 class BadJsonRequest(ValueError):
@@ -2606,7 +2607,11 @@ def _dual_market_board(db_path: str | Path) -> dict[str, object]:
     referenced listings are still the current lowest eligible observations.
     """
 
-    observations = list_current_observations(db_path)
+    fresh_since = (
+        datetime.datetime.now(datetime.UTC)
+        - datetime.timedelta(minutes=DUAL_MARKET_OBSERVATION_FRESHNESS_MINUTES)
+    ).isoformat()
+    observations = list_current_observations(db_path, captured_since=fresh_since)
     grouped: dict[str, list[ListingObservation]] = {}
     for observation in observations:
         if observation.canonical_product_key:
