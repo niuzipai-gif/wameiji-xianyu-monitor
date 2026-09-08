@@ -97,3 +97,21 @@ def test_static_snapshot_status_is_explicit_about_freshness() -> None:
     assert "Pages 历史快照" in javascript
     assert "不代表当前可买" in javascript
     assert "采集仅在本机运行" in javascript
+
+
+def test_home_feed_is_two_columns_with_compact_three_part_cards() -> None:
+    css = Path("web/styles/kuro.css").read_text(encoding="utf-8")
+    homepage = Path("web/index.html").read_text(encoding="utf-8")
+
+    assert "body.kuro #homeFeed" in css
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in css
+    assert (
+        "grid-template-columns: minmax(0, 1fr) minmax(130px, .7fr) "
+        "minmax(0, 1fr)" in css
+    )
+    assert "max-height: 245px" in css
+    assert "@media (max-width: 1180px)" in css
+    assert "@media (max-width: 760px)" in css
+    assert "一行两条机会" in homepage
+    assert "左侧闲鱼" in homepage
+    assert "右侧挖煤姬" in homepage

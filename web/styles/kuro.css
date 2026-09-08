@@ -748,3 +748,120 @@ body.kuro #discoveryCommandStatus.error { color: #b43f52; }
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.4; transform: scale(0.85); }
 }
+
+/* Confirmed homepage layout: two compact comparisons per desktop row. */
+body.kuro #home .hero { min-height: 310px; }
+body.kuro #home .hero-copy { padding: 30px 32px 24px; }
+body.kuro #home h2 { font-size: 38px; margin: 10px 0 12px; }
+body.kuro #home .lead { font-size: 14px; line-height: 1.7; }
+body.kuro #home .stats { margin-top: 18px; }
+body.kuro #home .stat { padding: 12px; }
+body.kuro #home .mascot-stage { min-height: 310px; padding-top: 12px; }
+body.kuro #home .mascot-stage img { max-height: 245px; }
+
+body.kuro #homeFeed {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+}
+body.kuro #homeFeed > .empty-state,
+body.kuro #homeFeed > .feed-sentinel { grid-column: 1 / -1; }
+body.kuro #homeFeed .discovery-op-card {
+  grid-template-columns: minmax(0, 1fr) minmax(130px, .7fr) minmax(0, 1fr);
+  gap: 10px;
+  min-height: 260px;
+  padding: 12px;
+  border-radius: 22px;
+}
+body.kuro #homeFeed .discovery-op-card .side-product {
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 15px;
+}
+body.kuro #homeFeed .discovery-op-card .thumb {
+  width: 100%;
+  height: 132px;
+  border-radius: 11px;
+}
+body.kuro #homeFeed .discovery-op-card .product .tag,
+body.kuro #homeFeed .discovery-op-card .product .status {
+  padding: 3px 6px;
+  font-size: 9px;
+}
+body.kuro #homeFeed .discovery-op-card .product h4 {
+  margin: 6px 0 4px;
+  font-size: 12px;
+  -webkit-line-clamp: 2;
+}
+body.kuro #homeFeed .discovery-op-card .price { font-size: 21px; }
+body.kuro #homeFeed .discovery-op-card .product .desc {
+  margin-top: 4px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+body.kuro #homeFeed .discovery-op-card .analysis { padding: 11px 8px; }
+body.kuro #homeFeed .discovery-op-card .comparison-rail {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 9px;
+  line-height: 1.4;
+}
+body.kuro #homeFeed .discovery-op-card .comparison-rail span {
+  display: block;
+  text-align: center;
+}
+body.kuro #homeFeed .discovery-op-card .comparison-rail i { display: none; }
+body.kuro #homeFeed .discovery-op-card .grid2 {
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+body.kuro #homeFeed .discovery-op-card .metric {
+  min-width: 0;
+  padding: 6px;
+  border-radius: 9px;
+}
+body.kuro #homeFeed .discovery-op-card .metric small {
+  font-size: 8px;
+  line-height: 1.3;
+}
+body.kuro #homeFeed .discovery-op-card .metric strong { font-size: 13px; }
+body.kuro #homeFeed .discovery-op-card .metric .status {
+  padding: 3px 5px;
+  font-size: 8px;
+}
+body.kuro #homeFeed .discovery-op-card .comparison-catalog {
+  margin-top: 8px;
+  font-size: 9px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+body.kuro #homeFeed .discovery-op-card .reason {
+  margin-top: 8px;
+  padding: 8px;
+  font-size: 9px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@media (max-width: 1180px) {
+  body.kuro #homeFeed { grid-template-columns: 1fr; }
+  body.kuro #homeFeed .discovery-op-card {
+    grid-template-columns: minmax(0, 1fr) minmax(175px, .7fr) minmax(0, 1fr);
+  }
+  body.kuro #homeFeed .discovery-op-card .thumb { height: 180px; }
+}
+
+@media (max-width: 760px) {
+  body.kuro #homeFeed .discovery-op-card { grid-template-columns: 1fr; }
+  body.kuro #homeFeed .discovery-op-card .analysis { order: -1; }
+  body.kuro #homeFeed .discovery-op-card .side-product.xianyu { order: 2; }
+  body.kuro #homeFeed .discovery-op-card .side-product.market { order: 3; }
+  body.kuro #homeFeed .discovery-op-card .thumb { height: 220px; }
+}
