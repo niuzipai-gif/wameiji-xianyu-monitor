@@ -76,6 +76,10 @@
 
   function renderDiscoveryStatus(summary) {
     if (view.dualMarketBoard && view.dualMarketBoard.collector) {
+      if (view.dualMarketBoard.unavailable) {
+        setDiscoveryStatus("双边证据流暂不可用 · 不展示旧机会卡", "paused_quality");
+        return;
+      }
       const collectorState = String(view.dualMarketBoard.collector.state || "paused");
       if (collectorState === "paused") {
         setDiscoveryStatus("采集已暂停 · 仅展示已保存的双边商品证据", "idle");
@@ -412,6 +416,10 @@
 
   function renderDualMarketFeed(target) {
     const board = view.dualMarketBoard || {};
+    if (board.unavailable) {
+      target.innerHTML = '<div class="empty-state">双边证据流暂不可用；为避免把旧的全局样本误当成同款，本页不展示旧机会卡。</div>';
+      return;
+    }
     const query = String(view.query || view.advancedFilter && view.advancedFilter.q || "").trim().toLowerCase();
     let ready = Array.isArray(board.ready) ? board.ready.slice() : [];
     if (query) ready = ready.filter((item) => dualMarketSearchText(item).includes(query));
@@ -596,7 +604,11 @@
       const [board, commandPayload, dualMarketBoard] = await Promise.all([
         apiGet("/api/discovery/board"),
         apiGet("/api/discovery/commands"),
-        apiGet("/api/dual-market/board").catch(() => null),
+        apiGet("/api/dual-market/board").catch((error) => ({
+          unavailable: true,
+          error: String(error && error.message || "unknown_error"),
+          collector: { state: "paused" },
+        })),
       ]);
       view.board = board || { summary: {}, pools: [], opportunities: [] };
       view.dualMarketBoard = dualMarketBoard;

@@ -25,3 +25,12 @@ def test_homepage_names_cd_and_galgame_physical_media() -> None:
     homepage = Path("web/index.html").read_text(encoding="utf-8")
 
     assert "CD 与 GalGame 实体" in homepage
+
+
+def test_dual_market_ui_fails_closed_when_its_board_is_unavailable() -> None:
+    javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+
+    assert 'apiGet("/api/dual-market/board").catch(() => null)' not in javascript
+    assert "unavailable: true" in javascript
+    assert "双边证据流暂不可用" in javascript
+    assert "不展示旧机会卡" in javascript
