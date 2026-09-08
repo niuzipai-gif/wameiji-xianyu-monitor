@@ -21,13 +21,15 @@ services:
       CD_MONITOR_DB_PATH: /app/data/cd_monitor.db
       BROWSER_ENABLED: "false"
       DUAL_MARKET_COLLECTION_PAUSED: "true"
-      CD_SNAPSHOT_DIR: /app/data/snapshots
-      CD_SCREENSHOT_DIR: /app/data/screenshots
-      CD_IMAGE_DIR: /app/data/images
+      CD_SNAPSHOT_DIR: /app/data/imported-evidence/snapshots
+      CD_SCREENSHOT_DIR: /app/data/imported-evidence/screenshots
+      CD_IMAGE_DIR: /app/data/imported-evidence/images
       SERVER_PORT: "9890"
       CD_DATA_DIR: /app/data
     volumes:
-      - ./data:/app/data
+      # Dedicated Docker runtime directory only. Never bind-mount ./data because
+      # it contains browser profiles and storage state used by host collection.
+      - ./docker-runtime-data:/app/data
     # Browser collection stays on the host, where the user's authorized
     # Wameiji/Xianyu profiles are available. The container only runs the web
     # application and consumes imported snapshots.

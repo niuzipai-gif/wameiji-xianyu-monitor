@@ -48,8 +48,13 @@ COPY prompts ./prompts
 COPY config.example.yaml ./config.example.yaml
 COPY .env.example ./.env.example
 
-# 创建运行时数据目录（实际挂载到宿主机）。不包含浏览器状态目录。
-RUN mkdir -p /app/data /app/data/snapshots /app/data/screenshots /app/data/images /app/dist
+# 创建 Docker 专用的运行时数据目录。宿主机只能挂载已筛选的证据和唯一 SQLite 数据库，
+# 不包含浏览器 profile、Cookie 或 storage state。
+RUN mkdir -p /app/data \
+    /app/data/imported-evidence/snapshots \
+    /app/data/imported-evidence/screenshots \
+    /app/data/imported-evidence/images \
+    /app/dist
 
 EXPOSE 9890
 
