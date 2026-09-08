@@ -21,7 +21,7 @@ def test_wameiji_detail_normalizes_to_a_detail_verified_observation() -> None:
 
     observation = observation_from_wameiji(item, captured_at="2026-09-08T00:00:00Z")
 
-    assert observation.canonical_product_key == "catalog:srcl3520"
+    assert observation.canonical_product_key == "catalog:srcl3520|edition:initial_limited"
     assert observation.evidence_level == "detail_verified"
     assert observation.source_listing_id == "m-1"
     assert observation.url == "https://meruki.cn/mall/mercari/detail/m-1"
@@ -41,7 +41,7 @@ def test_xianyu_search_card_normalizes_without_borrowing_wameiji_identity() -> N
 
     assert observation.source == "xianyu"
     assert observation.source_listing_id == "x-1"
-    assert observation.canonical_product_key == "catalog:srcl3520"
+    assert observation.canonical_product_key == "catalog:srcl3520|edition:initial_limited"
     assert observation.evidence_level == "search_card"
     assert observation.url == "https://www.goofish.com/item?id=x-1"
     assert observation.image_url == "https://images.example/xianyu/x-1.jpg"
@@ -59,3 +59,35 @@ def test_title_without_a_confirmed_catalog_or_jan_stays_unpaired() -> None:
     observation = observation_from_xianyu(sample, captured_at="2026-09-08T00:00:00Z")
 
     assert observation.canonical_product_key is None
+
+
+def test_same_catalog_with_different_edition_platform_or_condition_stays_unpaired() -> None:
+    wameiji = observation_from_wameiji(
+        MarketItem(
+            source="wameiji",
+            title="Game SRCL-3520 初回限定版 Nintendo Switch",
+            price=1280,
+            currency="JPY",
+            external_item_id="m-edition",
+            catalog_no="SRCL-3520",
+            url="/mall/mercari/detail/m-edition",
+            image_url="//images.example/wameiji/edition.jpg",
+            availability="available",
+            condition_text="中古",
+            detail_verified=True,
+        ),
+        captured_at="2026-09-08T00:00:00Z",
+    )
+    xianyu = observation_from_xianyu(
+        XianyuPriceSample(
+            catalog_no="SRCL-3520",
+            title="Game SRCL-3520 通常版 PlayStation 4",
+            price_cny=298,
+            url="/item?id=x-edition",
+            image_url="//images.example/xianyu/edition.jpg",
+            raw_text="新品",
+        ),
+        captured_at="2026-09-08T00:00:00Z",
+    )
+
+    assert wameiji.canonical_product_key != xianyu.canonical_product_key

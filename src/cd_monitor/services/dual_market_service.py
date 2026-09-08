@@ -31,13 +31,22 @@ def rebuild_current_comparison(
         raise ValueError("canonical_product_key is required")
     observations = list_current_observations(db_path, canonical_product_key=key)
     wameiji = select_lowest_eligible(observations, source="wameiji")
-    xianyu = select_lowest_eligible(observations, source="xianyu")
     if wameiji is None:
         return ComparisonOutcome(status="waiting_wameiji")
+    xianyu = select_lowest_eligible(
+        (
+            observation
+            for observation in observations
+            if observation.condition_group == wameiji.condition_group
+        ),
+        source="xianyu",
+    )
     if xianyu is None:
         return ComparisonOutcome(status="waiting_xianyu")
     if wameiji.canonical_product_key != key or xianyu.canonical_product_key != key:
         raise ValueError("comparison observations must share the requested product key")
+    if wameiji.condition_group != xianyu.condition_group:
+        raise ValueError("comparison observations must share the same condition group")
     if wameiji.id is None or xianyu.id is None:
         raise ValueError("persisted observations require database ids")
     if wameiji.currency != "JPY" or xianyu.currency != "CNY":

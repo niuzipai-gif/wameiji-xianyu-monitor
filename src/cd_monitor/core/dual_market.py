@@ -143,17 +143,23 @@ def observation_from_wameiji(
     if item.source != "wameiji":
         raise ValueError("Wameiji observations require a wameiji MarketItem")
     url = _require_http_url(item.url, base_url="https://meruki.cn")
+    condition_group = normalize_condition_group(item.condition_text)
     return ListingObservation(
         source="wameiji",
         source_listing_id=_source_listing_id(item.external_item_id, url),
-        canonical_product_key=canonical_product_key(item.catalog_no, item.jan, item.title),
+        canonical_product_key=canonical_product_key(
+            item.catalog_no,
+            item.jan,
+            item.title,
+            condition_group=condition_group,
+        ),
         title=_require_text(item.title, field="title"),
         price=float(item.price),
         currency=_require_text(item.currency, field="currency").upper(),
         url=url,
         image_url=_require_http_url(item.image_url, base_url=url),
         availability=item.availability,
-        condition_group=normalize_condition_group(item.condition_text),
+        condition_group=condition_group,
         completeness=classify_completeness(item.title, item.raw_text),
         evidence_level="detail_verified" if item.detail_verified else "search_card",
         captured_at=_require_text(captured_at, field="captured_at"),
@@ -174,17 +180,23 @@ def observation_from_xianyu(
     """Normalize one Xianyu listing card as its own asking-price observation."""
 
     url = _require_http_url(sample.url, base_url="https://www.goofish.com")
+    condition_group = normalize_condition_group(sample.raw_text)
     return ListingObservation(
         source="xianyu",
         source_listing_id=_source_listing_id(None, url),
-        canonical_product_key=canonical_product_key(sample.catalog_no, None, sample.title),
+        canonical_product_key=canonical_product_key(
+            sample.catalog_no,
+            None,
+            sample.title,
+            condition_group=condition_group,
+        ),
         title=_require_text(sample.title, field="title"),
         price=float(sample.price_cny),
         currency="CNY",
         url=url,
         image_url=_require_http_url(sample.image_url, base_url=url),
         availability="available" if sample.is_valid else "unavailable",
-        condition_group=normalize_condition_group(sample.raw_text),
+        condition_group=condition_group,
         completeness=classify_completeness(sample.title, sample.raw_text),
         evidence_level=evidence_level,
         captured_at=_require_text(captured_at, field="captured_at"),
@@ -194,22 +206,73 @@ def observation_from_xianyu(
 
 
 def canonical_product_key(
-    catalog_no: str | None, jan: str | None, title: str | None
+    catalog_no: str | None,
+    jan: str | None,
+    title: str | None,
+    *,
+    condition_group: str | None = None,
 ) -> str | None:
-    """Return only an identifier-backed key; titles alone stay unpaired."""
+    """Return an identifier-backed, saleable-variant key.
+
+    A title alone remains insufficient.  When a title explicitly names an
+    edition or platform, that fact becomes part of the key; missing metadata
+    therefore creates a waiting state instead of a loose cross-variant match.
+    Non-used condition groups are also distinct saleable variants.
+    """
 
     normalized_jan = normalize_jan(jan)
     if normalized_jan:
-        return f"jan:{normalized_jan}"
-    for text in (catalog_no, title):
+        base = f"jan:{normalized_jan}"
+    else:
+        base = None
+    for text in (catalog_no, title) if base is None else ():
         jan_candidates = extract_jan_candidates(text)
         if jan_candidates:
-            return f"jan:{jan_candidates[0]}"
-    for text in (catalog_no, title):
+            base = f"jan:{jan_candidates[0]}"
+            break
+    for text in (catalog_no, title) if base is None else ():
         catalog_candidates = extract_catalog_candidates(text)
         if catalog_candidates:
-            return f"catalog:{normalize_catalog_no_compact(catalog_candidates[0]).lower()}"
-    return None
+            base = f"catalog:{normalize_catalog_no_compact(catalog_candidates[0]).lower()}"
+            break
+    if base is None:
+        return None
+    return "|".join((base, *_variant_discriminators(title, condition_group)))
+
+
+def _variant_discriminators(title: str | None, condition_group: str | None) -> list[str]:
+    value = (title or "").casefold()
+    discriminators: list[str] = []
+    for marker, label in (
+        ("完全生産限定", "complete_limited"),
+        ("初回限定", "initial_limited"),
+        ("限定版", "limited"),
+        ("限定盤", "limited"),
+        ("通常版", "standard"),
+        ("通常盤", "standard"),
+    ):
+        if marker in value:
+            discriminators.append(f"edition:{label}")
+            break
+    for marker, label in (
+        ("nintendo switch", "switch"),
+        ("switch", "switch"),
+        ("playstation 5", "ps5"),
+        ("ps5", "ps5"),
+        ("playstation 4", "ps4"),
+        ("ps4", "ps4"),
+        ("playstation vita", "psvita"),
+        ("ps vita", "psvita"),
+        ("psp", "psp"),
+        ("windows", "windows"),
+        (" pc", "windows"),
+    ):
+        if marker in value:
+            discriminators.append(f"platform:{label}")
+            break
+    if condition_group and condition_group != "complete_used":
+        discriminators.append(f"condition:{condition_group}")
+    return discriminators
 
 
 def normalize_condition_group(condition_text: str | None) -> str:

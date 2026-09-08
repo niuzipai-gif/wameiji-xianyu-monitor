@@ -79,6 +79,31 @@ def test_build_comparison_returns_waiting_when_only_one_source_has_an_eligible_l
     assert outcome.comparison is None
 
 
+def test_build_comparison_refuses_a_different_condition_even_with_the_same_product_key(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "monitor.db"
+    insert_listing_observation(db_path, make_observation())
+    insert_listing_observation(
+        db_path,
+        make_observation(
+            source="xianyu",
+            source_listing_id="x-sealed",
+            price=298,
+            currency="CNY",
+            url="https://www.goofish.com/item?id=x-sealed",
+            image_url="https://images.example/xianyu/x-sealed.jpg",
+            evidence_level="search_card",
+            condition_group="sealed",
+        ),
+    )
+
+    outcome = rebuild_current_comparison(db_path, "catalog:srcl3520", COST_CONFIG)
+
+    assert outcome.status == "waiting_xianyu"
+    assert outcome.comparison is None
+
+
 def test_lower_xianyu_price_creates_negative_profit_history_not_buy_recommendation(
     tmp_path: Path,
 ) -> None:
