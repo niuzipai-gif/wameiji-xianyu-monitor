@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from uuid import uuid4
 
 from cd_monitor.core.discovery import DiscoveryCandidate, DiscoveryKeyword, DiscoveryPool
+from cd_monitor.core.dual_market import ListingObservation, MarketSource
 from cd_monitor.core.identifiers import normalize_catalog_no_compact
 from cd_monitor.core.models import MarketItem, Opportunity, WatchItem, XianyuPriceSample
 from cd_monitor.core.product_images import is_usable_product_image
 from cd_monitor.storage.migrations import SCHEMA_SQL
-
 
 _TITLE_QUERY_EVIDENCE_VERSION_KEY = "discovery_title_query_evidence_version"
 _TITLE_QUERY_EVIDENCE_VERSION = "strict-title-sample-v3"
@@ -1418,6 +1419,132 @@ def insert_xianyu_samples(db_path: str | Path, samples: Iterable[XianyuPriceSamp
             )
             ids.append(int(cur.lastrowid))
     return ids
+
+
+def insert_listing_observation(
+    db_path: str | Path, observation: ListingObservation
+) -> int:
+    """Persist one immutable capture and return its stable database id.
+
+    Replaying the same evidence manifest is idempotent, while a later capture
+    of the same source listing remains a new historical row because its
+    ``captured_at`` differs.
+    """
+
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO listing_observations (
+              source, source_listing_id, canonical_product_key, title, price, currency,
+              url, image_url, availability, condition_group, completeness, evidence_level,
+              raw_snapshot_path, screenshot_path, source_detail_fee, captured_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source, source_listing_id, captured_at) DO NOTHING
+            """,
+            (
+                observation.source,
+                observation.source_listing_id,
+                observation.canonical_product_key,
+                observation.title,
+                observation.price,
+                observation.currency,
+                observation.url,
+                observation.image_url,
+                observation.availability,
+                observation.condition_group,
+                observation.completeness,
+                observation.evidence_level,
+                observation.raw_snapshot_path,
+                observation.screenshot_path,
+                observation.source_detail_fee,
+                observation.captured_at,
+            ),
+        )
+        row = conn.execute(
+            """
+            SELECT id FROM listing_observations
+            WHERE source = ? AND source_listing_id = ? AND captured_at = ?
+            """,
+            (
+                observation.source,
+                observation.source_listing_id,
+                observation.captured_at,
+            ),
+        ).fetchone()
+    if row is None:  # pragma: no cover - SQLite invariant guard
+        raise RuntimeError("listing observation was not persisted")
+    return int(row[0])
+
+
+def get_listing_observation(
+    db_path: str | Path, observation_id: int
+) -> ListingObservation | None:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM listing_observations WHERE id = ?", (observation_id,)
+        ).fetchone()
+    return _listing_observation_from_row(row) if row is not None else None
+
+
+def list_current_observations(
+    db_path: str | Path,
+    *,
+    canonical_product_key: str | None = None,
+    source: MarketSource | None = None,
+) -> list[ListingObservation]:
+    """Return the newest capture per source-local listing without deleting history."""
+
+    init_db(db_path)
+    conditions: list[str] = []
+    parameters: list[object] = []
+    if canonical_product_key is not None:
+        conditions.append("canonical_product_key = ?")
+        parameters.append(canonical_product_key)
+    if source is not None:
+        conditions.append("source = ?")
+        parameters.append(source)
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    sql = f"""
+        WITH current_per_listing AS (
+          SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY source, source_listing_id
+            ORDER BY captured_at DESC, id DESC
+          ) AS current_rank
+          FROM listing_observations
+          {where_sql}
+        )
+        SELECT * FROM current_per_listing
+        WHERE current_rank = 1
+        ORDER BY captured_at DESC, id DESC
+    """
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(sql, tuple(parameters)).fetchall()
+    return [_listing_observation_from_row(row) for row in rows]
+
+
+def _listing_observation_from_row(row: sqlite3.Row) -> ListingObservation:
+    return ListingObservation(
+        source=row["source"],
+        source_listing_id=row["source_listing_id"],
+        canonical_product_key=row["canonical_product_key"],
+        title=row["title"],
+        price=float(row["price"]),
+        currency=row["currency"],
+        url=row["url"],
+        image_url=row["image_url"],
+        availability=row["availability"],
+        condition_group=row["condition_group"],
+        completeness=row["completeness"],
+        evidence_level=row["evidence_level"],
+        captured_at=row["captured_at"],
+        raw_snapshot_path=row["raw_snapshot_path"],
+        screenshot_path=row["screenshot_path"],
+        source_detail_fee=row["source_detail_fee"],
+    )
 
 
 def insert_opportunity(db_path: str | Path, opportunity: Opportunity, wameiji_item_id: int | None = None) -> int:
