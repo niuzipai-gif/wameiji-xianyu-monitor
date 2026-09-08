@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib.util
 import io
 import json
 from datetime import datetime
@@ -179,3 +180,39 @@ def test_all_failed_cards_preserve_the_previous_snapshot(tmp_path: Path) -> None
 
     assert snapshot_path.read_text(encoding="utf-8") == '{"previous": true}'
     assert manifest_path.read_text(encoding="utf-8") == '{"previous_manifest": true}'
+
+
+def test_export_cli_accepts_a_local_board_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    board_file = tmp_path / "board.json"
+    board_file.write_text(
+        json.dumps(verified_board(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    script_path = Path("scripts/export_dual_market_pages_snapshot.py")
+    spec = importlib.util.spec_from_file_location("pages_snapshot_cli", script_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def fetch(_url: str) -> DownloadedImage:
+        return DownloadedImage(png_bytes("purple"), "image/png")
+
+    exit_code = module.main(
+        [
+            "--board-file",
+            str(board_file),
+            "--web-dir",
+            str(tmp_path / "web"),
+            "--generated-at",
+            "2026-09-09T00:30:00+08:00",
+        ],
+        fetch_image=fetch,
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["published_comparisons"] == 1
+    assert output["dropped_comparison_ids"] == []
