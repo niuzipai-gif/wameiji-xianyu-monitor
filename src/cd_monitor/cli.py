@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -62,6 +63,11 @@ from cd_monitor.services.task_generate import TaskGenerationService
 DEFAULT_DB = Path("data/cd_monitor.db")
 DEFAULT_WAMEIJI = Path("data/mock/wameiji_items.sample.json")
 DEFAULT_XIANYU = Path("data/mock/xianyu_samples.sample.json")
+
+
+def _dual_market_collection_paused() -> bool:
+    value = os.getenv("DUAL_MARKET_COLLECTION_PAUSED", "1").strip().casefold()
+    return value not in {"0", "false", "no", "off"}
 
 
 
@@ -321,6 +327,23 @@ def main(argv: list[str] | None = None) -> int:
     tg.add_argument("--watch", action="store_true", help="Wait for the job to complete and exit non-zero on failure.")
     tg.add_argument("--poll-interval", type=float, default=0.6, help="Polling interval for --watch (seconds).")
     args = parser.parse_args(argv)
+    if (
+        args.command in {"capture-live-html", "scan-live-html", "live-watchlist"}
+        and _dual_market_collection_paused()
+    ):
+        print(
+            json.dumps(
+                {
+                    "error": "collector_paused",
+                    "detail": (
+                        "Live dual-market collection is paused. "
+                        "Set DUAL_MARKET_COLLECTION_PAUSED=0 to explicitly enable it."
+                    ),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 2
     config = load_config(args.config)
     db_path = getattr(args, "command_db", None) or args.db or config.app.db_path or str(DEFAULT_DB)
     # If the configured DB path is unusable (corrupt journal, locked file, read-only),

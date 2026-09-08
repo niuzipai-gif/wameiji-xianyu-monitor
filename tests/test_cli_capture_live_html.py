@@ -4,6 +4,7 @@ from cd_monitor import cli
 
 
 def test_cli_capture_live_html_prints_capture_summary(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("DUAL_MARKET_COLLECTION_PAUSED", "0")
     output = tmp_path / "xianyu.html"
 
     async def fake_capture(source, catalog_no, output_path, **kwargs):
