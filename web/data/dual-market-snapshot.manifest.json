@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "20260909T010843+0800",
+  "generated_at": "2026-09-09T01:08:43.236583+08:00",
+  "published_comparisons": 3,
+  "dropped_comparison_ids": [],
+  "assets": [
+    {
+      "path": "assets/dual-market/20260909T010843+0800/6-xianyu.webp",
+      "source": "xianyu",
+      "comparison_id": 6,
+      "sha256": "ea60f766480d3d720e9cfbcc87a8224dadbc5eb5a939dab3b20a5d23a819df13",
+      "width": 110,
+      "height": 110
+    },
+    {
+      "path": "assets/dual-market/20260909T010843+0800/6-wameiji.jpg",
+      "source": "wameiji",
+      "comparison_id": 6,
+      "sha256": "0225b1acc82b41d3db8f02a50f03b265e9c72ce3b7b5153a57e997cd5124ab04",
+      "width": 703,
+      "height": 704
+    },
+    {
+      "path": "assets/dual-market/20260909T010843+0800/5-xianyu.webp",
+      "source": "xianyu",
+      "comparison_id": 5,
+      "sha256": "ea60f766480d3d720e9cfbcc87a8224dadbc5eb5a939dab3b20a5d23a819df13",
+      "width": 110,
+      "height": 110
+    },
+    {
+      "path": "assets/dual-market/20260909T010843+0800/5-wameiji.jpg",
+      "source": "wameiji",
+      "comparison_id": 5,
+      "sha256": "ae6830df60f4bc53fb9e90bbca149883cceb4c212b19782cc45cdca9447cc0d6",
+      "width": 1200,
+      "height": 1200
+    },
+    {
+      "path": "assets/dual-market/20260909T010843+0800/4-xianyu.webp",
+      "source": "xianyu",
+      "comparison_id": 4,
+      "sha256": "ea60f766480d3d720e9cfbcc87a8224dadbc5eb5a939dab3b20a5d23a819df13",
+      "width": 110,
+      "height": 110
+    },
+    {
+      "path": "assets/dual-market/20260909T010843+0800/4-wameiji.jpg",
+      "source": "wameiji",
+      "comparison_id": 4,
+      "sha256": "c33556a75b9bf2e14184bfcb5c53009089ecf5373a14f061477280612ce75469",
+      "width": 1200,
+      "height": 1200
+    }
+  ]
+}

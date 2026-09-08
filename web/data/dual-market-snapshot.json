@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-09T01:08:43.236583+08:00",
+  "mode": "verified_static_snapshot",
+  "summary": {
+    "ready_count": 0,
+    "negative_profit_count": 0,
+    "cost_pending_count": 3,
+    "waiting_wameiji_count": 0,
+    "waiting_xianyu_count": 0
+  },
+  "ready": [],
+  "negative_profit": [],
+  "cost_pending": [
+    {
+      "comparison_id": 6,
+      "canonical_product_key": "catalog:vljm38101|platform:psvita",
+      "xianyu": {
+        "listing_id": 12,
+        "source": "xianyu",
+        "canonical_product_key": "catalog:vljm38101|platform:psvita",
+        "title": "PS Vita 领结×恶意 -无限版- VLJ 日本代购 PS Vita 领结×恶意 -无限版- VLJM-38101 ———————————&mda...",
+        "price": 81.0,
+        "currency": "CNY",
+        "url": "https://www.goofish.com/item?id=1078916812652&categoryId=126856345",
+        "availability": "available",
+        "condition_group": "complete_used",
+        "completeness": "complete",
+        "evidence_level": "search_card",
+        "captured_at": "2026-09-08T23:31:06.741894+08:00",
+        "image_url": "assets/dual-market/20260909T010843+0800/6-xianyu.webp"
+      },
+      "wameiji": {
+        "listing_id": 11,
+        "source": "wameiji",
+        "canonical_product_key": "catalog:vljm38101|platform:psvita",
+        "title": "PSVITA Collar X Malice -Unlimited- VLJM-38101",
+        "price": 1500.0,
+        "currency": "JPY",
+        "url": "https://meruki.cn/mall/paypay/detail/z618880764",
+        "availability": "available",
+        "condition_group": "complete_used",
+        "completeness": "complete",
+        "evidence_level": "detail_verified",
+        "captured_at": "2026-09-08T23:31:00.994164+08:00",
+        "image_url": "assets/dual-market/20260909T010843+0800/6-wameiji.jpg"
+      },
+      "calculation": {
+        "status": "cost_pending",
+        "sale_price_cny": 81.0,
+        "landed_cost_cny": null,
+        "expected_profit_cny": null,
+        "net_margin": null,
+        "created_at": "2026-09-08 15:31:28"
+      }
+    },
+    {
+      "comparison_id": 5,
+      "canonical_product_key": "catalog:tkca72506|condition:minor_damage",
+      "xianyu": {
+        "listing_id": 10,
+        "source": "xianyu",
+        "canonical_product_key": "catalog:tkca72506|condition:minor_damage",
+        "title": "《明日之丈》歌曲集CD（附外盒）TKCA-72 日本代购 《明日之丈》歌曲集CD（附外盒）TKCA-72506 主题歌·插曲全收录  【商品信息】 外壳有一些划痕。 手册存在因年代久远而产生的污渍。图片仅为部分展示。 光盘背面几乎完好无损，不会影响播放，请放心。 对细节极为敏感、...",
+        "price": 49.0,
+        "currency": "CNY",
+        "url": "https://www.goofish.com/item?id=1082397412528&categoryId=126862148",
+        "availability": "available",
+        "condition_group": "minor_damage",
+        "completeness": "complete",
+        "evidence_level": "search_card",
+        "captured_at": "2026-09-08T23:30:01.598907+08:00",
+        "image_url": "assets/dual-market/20260909T010843+0800/5-xianyu.webp"
+      },
+      "wameiji": {
+        "listing_id": 9,
+        "source": "wameiji",
+        "canonical_product_key": "catalog:tkca72506|condition:minor_damage",
+        "title": "あしたのジョー ソングファイル CD 帯付 TKCA-72506 主題歌 挿入歌 コンプリート",
+        "price": 890.0,
+        "currency": "JPY",
+        "url": "https://meruki.cn/mall/paypay/detail/z676384674",
+        "availability": "available",
+        "condition_group": "minor_damage",
+        "completeness": "complete",
+        "evidence_level": "detail_verified",
+        "captured_at": "2026-09-08T23:29:55.991464+08:00",
+        "image_url": "assets/dual-market/20260909T010843+0800/5-wameiji.jpg"
+      },
+      "calculation": {
+        "status": "cost_pending",
+        "sale_price_cny": 49.0,
+        "landed_cost_cny": null,
+        "expected_profit_cny": null,
+        "net_margin": null,
+        "created_at": "2026-09-08 15:30:23"
+      }
+    },
+    {
+      "comparison_id": 4,
+      "canonical_product_key": "catalog:nzs955|edition:initial_limited|condition:sealed",
+      "xianyu": {
+        "listing_id": 8,
+        "source": "xianyu",
+        "canonical_product_key": "catalog:nzs955|edition:initial_limited|condition:sealed",
+        "title": "M!LK Kiss Plan 初回限定盘B C 日本代购 M!LK Kiss Plan 初回限定盘B CD+蓝光光盘 NZS-955【商品信息】M!LK单曲《Kiss Plan》初回限定盘B（CD＋Blu-ray）附带塑封，未拆封，保存状态良好。【艺人】M!LK【标题】Kiss Plan【版本】初回限定盘B（CD＋蓝光光盘）【型号】NZS-955【商品状态】全新（未拆封）【颜色】红色系（封面设计）感谢您的关注与支持！由于海关备案规则调整，二手衣物类商品（适用范围：包含上衣、裤装、裙装、外套、童装、鞋类）将默认 EMS 发货。如您购买的商品为带吊牌的未开封商品、或带原始出厂包装，可联系客服单独确认物流方式。开学焕新季限时活动！9.1 10：00～9.10 23：59 限时享受88折 封顶3000元 下单后系统自动改价，请等待改价后再支付【下单须知】1、发货地：日本2、商品价格不含国际运费及税费，预估如下：运费：详询客服      税费：免税        到手价预估：详询客服注：运费税费仅供参考，以实际为准3、代购商品性质特殊，拍下后不退不换",
+        "price": 121.0,
+        "currency": "CNY",
+        "url": "https://www.goofish.com/item?id=1079232718302&categoryId=126862148",
+        "availability": "available",
+        "condition_group": "sealed",
+        "completeness": "complete",
+        "evidence_level": "search_card",
+        "captured_at": "2026-09-08T23:28:24.249867+08:00",
+        "image_url": "assets/dual-market/20260909T010843+0800/4-xianyu.webp"
+      },
+      "wameiji": {
+        "listing_id": 7,
+        "source": "wameiji",
+        "canonical_product_key": "catalog:nzs955|edition:initial_limited|condition:sealed",
+        "title": "M!LK Kiss Plan 初回限定盤B CD+Blu-ray NZS-955",
+        "price": 2250.0,
+        "currency": "JPY",
+        "url": "https://meruki.cn/mall/paypay/detail/z673929508",
+        "availability": "available",
+        "condition_group": "sealed",
+        "completeness": "complete",
+        "evidence_level": "detail_verified",
+        "captured_at": "2026-09-08T23:28:19.065621+08:00",
+        "image_url": "assets/dual-market/20260909T010843+0800/4-wameiji.jpg"
+      },
+      "calculation": {
+        "status": "cost_pending",
+        "sale_price_cny": 121.0,
+        "landed_cost_cny": null,
+        "expected_profit_cny": null,
+        "net_margin": null,
+        "created_at": "2026-09-08 15:28:48"
+      }
+    }
+  ],
+  "waiting_wameiji": [],
+  "waiting_xianyu": [],
+  "collector": {
+    "state": "paused"
+  }
+}

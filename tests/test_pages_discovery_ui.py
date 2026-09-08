@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
+
+from PIL import Image
 
 
 def test_pages_build_includes_the_automatic_selection_board(tmp_path: Path) -> None:
@@ -48,3 +51,30 @@ def test_pages_build_includes_the_automatic_selection_board(tmp_path: Path) -> N
     assert "每轮闲鱼商品上限" in script
     assert 'url.startsWith("//") ? "https:" + url : url' in script
     assert "sigmerchantimg" in script
+
+
+def test_pages_build_copies_verified_snapshot_and_images(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    destination = tmp_path / "site"
+
+    subprocess.run(
+        [sys.executable, "scripts/build_pages.py", "--dest", str(destination)],
+        cwd=root,
+        check=True,
+    )
+
+    payload = json.loads(
+        (destination / "data" / "dual-market-snapshot.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    cards = payload["ready"] + payload["negative_profit"] + payload["cost_pending"]
+    assert cards
+    for card in cards:
+        for source in ("xianyu", "wameiji"):
+            relative_image = card[source]["image_url"]
+            assert relative_image.startswith("assets/dual-market/")
+            image_path = destination / relative_image
+            assert image_path.is_file()
+            with Image.open(image_path) as image:
+                image.verify()
