@@ -55,7 +55,7 @@ def test_select_lowest_eligible_ignores_an_incomplete_cheaper_listing() -> None:
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `pytest tests/test_dual_market_core.py::test_select_lowest_eligible_ignores_an_incomplete_cheaper_listing -q`  
+Run: `pytest tests/test_dual_market_core.py::test_select_lowest_eligible_ignores_an_incomplete_cheaper_listing -q`
 Expected: FAIL because `cd_monitor.core.dual_market` does not exist.
 
 - [ ] **Step 3: Add the smallest source-neutral types and selector**
@@ -101,7 +101,7 @@ def select_lowest_eligible(
 
 - [ ] **Step 4: Run the focused test to verify it passes**
 
-Run: `pytest tests/test_dual_market_core.py::test_select_lowest_eligible_ignores_an_incomplete_cheaper_listing -q`  
+Run: `pytest tests/test_dual_market_core.py::test_select_lowest_eligible_ignores_an_incomplete_cheaper_listing -q`
 Expected: PASS.
 
 - [ ] **Step 5: Add separate failing tests for sold, missing-image, and Wameiji-search-card rejection**
@@ -118,7 +118,7 @@ def test_wameiji_ineligible_records_never_win_lowest_price(field: str, value: st
 
 - [ ] **Step 6: Implement only the predicate changes required by the new tests, then run the file**
 
-Run: `pytest tests/test_dual_market_core.py -q`  
+Run: `pytest tests/test_dual_market_core.py -q`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -156,7 +156,7 @@ def test_wameiji_detail_normalizes_to_a_detail_verified_observation() -> None:
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `pytest tests/test_dual_market_normalization.py::test_wameiji_detail_normalizes_to_a_detail_verified_observation -q`  
+Run: `pytest tests/test_dual_market_normalization.py::test_wameiji_detail_normalizes_to_a_detail_verified_observation -q`
 Expected: FAIL because `observation_from_wameiji` is absent.
 
 - [ ] **Step 3: Implement source-specific normalizers in `dual_market.py`**
@@ -196,7 +196,7 @@ def test_xianyu_title_only_sample_stays_unpaired_without_structured_identity() -
     assert observation.canonical_product_key is None
 ```
 
-Run: `pytest tests/test_dual_market_normalization.py -q`  
+Run: `pytest tests/test_dual_market_normalization.py -q`
 Expected before implementation: FAIL; after implementation: PASS.
 
 - [ ] **Step 5: Add parser-output fixtures for actual card contracts**
@@ -205,7 +205,7 @@ Use existing `data/mock/` conventions. Add one Wameiji detail fixture with a pri
 
 - [ ] **Step 6: Run focused parser and normalization suites**
 
-Run: `pytest tests/test_wameiji_browser_runner.py tests/test_discovery_browser_queries.py tests/test_dual_market_normalization.py -q`  
+Run: `pytest tests/test_wameiji_browser_runner.py tests/test_discovery_browser_queries.py tests/test_dual_market_normalization.py -q`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -239,7 +239,7 @@ def test_observation_round_trip_keeps_source_image_and_capture_evidence(tmp_path
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest tests/test_dual_market_storage.py::test_observation_round_trip_keeps_source_image_and_capture_evidence -q`  
+Run: `pytest tests/test_dual_market_storage.py::test_observation_round_trip_keeps_source_image_and_capture_evidence -q`
 Expected: FAIL because the table and repository functions do not exist.
 
 - [ ] **Step 3: Add idempotent tables and repository functions**
@@ -281,7 +281,7 @@ def test_initialize_database_preserves_legacy_discovery_rows_when_adding_observa
     ...
 ```
 
-Run: `pytest tests/test_dual_market_storage.py -q`  
+Run: `pytest tests/test_dual_market_storage.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -315,7 +315,7 @@ def test_build_comparison_references_each_side_lowest_eligible_observation(tmp_p
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest tests/test_dual_market_service.py::test_build_comparison_references_each_side_lowest_eligible_observation -q`  
+Run: `pytest tests/test_dual_market_service.py::test_build_comparison_references_each_side_lowest_eligible_observation -q`
 Expected: FAIL because `rebuild_current_comparison` is absent.
 
 - [ ] **Step 3: Add comparison snapshot storage and service**
@@ -348,7 +348,7 @@ def test_lower_xianyu_price_creates_negative_profit_history_not_buy_recommendati
 def test_comparison_never_uses_a_sample_from_another_product_key() -> None: ...
 ```
 
-Run: `pytest tests/test_dual_market_service.py tests/test_dual_market_storage.py -q`  
+Run: `pytest tests/test_dual_market_service.py tests/test_dual_market_storage.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -383,7 +383,7 @@ async def test_search_capture_returns_snapshot_paths_before_normalizing_cards(tm
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest tests/test_dual_market_capture.py::test_search_capture_returns_snapshot_paths_before_normalizing_cards -q`  
+Run: `pytest tests/test_dual_market_capture.py::test_search_capture_returns_snapshot_paths_before_normalizing_cards -q`
 Expected: FAIL because `capture_observations` does not exist.
 
 - [ ] **Step 3: Implement `capture_observations` as a thin wrapper**
@@ -416,7 +416,7 @@ async def test_paused_capture_does_not_construct_or_call_a_browser_fetcher() -> 
     assert called is False
 ```
 
-Run: `pytest tests/test_dual_market_capture.py -q`  
+Run: `pytest tests/test_dual_market_capture.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Route actual capture through an explicit `capture_enabled` flag defaulting to false**
@@ -456,7 +456,7 @@ def test_xianyu_detail_parser_upgrades_an_existing_search_card_without_changing_
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest tests/test_xianyu_detail_parser.py::test_xianyu_detail_parser_upgrades_an_existing_search_card_without_changing_its_listing_id -q`  
+Run: `pytest tests/test_xianyu_detail_parser.py::test_xianyu_detail_parser_upgrades_an_existing_search_card_without_changing_its_listing_id -q`
 Expected: FAIL because `parse_detail_html` does not exist.
 
 - [ ] **Step 3: Implement only safe detail upgrading**
@@ -474,7 +474,7 @@ async def test_wameiji_detail_capture_records_same_url_and_detail_evidence(tmp_p
 
 - [ ] **Step 5: Verify all detail capture tests**
 
-Run: `pytest tests/test_wameiji_browser_runner.py tests/test_xianyu_detail_parser.py tests/test_dual_market_capture.py -q`  
+Run: `pytest tests/test_wameiji_browser_runner.py tests/test_xianyu_detail_parser.py tests/test_dual_market_capture.py -q`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -510,7 +510,7 @@ async def test_worker_collects_each_source_once_then_stops_before_detail_when_pa
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest tests/test_dual_market_worker.py::test_worker_collects_each_source_once_then_stops_before_detail_when_pair_is_missing -q`  
+Run: `pytest tests/test_dual_market_worker.py::test_worker_collects_each_source_once_then_stops_before_detail_when_pair_is_missing -q`
 Expected: FAIL because `DualMarketWorker` does not exist.
 
 - [ ] **Step 3: Implement a single-key, bounded coordinator**
@@ -540,7 +540,7 @@ async def test_worker_returns_negative_profit_comparison_without_buy_recommendat
 
 - [ ] **Step 5: Run worker and service suites**
 
-Run: `pytest tests/test_dual_market_worker.py tests/test_dual_market_service.py tests/test_dual_market_capture.py -q`  
+Run: `pytest tests/test_dual_market_worker.py tests/test_dual_market_service.py tests/test_dual_market_capture.py -q`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -570,7 +570,7 @@ def test_dual_market_board_returns_waiting_and_ready_streams(client, populated_d
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest tests/test_dual_market_api.py::test_dual_market_board_returns_waiting_and_ready_streams -q`  
+Run: `pytest tests/test_dual_market_api.py::test_dual_market_board_returns_waiting_and_ready_streams -q`
 Expected: FAIL with a 404 or missing route.
 
 - [ ] **Step 3: Implement a read-only board endpoint**
@@ -579,7 +579,7 @@ Return only records from `listing_observations` and `price_comparisons`. Each re
 
 - [ ] **Step 4: Add API tests for missing image, no counterpart, negative-profit, and paused collector state**
 
-Run: `pytest tests/test_dual_market_api.py -q`  
+Run: `pytest tests/test_dual_market_api.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -610,7 +610,7 @@ def test_dual_market_ui_renders_source_specific_images_and_waiting_state() -> No
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest tests/test_pages_dual_market_ui.py::test_dual_market_ui_renders_source_specific_images_and_waiting_state -q`  
+Run: `pytest tests/test_pages_dual_market_ui.py::test_dual_market_ui_renders_source_specific_images_and_waiting_state -q`
 Expected: FAIL because the dual-market renderer does not exist.
 
 - [ ] **Step 3: Implement exactly three render paths**
@@ -631,7 +631,7 @@ The ready card must show the Xianyu left image/link/price and Wameiji right imag
 
 - [ ] **Step 4: Add a DOM-free rendering test fixture for all three states**
 
-Run: `pytest tests/test_pages_dual_market_ui.py -q`  
+Run: `pytest tests/test_pages_dual_market_ui.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -657,7 +657,7 @@ def test_dual_market_capture_is_disabled_by_default(project_config: ProjectConfi
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pytest tests/test_dual_market_worker.py::test_dual_market_capture_is_disabled_by_default -q`  
+Run: `pytest tests/test_dual_market_worker.py::test_dual_market_capture_is_disabled_by_default -q`
 Expected: FAIL until the default setting and config parsing exist.
 
 - [ ] **Step 3: Implement default-disabled configuration and document the required explicit enablement**
