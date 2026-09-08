@@ -27,11 +27,13 @@
   }
 
   function cny(value) {
+    if (value === null || value === undefined || value === "") return "--";
     const number = Number(value);
     return Number.isFinite(number) ? "¥" + number.toLocaleString("zh-CN", { maximumFractionDigits: 0 }) : "--";
   }
 
   function jpy(value) {
+    if (value === null || value === undefined || value === "") return "--";
     const number = Number(value);
     return Number.isFinite(number) ? "¥" + number.toLocaleString("ja-JP", { maximumFractionDigits: 0 }) : "--";
   }

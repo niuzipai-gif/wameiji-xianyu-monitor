@@ -27,6 +27,14 @@ def test_homepage_names_cd_and_galgame_physical_media() -> None:
     assert "CD 与 GalGame 实体" in homepage
 
 
+def test_homepage_distinguishes_xianyu_search_evidence_from_wameiji_detail() -> None:
+    homepage = Path("web/index.html").read_text(encoding="utf-8")
+
+    assert "闲鱼以淡黄色显示搜索挂牌价样本" in homepage
+    assert "挖煤姬以淡粉白显示详情已核验进货价" in homepage
+    assert "只有详情已核验的来源才会进入机会流" not in homepage
+
+
 def test_dual_market_ui_fails_closed_when_its_board_is_unavailable() -> None:
     javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
 
@@ -41,3 +49,12 @@ def test_dual_market_ui_does_not_submit_scan_or_resume_while_collection_is_pause
 
     assert "采集已暂停，未提交扫描命令" in javascript
     assert "采集已暂停，未提交恢复命令" in javascript
+
+
+def test_dual_market_ui_does_not_coerce_missing_landed_cost_to_zero() -> None:
+    javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    start = javascript.index("function cny")
+    end = javascript.index("function jpy")
+    currency_formatter = javascript[start:end]
+
+    assert 'value === null || value === undefined || value === ""' in currency_formatter

@@ -481,6 +481,8 @@ _HARD_SECURITY_MARKERS = (
     "fail_sys_user_validate",
     "____tmd____",
     "x5step",
+    "闲鱼app扫码查看",
+    "跨境商品请前往闲鱼app端查看",
 )
 _TITLE_SECURITY_MARKERS = (
     "安全验证",

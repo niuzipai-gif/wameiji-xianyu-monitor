@@ -172,6 +172,46 @@ def test_parse_detail_html_uses_scoped_product_image_not_search_card_logo() -> N
     assert status.items[0].image_url == "https://images.example.invalid/detail/album-3520.webp"
 
 
+def test_parse_detail_html_prefers_matching_json_ld_product_image_over_placeholder() -> None:
+    """A real detail image in JSON-LD must beat the Wameiji placeholder."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card title",
+        price=1500,
+        currency="JPY",
+        external_item_id="z618880764",
+        url="/mall/paypay/detail/z618880764",
+        availability="unknown_but_visible",
+    )
+    detail_html = """
+    <main class="goods-detail">
+      <img class="goods-image" src="https://imgoss.mokaki.cn/ossdoorzo/web/img_bg_wmj.png">
+      <h1 class="goods-name">PSVITA Collar X Malice -Unlimited- VLJM-38101</h1>
+      <p class="price-com">1,500 日元</p>
+      <p>二手 在库</p>
+    </main>
+    <script type="application/ld+json">
+      [
+        {
+          "@type": "Product",
+          "sku": "unrelated-listing",
+          "image": "https://images.example.invalid/detail/unrelated.webp"
+        },
+        {
+          "@type": "Product",
+          "sku": "z618880764",
+          "image": ["https://images.example.invalid/detail/vljm-38101.jpg"]
+        }
+      ]
+    </script>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert status.items[0].image_url == "https://images.example.invalid/detail/vljm-38101.jpg"
+
+
 def test_parse_detail_html_does_not_promote_page_metadata_as_a_product_title() -> None:
     """A generic site title plus a number is not sufficient purchase evidence."""
     search_item = MarketItem(

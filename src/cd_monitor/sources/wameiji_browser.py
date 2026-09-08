@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, quote_plus, urlparse
@@ -101,7 +102,11 @@ class WameijiBrowserAdapter(BrowserHarnessAdapter):
             )
         parser = _WameijiDetailParser()
         parser.feed(html)
-        item = _detail_item_from_parser(parser, search_item)
+        item = _detail_item_from_parser(
+            parser,
+            search_item,
+            json_ld_image_url=_matching_json_ld_product_image(html, search_item),
+        )
         if item is None:
             return AdapterStatus(
                 status="human_required",
@@ -443,7 +448,10 @@ class _WameijiDetailParser(HTMLParser):
 
 
 def _detail_item_from_parser(
-    parser: _WameijiDetailParser, search_item: MarketItem
+    parser: _WameijiDetailParser,
+    search_item: MarketItem,
+    *,
+    json_ld_image_url: str | None = None,
 ) -> MarketItem | None:
     title = " ".join(parser._title_parts).strip()
     price = parser.price()
@@ -467,7 +475,7 @@ def _detail_item_from_parser(
         # record: it may be stale and does not include page-specific fees.
         price_cny_display=None,
         url=search_item.url,
-        image_url=parser.product_image_url(search_item.url),
+        image_url=json_ld_image_url or parser.product_image_url(search_item.url),
         availability=parser.availability(),
         condition_text=_detect_condition_from_text(raw_text),
         fees_hint=_detect_fees_hint(raw_text),
@@ -478,6 +486,84 @@ def _detail_item_from_parser(
         ),
         proxy_fee_jpy=_extract_labeled_jpy_fee(raw_text, "代购手续费"),
     )
+
+
+_JSON_LD_SCRIPT_PATTERN = re.compile(
+    r"<script\b[^>]*\btype\s*=\s*(?:[\"'])?application/ld\+json(?:[\"'])?[^>]*>"
+    r"(?P<payload>.*?)</script\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _matching_json_ld_product_image(html: str, search_item: MarketItem) -> str | None:
+    """Return a usable JSON-LD image only for this exact detail listing."""
+
+    external_item_id = str(search_item.external_item_id or "").strip()
+    if not external_item_id:
+        return None
+    base_url = str(search_item.url or "").strip()
+    if base_url.startswith("/"):
+        base_url = "https://meruki.cn" + base_url
+    for match in _JSON_LD_SCRIPT_PATTERN.finditer(html):
+        try:
+            payload = json.loads(match.group("payload"))
+        except json.JSONDecodeError:
+            continue
+        for product in _json_ld_product_nodes(payload):
+            if not _json_ld_product_matches_item(product, external_item_id):
+                continue
+            for image in _json_ld_image_values(product.get("image")):
+                normalized = normalize_product_image_url(image, base_url=base_url or None)
+                if normalized and is_usable_product_image(normalized):
+                    return normalized
+    return None
+
+
+def _json_ld_product_nodes(payload: object) -> list[dict[str, object]]:
+    if isinstance(payload, list):
+        nodes: list[dict[str, object]] = []
+        for entry in payload:
+            nodes.extend(_json_ld_product_nodes(entry))
+        return nodes
+    if not isinstance(payload, dict):
+        return []
+    nodes = [payload] if _json_ld_has_product_type(payload.get("@type")) else []
+    graph = payload.get("@graph")
+    if isinstance(graph, list):
+        for entry in graph:
+            nodes.extend(_json_ld_product_nodes(entry))
+    return nodes
+
+
+def _json_ld_has_product_type(value: object) -> bool:
+    values = value if isinstance(value, list) else [value]
+    return any(str(entry).strip().lower() == "product" for entry in values)
+
+
+def _json_ld_product_matches_item(product: dict[str, object], external_item_id: str) -> bool:
+    if str(product.get("sku") or "").strip() == external_item_id:
+        return True
+    for key in ("@id", "url", "mainEntityOfPage"):
+        value = product.get(key)
+        if isinstance(value, dict):
+            value = value.get("@id") or value.get("url")
+        candidate = str(value or "").strip().rstrip("/")
+        if candidate.endswith("/" + external_item_id):
+            return True
+    return False
+
+
+def _json_ld_image_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [str(value.get(key) or "") for key in ("url", "contentUrl")]
+    if isinstance(value, list):
+        values: list[str] = []
+        for entry in value:
+            values.extend(_json_ld_image_values(entry))
+        return values
+    return []
 
 
 def _first_detail_catalog_no(text: str) -> str | None:

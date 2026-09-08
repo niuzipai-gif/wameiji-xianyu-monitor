@@ -164,6 +164,19 @@ _RISK_CONDITION_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 
+_NEGATED_RISK_MARKERS = (
+    "目立った傷や汚れなし",
+    "目立つ傷や汚れなし",
+    "傷や汚れなし",
+    "傷・汚れなし",
+    "傷なし",
+    "キズなし",
+    "汚れなし",
+    "没有明显的损伤或污渍",
+    "没有明显损伤或污渍",
+    "无明显损伤或污渍",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ListingObservation:
@@ -405,6 +418,7 @@ def _variant_discriminators(title: str | None, condition_group: str | None) -> l
         ("playstation 4", "ps4"),
         ("ps4", "ps4"),
         ("playstation vita", "psvita"),
+        ("psvita", "psvita"),
         ("ps vita", "psvita"),
         ("psp", "psp"),
         ("windows", "windows"),
@@ -422,8 +436,11 @@ def normalize_condition_group(condition_text: str | None) -> str:
     """Use conservative condition buckets until detail evidence says otherwise."""
 
     value = (condition_text or "").casefold()
+    risk_value = value
+    for marker in _NEGATED_RISK_MARKERS:
+        risk_value = risk_value.replace(marker, "")
     for group, markers in _RISK_CONDITION_GROUPS:
-        if any(marker in value for marker in markers):
+        if any(marker in risk_value for marker in markers):
             return group
     if any(marker in value for marker in ("新品", "new", "brand new")):
         return "new"

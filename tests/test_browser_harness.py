@@ -67,6 +67,21 @@ def test_xianyu_security_title_requires_human() -> None:
     assert status.error_type == "security_check"
 
 
+def test_xianyu_app_qr_gate_requires_human() -> None:
+    """The desktop App-only modal is not a usable listing detail page."""
+    status = XianyuBrowserAdapter(enabled=True).parse_search_html(
+        """
+        <title>闲鱼 - 闲不住？上闲鱼！</title>
+        <h3>闲鱼APP扫码查看</h3>
+        <p>跨境商品请前往闲鱼APP端查看</p>
+        """,
+        WatchItem("VLJM-38101"),
+    )
+
+    assert status.status == "human_required"
+    assert status.error_type == "security_check"
+
+
 def test_xianyu_current_goofish_feed_cards_parse_title_price_and_image() -> None:
     html = """
     <main class="feeds-list-container--hash">

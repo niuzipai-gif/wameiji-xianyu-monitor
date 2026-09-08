@@ -4,7 +4,11 @@ from dataclasses import replace
 
 import pytest
 
-from cd_monitor.core.dual_market import ListingObservation, select_lowest_eligible
+from cd_monitor.core.dual_market import (
+    ListingObservation,
+    canonical_product_key,
+    select_lowest_eligible,
+)
 
 
 def make_wameiji_observation(**changes: object) -> ListingObservation:
@@ -78,3 +82,18 @@ def test_xianyu_search_card_can_be_the_current_lowest_asking_price() -> None:
     selected = select_lowest_eligible([search_card], source="xianyu")
 
     assert selected is search_card
+
+
+def test_canonical_product_key_normalizes_psvita_spelling_variants() -> None:
+    wameiji_key = canonical_product_key(
+        "VLJM-38101",
+        None,
+        "PSVITA Collar X Malice -Unlimited- VLJM-38101",
+    )
+    xianyu_key = canonical_product_key(
+        "VLJM-38101",
+        None,
+        "PS Vita 领结×恶意 -无限版- VLJM-38101",
+    )
+
+    assert wameiji_key == xianyu_key == "catalog:vljm38101|platform:psvita"

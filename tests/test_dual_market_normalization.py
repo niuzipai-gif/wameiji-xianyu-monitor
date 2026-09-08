@@ -122,6 +122,10 @@ def test_normalize_condition_group_keeps_japanese_and_chinese_risk_conditions_di
     assert normalize_condition_group(condition_text) == expected_group
 
 
+def test_normalize_condition_group_does_not_treat_japanese_no_damage_as_minor_damage() -> None:
+    assert normalize_condition_group("【商品の状態】目立った傷や汚れなし") == "complete_used"
+
+
 def test_box_damage_does_not_make_an_otherwise_complete_listing_incomplete() -> None:
     assert classify_completeness("Album SRCL-3520", "外箱に潰れあり") == "complete"
     assert classify_completeness("Album SRCL-3520 外箱のみ", None) == "incomplete"
