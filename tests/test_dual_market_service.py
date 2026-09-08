@@ -3,7 +3,15 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from cd_monitor.core.dual_market import DualMarketCostConfig, ListingObservation
+import pytest
+
+from cd_monitor.core.dual_market import (
+    DualMarketCostConfig,
+    ListingObservation,
+    observation_from_wameiji,
+    observation_from_xianyu,
+)
+from cd_monitor.core.models import MarketItem, XianyuPriceSample
 from cd_monitor.services.dual_market_service import rebuild_current_comparison
 from cd_monitor.storage.sqlite import insert_listing_observation
 
@@ -99,6 +107,62 @@ def test_build_comparison_refuses_a_different_condition_even_with_the_same_produ
     )
 
     outcome = rebuild_current_comparison(db_path, "catalog:srcl3520", COST_CONFIG)
+
+    assert outcome.status == "waiting_xianyu"
+    assert outcome.comparison is None
+
+
+@pytest.mark.parametrize(
+    ("risk_raw_text", "expected_condition_group"),
+    [
+        ("盘面有轻微划痕", "minor_damage"),
+        ("傷が多く大きな傷あり", "heavy_damage"),
+        ("外盒有压痕", "box_damage"),
+        ("ジャンク・動作不良", "defective"),
+        ("功能未测试", "untested"),
+    ],
+)
+def test_build_comparison_never_pairs_complete_used_with_a_risk_condition(
+    tmp_path: Path,
+    risk_raw_text: str,
+    expected_condition_group: str,
+) -> None:
+    db_path = tmp_path / "monitor.db"
+    wameiji = observation_from_wameiji(
+        MarketItem(
+            source="wameiji",
+            title="Album SRCL-3520",
+            price=1280,
+            currency="JPY",
+            external_item_id="m-complete-used",
+            catalog_no="SRCL-3520",
+            url="/mall/mercari/detail/m-complete-used",
+            image_url="//images.example/wameiji/m-complete-used.jpg",
+            availability="available",
+            condition_text="中古・良品",
+            detail_verified=True,
+        ),
+        captured_at="2026-09-08T00:00:00Z",
+    )
+    xianyu = observation_from_xianyu(
+        XianyuPriceSample(
+            catalog_no="SRCL-3520",
+            title="Album SRCL-3520",
+            price_cny=298,
+            url="/item?id=x-risk-condition",
+            image_url="//images.example/xianyu/x-risk-condition.jpg",
+            raw_text=risk_raw_text,
+        ),
+        captured_at="2026-09-08T00:00:00Z",
+    )
+
+    assert wameiji.condition_group == "complete_used"
+    assert xianyu.condition_group == expected_condition_group
+    assert wameiji.canonical_product_key != xianyu.canonical_product_key
+    insert_listing_observation(db_path, wameiji)
+    insert_listing_observation(db_path, xianyu)
+
+    outcome = rebuild_current_comparison(db_path, wameiji.canonical_product_key or "", COST_CONFIG)
 
     assert outcome.status == "waiting_xianyu"
     assert outcome.comparison is None

@@ -24,6 +24,147 @@ MarketSource = Literal["wameiji", "xianyu"]
 EvidenceLevel = Literal["search_card", "detail_verified"]
 
 
+# Risk markers deliberately take precedence over new/sealed labels. A listing
+# can be unopened while its box is damaged, and that is not interchangeable
+# with an ordinary new listing.
+_RISK_CONDITION_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "defective",
+        (
+            "ジャンク",
+            "動作不良",
+            "読み込み不良",
+            "再生不良",
+            "起動不可",
+            "故障",
+            "不良品",
+            "defective",
+            "faulty",
+            "not working",
+            "for parts",
+            "故障品",
+            "功能异常",
+            "功能異常",
+            "无法播放",
+            "無法播放",
+            "无法读取",
+            "無法讀取",
+            "无法使用",
+            "無法使用",
+            "坏了",
+            "壞了",
+        ),
+    ),
+    (
+        "untested",
+        (
+            "動作未確認",
+            "動作確認未",
+            "未動作確認",
+            "未チェック",
+            "未検品",
+            "未検証",
+            "untested",
+            "not tested",
+            "未测试",
+            "未測試",
+            "功能未测",
+            "功能未測",
+            "未检测",
+            "未檢測",
+        ),
+    ),
+    (
+        "box_damage",
+        (
+            "箱潰れ",
+            "箱つぶれ",
+            "箱破れ",
+            "外箱潰",
+            "外箱に潰",
+            "外箱傷",
+            "外箱に傷",
+            "ケース割れ",
+            "ケース傷",
+            "ケースに傷",
+            "box damage",
+            "damaged box",
+            "case cracked",
+            "盒损",
+            "盒損",
+            "外盒有压",
+            "外盒有壓",
+            "外盒破",
+            "包装破损",
+            "包裝破損",
+            "盒子破",
+            "盒子压",
+            "盒子壓",
+        ),
+    ),
+    (
+        "heavy_damage",
+        (
+            "傷が多",
+            "大きな傷",
+            "深い傷",
+            "目立つ傷",
+            "ひどい傷",
+            "破損",
+            "割れ",
+            "heavily scratched",
+            "major scratch",
+            "serious damage",
+            "严重划痕",
+            "嚴重劃痕",
+            "重度划痕",
+            "重度劃痕",
+            "多处划痕",
+            "多處劃痕",
+            "明显划痕",
+            "明顯劃痕",
+            "严重瑕疵",
+            "嚴重瑕疵",
+            "破损",
+            "品相不佳",
+            "品相差",
+            "整体状态不佳",
+            "整體狀態不佳",
+        ),
+    ),
+    (
+        "minor_damage",
+        (
+            "盤傷",
+            "傷あり",
+            "キズ",
+            "擦り傷",
+            "スレ",
+            "汚れ",
+            "使用感",
+            "minor scratch",
+            "scratched",
+            "scuff",
+            "stain",
+            "轻微划痕",
+            "輕微劃痕",
+            "划痕",
+            "劃痕",
+            "轻微瑕疵",
+            "輕微瑕疵",
+            "小瑕疵",
+            "磨损",
+            "磨損",
+            "污渍",
+            "污漬",
+            "使用痕迹",
+            "使用痕跡",
+            "瑕疵",
+        ),
+    ),
+)
+
+
 @dataclass(frozen=True, slots=True)
 class ListingObservation:
     """Immutable evidence collected from one visible marketplace listing."""
@@ -279,6 +420,9 @@ def normalize_condition_group(condition_text: str | None) -> str:
     """Use conservative condition buckets until detail evidence says otherwise."""
 
     value = (condition_text or "").casefold()
+    for group, markers in _RISK_CONDITION_GROUPS:
+        if any(marker in value for marker in markers):
+            return group
     if any(marker in value for marker in ("新品", "new", "brand new")):
         return "new"
     if any(marker in value for marker in ("未開封", "未拆", "sealed")):

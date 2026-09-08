@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from cd_monitor.core.dual_market import observation_from_wameiji, observation_from_xianyu
+import pytest
+
+from cd_monitor.core.dual_market import (
+    classify_completeness,
+    normalize_condition_group,
+    observation_from_wameiji,
+    observation_from_xianyu,
+)
 from cd_monitor.core.models import MarketItem, XianyuPriceSample
 
 
@@ -91,3 +98,30 @@ def test_same_catalog_with_different_edition_platform_or_condition_stays_unpaire
     )
 
     assert wameiji.canonical_product_key != xianyu.canonical_product_key
+
+
+@pytest.mark.parametrize(
+    ("condition_text", "expected_group"),
+    [
+        ("盤に薄い傷あり", "minor_damage"),
+        ("盘面有轻微划痕", "minor_damage"),
+        ("傷が多く大きな傷あり", "heavy_damage"),
+        ("盘面严重划痕", "heavy_damage"),
+        ("外箱に潰れあり", "box_damage"),
+        ("外盒有压痕", "box_damage"),
+        ("ジャンク・動作不良", "defective"),
+        ("故障品，无法播放", "defective"),
+        ("動作未確認", "untested"),
+        ("功能未测试", "untested"),
+    ],
+)
+def test_normalize_condition_group_keeps_japanese_and_chinese_risk_conditions_distinct(
+    condition_text: str,
+    expected_group: str,
+) -> None:
+    assert normalize_condition_group(condition_text) == expected_group
+
+
+def test_box_damage_does_not_make_an_otherwise_complete_listing_incomplete() -> None:
+    assert classify_completeness("Album SRCL-3520", "外箱に潰れあり") == "complete"
+    assert classify_completeness("Album SRCL-3520 外箱のみ", None) == "incomplete"
