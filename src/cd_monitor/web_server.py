@@ -1126,10 +1126,7 @@ def _build_handler(
                     and isinstance(updates, dict)
                     and updates.get("capture_state") == "active"
                 )
-                if _dual_market_collection_paused() and (
-                    command_type == "scan_now" or resume_requested
-                ):
-                    self._json({"error": "collector_paused"}, status=HTTPStatus.CONFLICT)
+                if (command_type == "scan_now" or resume_requested) and self._reject_paused_collection():
                     return
                 command_payload = {
                     key: value
@@ -1735,6 +1732,8 @@ def _build_handler(
             if route == "/api/scan/live-html":
                 # Real browser capture + evaluation + optional notify for one catalog.
                 # Matches `cli scan-live-html --catalog-no X ... --notify ...`.
+                if self._reject_paused_collection():
+                    return
                 catalog_no = str(payload.get("catalog_no", "")).strip()
                 if not catalog_no:
                     self._json(
@@ -1792,6 +1791,8 @@ def _build_handler(
             if route == "/api/scan/live-watchlist":
                 # Real browser capture + evaluation + optional notify for every watch.
                 # Matches `cli live-watchlist ... --notify ...`.
+                if self._reject_paused_collection():
+                    return
                 config = load_config(None)
                 do_notify = bool(payload.get("notify", False))
                 channel_spec = str(payload.get("notify_channel", "feishu"))
@@ -2166,6 +2167,8 @@ def _build_handler(
             # so the API call returns immediately while the scraper fetches
             # fresh data. The frontend polls /api/scrape/status.
             if route == "/api/scrape/now":
+                if self._reject_paused_collection():
+                    return
                 import subprocess as _sp
                 import threading as _thr
                 import time as _t
@@ -2227,6 +2230,8 @@ def _build_handler(
             # 1) Spawn run_one_cycle.py (scrape only - it now skips matching).
             # 2) When done, run /api/scrape/match in-process to generate opportunities.
             if route == "/api/scrape/full":
+                if self._reject_paused_collection():
+                    return
                 import subprocess as _sp2
                 import threading as _thr3
                 import time as _t3
@@ -2500,6 +2505,12 @@ def _build_handler(
             token = os.getenv("CD_SYNC_TOKEN", "").strip()
             supplied = self.headers.get("X-CD-Sync-Token", "").strip()
             return bool(token and supplied and compare_digest(supplied, token))
+
+        def _reject_paused_collection(self) -> bool:
+            if not _dual_market_collection_paused():
+                return False
+            self._json({"error": "collector_paused"}, status=HTTPStatus.CONFLICT)
+            return True
 
         def _json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
 
