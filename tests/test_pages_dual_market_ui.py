@@ -11,13 +11,14 @@ def extract_dual_market_renderer(javascript: str) -> str:
 
 def test_dual_market_ui_renders_source_specific_images_and_waiting_state() -> None:
     javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    loader = Path("web/dual-market-data.js").read_text(encoding="utf-8")
     renderer = extract_dual_market_renderer(javascript)
 
     assert "item.xianyu.image_url" in renderer
     assert "item.wameiji.image_url" in renderer
     assert "waiting_wameiji" in renderer
     assert "waiting_xianyu" in renderer
-    assert "/api/dual-market/board" in javascript
+    assert "/api/dual-market/board" in loader
     assert "xianyu_reference_price" not in renderer
 
 
@@ -38,9 +39,11 @@ def test_homepage_distinguishes_xianyu_search_evidence_from_wameiji_detail() -> 
 
 def test_dual_market_ui_fails_closed_when_its_board_is_unavailable() -> None:
     javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    loader = Path("web/dual-market-data.js").read_text(encoding="utf-8")
 
     assert 'apiGet("/api/dual-market/board").catch(() => null)' not in javascript
-    assert "unavailable: true" in javascript
+    assert 'mode: "unavailable"' in loader
+    assert "unavailable: true" in loader
     assert "双边证据流暂不可用" in javascript
     assert "不展示旧机会卡" in javascript
 
@@ -70,3 +73,27 @@ def test_dual_market_kpis_label_cost_pending_pairs_without_zero_profit() -> None
     assert "verifiedPairCount" in renderer
     assert "costPendingCount" in renderer
     assert '"待算"' in renderer
+
+
+def test_homepage_loads_snapshot_loader_before_the_board_renderer() -> None:
+    homepage = Path("web/index.html").read_text(encoding="utf-8")
+
+    assert "dual-market-data.js" in homepage
+    assert homepage.index("dual-market-data.js") < homepage.index("discovery-ui.js")
+
+
+def test_board_refresh_decouples_legacy_api_failures_from_dual_market_data() -> None:
+    javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+
+    assert 'apiGet("/api/discovery/board").catch(() => emptyBoard)' in javascript
+    assert 'apiGet("/api/discovery/commands").catch(() => ({ items: [] }))' in javascript
+    assert "window.DualMarketData.load({ apiGet })" in javascript
+
+
+def test_static_snapshot_status_is_explicit_about_freshness() -> None:
+    javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+
+    assert "Pages 已核验快照" in javascript
+    assert "Pages 历史快照" in javascript
+    assert "不代表当前可买" in javascript
+    assert "采集仅在本机运行" in javascript

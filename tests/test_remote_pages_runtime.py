@@ -32,6 +32,7 @@ const fs = require("fs");
 const vm = require("vm");
 const source = fs.readFileSync(process.argv[1], "utf8");
 const discoverySource = {"fs.readFileSync(process.argv[2], 'utf8')" if include_discovery else 'null'};
+const dualMarketDataSource = {"fs.readFileSync(process.argv[3], 'utf8')" if include_discovery else 'null'};
 const listeners = {{ DOMContentLoaded: [] }};
 const requests = [];
 const websocketUrls = [];
@@ -47,6 +48,7 @@ const timers = [];
 let promptCount = 0;
 const document = {{
   readyState: {document_ready_state!r},
+  baseURI: {page_origin!r},
   addEventListener(name, listener) {{ (listeners[name] ||= []).push(listener); }},
   querySelectorAll() {{ return []; }},
   querySelector() {{ return null; }},
@@ -75,8 +77,11 @@ const context = {{
   clearTimeout() {{}},
   fetch: async (url) => {{
     requests.push(String(url));
-    const authorized = !{str(require_access_token).lower()} || String(url).includes("access_token={prompt_value}");
-    const payload = String(url).includes("/commands") ? {{ items: [] }} : {{ summary: {{}}, pools: [], opportunities: [] }};
+    const isSnapshot = String(url).includes("/data/dual-market-snapshot.json");
+    const authorized = isSnapshot || !{str(require_access_token).lower()} || String(url).includes("access_token={prompt_value}");
+    const payload = isSnapshot
+      ? {{ generated_at: "2099-09-09T00:00:00+08:00", summary: {{}}, ready: [], negative_profit: [], cost_pending: [], waiting_wameiji: [], waiting_xianyu: [], collector: {{ state: "paused" }} }}
+      : String(url).includes("/commands") ? {{ items: [] }} : {{ summary: {{}}, pools: [], opportunities: [], collector: {{ state: "paused" }} }};
     return {{ ok: authorized, status: authorized ? 200 : 401, json: async () => payload, text: async () => "" }};
   }},
 }};
@@ -94,6 +99,7 @@ if ({str(capture_websocket).lower()}) {{
 }}
 vm.createContext(context);
 vm.runInContext(source, context, {{ filename: "app.js" }});
+if (dualMarketDataSource) vm.runInContext(dualMarketDataSource, context, {{ filename: "dual-market-data.js" }});
 if (discoverySource) vm.runInContext(discoverySource, context, {{ filename: "discovery-ui.js" }});
 for (const listener of listeners.DOMContentLoaded) {{
   try {{ listener(); }} catch (_) {{}}
@@ -110,7 +116,14 @@ settled.then(() => {{
 }}).catch((error) => {{ console.error(error.stack || error); process.exit(1); }});
 '''
     result = subprocess.run(
-        ["node", "-e", harness, "web/app.js", "web/discovery-ui.js"],
+        [
+            "node",
+            "-e",
+            harness,
+            "web/app.js",
+            "web/discovery-ui.js",
+            "web/dual-market-data.js",
+        ],
         cwd=PROJECT_ROOT,
         text=True,
         capture_output=True,
@@ -184,5 +197,23 @@ def test_remote_pages_prompts_before_the_selection_board_fetches() -> None:
         include_discovery=True,
         run_initial_timeouts=True,
         prompt_value="viewer-token",
+        require_access_token=True,
+    )
+
+
+def test_cancelled_remote_token_still_loads_the_public_pages_snapshot() -> None:
+    """Static evidence remains visible when a viewer does not enter a Render token."""
+
+    _run_browserless_app_harness(
+        'if (promptCount !== 1) throw new Error("expected one prompt, got " + promptCount); '
+        'if (requests.some((url) => url.startsWith("https://collector.example"))) '
+        'throw new Error("remote request without token: " + requests.join(", ")); '
+        'if (!requests.some((url) => url.includes("/data/dual-market-snapshot.json"))) '
+        'throw new Error("snapshot was not requested: " + requests.join(", "));',
+        api_base="https://collector.example",
+        page_origin="https://viewer.example/",
+        include_discovery=True,
+        run_initial_timeouts=True,
+        prompt_value="",
         require_access_token=True,
     )

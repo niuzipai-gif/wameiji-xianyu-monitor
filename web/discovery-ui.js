@@ -17,6 +17,7 @@
     query: "",
     advancedFilter: null,
     refreshing: false,
+    liveApiBlocked: false,
   };
 
   function esc(value) {
@@ -78,6 +79,16 @@
 
   function renderDiscoveryStatus(summary) {
     if (view.dualMarketBoard && view.dualMarketBoard.collector) {
+      if (view.dualMarketBoard.mode === "verified_static_snapshot") {
+        const when = timeLabel(view.dualMarketBoard.generated_at);
+        setDiscoveryStatus(
+          view.dualMarketBoard.stale
+            ? "Pages 历史快照 · " + when + " · 不代表当前可买"
+            : "Pages 已核验快照 · " + when + " · 采集仅在本机运行",
+          view.dualMarketBoard.stale ? "paused_quality" : "idle",
+        );
+        return;
+      }
       if (view.dualMarketBoard.unavailable) {
         setDiscoveryStatus("双边证据流暂不可用 · 不展示旧机会卡", "paused_quality");
         return;
@@ -144,6 +155,9 @@
   }
 
   function apiGet(path) {
+    if (view.liveApiBlocked) {
+      return Promise.reject(new Error("viewer access token is unavailable"));
+    }
     if (typeof window.getJson === "function") return window.getJson(path);
     return fetch(path, { cache: "no-store", credentials: "include" }).then((response) => {
       if (!response.ok) throw new Error("GET " + path + " -> " + response.status);
@@ -616,14 +630,11 @@
     if (view.refreshing) return;
     view.refreshing = true;
     try {
+      const emptyBoard = { summary: {}, pools: [], opportunities: [] };
       const [board, commandPayload, dualMarketBoard] = await Promise.all([
-        apiGet("/api/discovery/board"),
-        apiGet("/api/discovery/commands"),
-        apiGet("/api/dual-market/board").catch((error) => ({
-          unavailable: true,
-          error: String(error && error.message || "unknown_error"),
-          collector: { state: "paused" },
-        })),
+        apiGet("/api/discovery/board").catch(() => emptyBoard),
+        apiGet("/api/discovery/commands").catch(() => ({ items: [] })),
+        window.DualMarketData.load({ apiGet }),
       ]);
       view.board = board || { summary: {}, pools: [], opportunities: [] };
       view.dualMarketBoard = dualMarketBoard;
@@ -788,8 +799,8 @@
       if (api && typeof api.ensureViewerAccessToken === "function") {
         const accessReady = await api.ensureViewerAccessToken();
         if (!accessReady) {
+          view.liveApiBlocked = true;
           setCommandMessage("需要 Render 访问令牌才能读取选品广场；填写后刷新此页即可继续。", true);
-          return;
         }
       }
       bindControls();
