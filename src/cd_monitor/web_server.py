@@ -44,6 +44,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from cd_monitor.config import load_config
+from cd_monitor.core.dual_market import ListingObservation, PriceComparison, select_lowest_eligible
 from cd_monitor.services.failure_guard import FailureGuard
 from cd_monitor.services.price_history_service import PriceHistoryService
 from cd_monitor.services.result_blacklist_service import ResultBlacklistService
@@ -120,6 +121,8 @@ from cd_monitor.storage.sqlite import (
     list_discovery_opportunities,
     list_discovery_pools,
     list_discovery_runs,
+    list_current_observations,
+    list_price_comparisons,
 )
 
 
@@ -528,6 +531,9 @@ def _build_handler(
                 return
             if route == "/api/summary":
                 self._json(_summary(db_path))
+                return
+            if route == "/api/dual-market/board":
+                self._json(_dual_market_board(db_path))
                 return
             if route == "/api/discovery/board":
                 self._json(
@@ -2590,6 +2596,129 @@ def _discovery_opportunity_views(db_path: str | Path) -> list[dict[str, object]]
             view["url"] = canonical_url
             view["source_url"] = canonical_url
     return views
+
+
+def _dual_market_board(db_path: str | Path) -> dict[str, object]:
+    """Build a read-only board from exact observation/comparison relationships.
+
+    Legacy opportunities and global Xianyu price samples intentionally never
+    enter this payload.  A comparison remains visible only while both of its
+    referenced listings are still the current lowest eligible observations.
+    """
+
+    observations = list_current_observations(db_path)
+    grouped: dict[str, list[ListingObservation]] = {}
+    for observation in observations:
+        if observation.canonical_product_key:
+            grouped.setdefault(observation.canonical_product_key, []).append(observation)
+
+    latest_comparisons: dict[str, PriceComparison] = {}
+    for comparison in list_price_comparisons(db_path, limit=500):
+        latest_comparisons.setdefault(comparison.canonical_product_key, comparison)
+
+    ready: list[dict[str, object]] = []
+    negative_profit: list[dict[str, object]] = []
+    cost_pending: list[dict[str, object]] = []
+    waiting_wameiji: list[dict[str, object]] = []
+    waiting_xianyu: list[dict[str, object]] = []
+    handled_keys: set[str] = set()
+
+    for product_key, current_group in grouped.items():
+        wameiji = select_lowest_eligible(current_group, source="wameiji")
+        xianyu = select_lowest_eligible(current_group, source="xianyu")
+        comparison = latest_comparisons.get(product_key)
+        if (
+            comparison is not None
+            and wameiji is not None
+            and xianyu is not None
+            and comparison.wameiji_observation_id == wameiji.id
+            and comparison.xianyu_observation_id == xianyu.id
+        ):
+            entry = _dual_market_comparison_view(comparison, wameiji, xianyu)
+            if comparison.status == "ready":
+                ready.append(entry)
+            elif comparison.status == "negative_profit":
+                negative_profit.append(entry)
+            else:
+                cost_pending.append(entry)
+            handled_keys.add(product_key)
+
+    for product_key, current_group in grouped.items():
+        if product_key in handled_keys:
+            continue
+        wameiji = select_lowest_eligible(current_group, source="wameiji")
+        xianyu = select_lowest_eligible(current_group, source="xianyu")
+        if wameiji is not None and xianyu is None:
+            waiting_xianyu.append(
+                {
+                    "canonical_product_key": product_key,
+                    "wameiji": _dual_market_observation_view(wameiji),
+                    "xianyu": None,
+                }
+            )
+        elif xianyu is not None and wameiji is None:
+            waiting_wameiji.append(
+                {
+                    "canonical_product_key": product_key,
+                    "wameiji": None,
+                    "xianyu": _dual_market_observation_view(xianyu),
+                }
+            )
+
+    return {
+        "summary": {
+            "ready_count": len(ready),
+            "negative_profit_count": len(negative_profit),
+            "cost_pending_count": len(cost_pending),
+            "waiting_wameiji_count": len(waiting_wameiji),
+            "waiting_xianyu_count": len(waiting_xianyu),
+        },
+        "ready": ready,
+        "negative_profit": negative_profit,
+        "cost_pending": cost_pending,
+        "waiting_wameiji": waiting_wameiji,
+        "waiting_xianyu": waiting_xianyu,
+        "collector": {"state": "paused"},
+    }
+
+
+def _dual_market_observation_view(observation: ListingObservation) -> dict[str, object]:
+    return {
+        "listing_id": observation.id,
+        "source": observation.source,
+        "canonical_product_key": observation.canonical_product_key,
+        "title": observation.title,
+        "price": observation.price,
+        "currency": observation.currency,
+        "url": observation.url,
+        "image_url": observation.image_url,
+        "availability": observation.availability,
+        "condition_group": observation.condition_group,
+        "completeness": observation.completeness,
+        "evidence_level": observation.evidence_level,
+        "captured_at": observation.captured_at,
+    }
+
+
+def _dual_market_comparison_view(
+    comparison: PriceComparison,
+    wameiji: ListingObservation,
+    xianyu: ListingObservation,
+) -> dict[str, object]:
+    return {
+        "comparison_id": comparison.id,
+        "canonical_product_key": comparison.canonical_product_key,
+        "xianyu": _dual_market_observation_view(xianyu),
+        "wameiji": _dual_market_observation_view(wameiji),
+        "calculation": {
+            "status": comparison.status,
+            "sale_price_cny": comparison.sale_price_cny,
+            "landed_cost_cny": comparison.landed_cost_cny,
+            "expected_profit_cny": comparison.expected_profit_cny,
+            "net_margin": comparison.net_margin,
+            "created_at": comparison.created_at,
+        },
+    }
 
 
 
