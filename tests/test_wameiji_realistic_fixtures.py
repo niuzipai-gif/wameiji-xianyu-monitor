@@ -7,6 +7,9 @@
 4. fees_hint 在真实 HTML 中被正确抽到
 5. condition_text 抽到盘伤
 """
+import pytest
+
+from cd_monitor.core.dual_market import observation_from_wameiji
 from cd_monitor.core.models import WatchItem
 from cd_monitor.sources.wameiji_browser import WameijiBrowserAdapter
 
@@ -119,6 +122,56 @@ def test_condition_text_extracted_when_disc_scratch() -> None:
     # condition_text 字段会被填充（盘伤/傷 触发）
     assert item.condition_text is not None
     assert "盤傷" in item.condition_text or "傷" in item.condition_text
+
+
+@pytest.mark.parametrize(
+    ("risk_text", "expected_group"),
+    [
+        ("動作未確認", "untested"),
+        ("箱潰れあり", "box_damage"),
+        ("スレあり", "minor_damage"),
+        ("使用感あり", "minor_damage"),
+    ],
+)
+def test_risk_card_html_never_shares_a_complete_used_canonical_key(
+    risk_text: str,
+    expected_group: str,
+) -> None:
+    """The actual card parser must carry Japanese risk text into normalization."""
+    html = f'''
+    <div data-item-card>
+      <a href="https://meruki.cn/item/SRCL-3520-ordinary">Album SRCL-3520 通常盤</a>
+      <span data-price>1280</span>
+      <img src="https://images.example/ordinary.jpg">
+      <span class="condition">中古・良品</span>
+    </div>
+    <div data-item-card>
+      <a href="https://meruki.cn/item/SRCL-3520-risk">Album SRCL-3520 通常盤</a>
+      <span data-price>900</span>
+      <img src="https://images.example/risk.jpg">
+      <span class="condition">{risk_text}</span>
+    </div>
+    '''
+
+    status = _adapter().parse_search_html(html, WatchItem(catalog_no="SRCL-3520"))
+
+    assert status.status == "ok"
+    assert len(status.items) == 2
+    ordinary_item, risk_item = status.items
+    assert risk_text in (risk_item.raw_text or "")
+    assert risk_text in (risk_item.condition_text or "")
+    ordinary = observation_from_wameiji(
+        ordinary_item,
+        captured_at="2026-09-08T00:00:00Z",
+    )
+    risk = observation_from_wameiji(
+        risk_item,
+        captured_at="2026-09-08T00:00:00Z",
+    )
+
+    assert ordinary.condition_group == "complete_used"
+    assert risk.condition_group == expected_group
+    assert ordinary.canonical_product_key != risk.canonical_product_key
 
 
 def test_source_site_mercari_vs_rakuma() -> None:

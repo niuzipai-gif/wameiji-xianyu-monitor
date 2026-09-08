@@ -284,7 +284,9 @@ def observation_from_wameiji(
     if item.source != "wameiji":
         raise ValueError("Wameiji observations require a wameiji MarketItem")
     url = _require_http_url(item.url, base_url="https://meruki.cn")
-    condition_group = normalize_condition_group(item.condition_text)
+    condition_group = normalize_condition_group(
+        " ".join(text for text in (item.condition_text, item.raw_text) if text)
+    )
     return ListingObservation(
         source="wameiji",
         source_listing_id=_source_listing_id(item.external_item_id, url),

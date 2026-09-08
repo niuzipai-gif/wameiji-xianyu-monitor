@@ -125,3 +125,37 @@ def test_normalize_condition_group_keeps_japanese_and_chinese_risk_conditions_di
 def test_box_damage_does_not_make_an_otherwise_complete_listing_incomplete() -> None:
     assert classify_completeness("Album SRCL-3520", "外箱に潰れあり") == "complete"
     assert classify_completeness("Album SRCL-3520 外箱のみ", None) == "incomplete"
+
+
+@pytest.mark.parametrize(
+    ("raw_risk_text", "expected_group"),
+    [
+        ("動作未確認", "untested"),
+        ("箱潰れあり", "box_damage"),
+        ("スレあり", "minor_damage"),
+        ("使用感あり", "minor_damage"),
+    ],
+)
+def test_wameiji_observation_keeps_raw_risk_text_when_condition_text_is_benign(
+    raw_risk_text: str,
+    expected_group: str,
+) -> None:
+    observation = observation_from_wameiji(
+        MarketItem(
+            source="wameiji",
+            title="Album SRCL-3520 通常盤",
+            price=1280,
+            currency="JPY",
+            external_item_id="m-risk",
+            catalog_no="SRCL-3520",
+            url="/mall/mercari/detail/m-risk",
+            image_url="//images.example/m-risk.jpg",
+            availability="available",
+            condition_text="中古・良品",
+            raw_text=f"Album SRCL-3520 通常盤 中古・良品 {raw_risk_text}",
+            detail_verified=True,
+        ),
+        captured_at="2026-09-08T00:00:00Z",
+    )
+
+    assert observation.condition_group == expected_group

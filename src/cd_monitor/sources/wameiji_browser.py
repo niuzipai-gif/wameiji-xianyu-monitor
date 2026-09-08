@@ -755,11 +755,18 @@ def _detect_source_site(text: str) -> str | None:
 
 def _detect_condition_text(parts: list[str]) -> str | None:
     condition_tokens = [
+        "動作未確認",
+        "動作確認未",
+        "未動作確認",
+        "箱潰れ",
+        "箱つぶれ",
         "盤傷",
         "ケース割れ",
         "破損",
         "傷",
+        "スレ",
         "汚れ",
+        "使用感",
         "ジャンク",
         "不良",
         "瑕疵",
