@@ -11,6 +11,7 @@
 
   const view = {
     board: null,
+    dualMarketBoard: null,
     commands: [],
     filter: "all",
     query: "",
@@ -74,6 +75,13 @@
   }
 
   function renderDiscoveryStatus(summary) {
+    if (view.dualMarketBoard && view.dualMarketBoard.collector) {
+      const collectorState = String(view.dualMarketBoard.collector.state || "paused");
+      if (collectorState === "paused") {
+        setDiscoveryStatus("采集已暂停 · 仅展示已保存的双边商品证据", "idle");
+        return;
+      }
+    }
     const pools = Array.isArray(view.board && view.board.pools) ? view.board.pools : [];
     const pausedPool = pools.find((pool) => pool && pool.enabled && pool.capture_state === "paused_quality");
     if (pausedPool) {
@@ -163,6 +171,21 @@
   }
 
   function renderKpis(summary) {
+    const dualSummary = view.dualMarketBoard && view.dualMarketBoard.summary;
+    if (dualSummary) {
+      const readyItems = Array.isArray(view.dualMarketBoard.ready) ? view.dualMarketBoard.ready : [];
+      const readyCount = Number(dualSummary.ready_count) || 0;
+      const pendingCount = (Number(dualSummary.cost_pending_count) || 0)
+        + (Number(dualSummary.waiting_wameiji_count) || 0)
+        + (Number(dualSummary.waiting_xianyu_count) || 0);
+      const profits = readyItems.map((item) => Number(item.calculation && item.calculation.expected_profit_cny) || 0);
+      setText("kpiToday", String(readyCount));
+      setText("kpiProfit", cny(profits.reduce((total, value) => total + value, 0)));
+      setText("kpiMax", cny(profits.reduce((maximum, value) => Math.max(maximum, value), 0)));
+      setText("kpiHitRate", (readyCount + pendingCount ? Math.round(readyCount / (readyCount + pendingCount) * 100) : 0) + "%");
+      renderDiscoveryStatus(summary);
+      return;
+    }
     const items = Array.isArray(view.board && view.board.opportunities) ? view.board.opportunities : [];
     const activeCandidates = Number(summary.active_candidates) || 0;
     const freshSourceDetails = Number(summary.fresh_source_details);
@@ -284,6 +307,135 @@
     ].join("");
   }
 
+  function dualEvidenceLabel(item) {
+    if (!item) return "等待另一侧证据";
+    return item.evidence_level === "detail_verified" ? "详情已核验" : "搜索挂牌价样本";
+  }
+
+  function dualSide(kind, item) {
+    const isXianyu = kind === "xianyu";
+    const tag = isXianyu ? "闲鱼 · 销售侧" : "挖煤姬 · 进货侧";
+    const image = item && item.image_url;
+    const price = isXianyu ? cny(item && item.price) : jpy(item && item.price);
+    const body = [
+      '<div class="thumb ' + (isXianyu ? "xianyu-thumb" : "market-thumb") + '">',
+        thumbMarkup(image, tag, dualEvidenceLabel(item)),
+      '</div>',
+      '<div class="product">',
+        '<span class="tag ' + (isXianyu ? "xianyu-tag" : "hot") + '">' + esc(tag) + '</span>',
+        '<span class="status ' + (item && item.evidence_level === "detail_verified" ? "ok" : "warn") + '">' + esc(dualEvidenceLabel(item)) + '</span>',
+        '<h4>' + esc(item && item.title || "未获取商品") + '</h4>',
+        '<div class="price">' + esc(price) + '</div>',
+        '<div class="desc">' + esc(item && item.condition_group || "品相待确认") + ' · ' + esc(timeLabel(item && item.captured_at)) + '</div>',
+      '</div>',
+    ].join("");
+    return sideMarkup(isXianyu ? "xianyu" : "market", item && item.url, body);
+  }
+
+  function readyComparisonCard(item) {
+    const calculation = item.calculation || {};
+    const xianyuSide = dualSide("xianyu", {
+      ...item.xianyu,
+      image_url: item.xianyu.image_url,
+    });
+    const wameijiSide = dualSide("wameiji", {
+      ...item.wameiji,
+      image_url: item.wameiji.image_url,
+    });
+    return [
+      '<article class="op-card discovery-op-card dual-market-card" data-dual-market-comparison-id="' + esc(item.comparison_id || "") + '">',
+        xianyuSide,
+        '<div class="analysis">',
+          '<div class="comparison-rail"><span>闲鱼最低有效挂牌价</span><i aria-hidden="true">↔</i><span>挖煤姬最低有效进货价</span></div>',
+          '<div class="grid2">',
+            '<div class="metric"><small>销售侧挂牌价</small><strong>' + esc(cny(calculation.sale_price_cny)) + '</strong></div>',
+            '<div class="metric"><small>落地成本</small><strong>' + esc(cny(calculation.landed_cost_cny)) + '</strong></div>',
+            '<div class="metric"><small>预计净利</small><strong>' + esc(cny(calculation.expected_profit_cny)) + '</strong></div>',
+            '<div class="metric"><small>利润率</small><strong>' + esc(percent(calculation.net_margin)) + '</strong></div>',
+          '</div>',
+          '<p class="comparison-catalog">同款键：' + esc(item.canonical_product_key) + '</p>',
+          '<div class="reason">两侧均为本次比较快照引用的真实商品；闲鱼价格是当前最低有效挂牌价，不代表已成交价。</div>',
+        '</div>',
+        wameijiSide,
+      '</article>',
+    ].join("");
+  }
+
+  function nonReadyComparisonCard(item) {
+    const calculation = item.calculation || {};
+    const costPending = calculation.status === "cost_pending";
+    const label = costPending ? "成本待确认" : "当前无利润，不建议收购";
+    const detail = costPending
+      ? "成本配置缺少实际输入，系统未计算利润。"
+      : "两侧价格已记录，但按当前成本计算没有正利润。";
+    return [
+      '<article class="op-card discovery-op-card dual-market-card dual-market-nonready">',
+        dualSide("xianyu", item.xianyu),
+        '<div class="analysis">',
+          '<div class="comparison-rail"><span>' + esc(label) + '</span></div>',
+          '<div class="grid2">',
+            '<div class="metric"><small>销售侧挂牌价</small><strong>' + esc(cny(calculation.sale_price_cny)) + '</strong></div>',
+            '<div class="metric"><small>落地成本</small><strong>' + esc(cny(calculation.landed_cost_cny)) + '</strong></div>',
+          '</div>',
+          '<p class="comparison-catalog">同款键：' + esc(item.canonical_product_key) + '</p>',
+          '<div class="reason">' + esc(detail) + '</div>',
+        '</div>',
+        dualSide("wameiji", item.wameiji),
+      '</article>',
+    ].join("");
+  }
+
+  function waitingObservationCard(item, missingSource) {
+    const presentSide = missingSource === "wameiji" ? "xianyu" : "wameiji";
+    const missingLabel = missingSource === "wameiji" ? "等待挖煤姬最低有效进货价" : "等待闲鱼最低有效挂牌价";
+    return [
+      '<article class="op-card discovery-op-card dual-market-card dual-market-waiting">',
+        presentSide === "xianyu" ? dualSide("xianyu", item.xianyu) : '<div class="side-product xianyu dual-market-missing">闲鱼侧待配对</div>',
+        '<div class="analysis">',
+          '<div class="comparison-rail"><span>待配对</span></div>',
+          '<div class="metric"><small>当前状态</small><strong>' + esc(missingLabel) + '</strong></div>',
+          '<p class="comparison-catalog">同款键：' + esc(item.canonical_product_key) + '</p>',
+          '<div class="reason">只展示已保存的一侧真实商品；未获得另一侧证据前，系统不会展示利润。</div>',
+        '</div>',
+        presentSide === "wameiji" ? dualSide("wameiji", item.wameiji) : '<div class="side-product market dual-market-missing">挖煤姬侧待配对</div>',
+      '</article>',
+    ].join("");
+  }
+
+  function dualMarketSearchText(item) {
+    return [
+      item.canonical_product_key,
+      item.xianyu && item.xianyu.title,
+      item.wameiji && item.wameiji.title,
+    ].filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function renderDualMarketFeed(target) {
+    const board = view.dualMarketBoard || {};
+    const query = String(view.query || view.advancedFilter && view.advancedFilter.q || "").trim().toLowerCase();
+    let ready = Array.isArray(board.ready) ? board.ready.slice() : [];
+    if (query) ready = ready.filter((item) => dualMarketSearchText(item).includes(query));
+    ready.sort((left, right) => (
+      (Number(right.calculation && right.calculation.expected_profit_cny) || 0)
+      - (Number(left.calculation && left.calculation.expected_profit_cny) || 0)
+    ));
+    const waitingWameiji = Array.isArray(board.waiting_wameiji) ? board.waiting_wameiji : [];
+    const waitingXianyu = Array.isArray(board.waiting_xianyu) ? board.waiting_xianyu : [];
+    const nonReady = [
+      ...(Array.isArray(board.cost_pending) ? board.cost_pending : []),
+      ...(Array.isArray(board.negative_profit) ? board.negative_profit : []),
+    ];
+    const cards = [
+      ...ready.map(readyComparisonCard),
+      ...waitingWameiji.map((item) => waitingObservationCard(item, "wameiji")),
+      ...waitingXianyu.map((item) => waitingObservationCard(item, "xianyu")),
+      ...nonReady.map(nonReadyComparisonCard),
+    ];
+    target.innerHTML = cards.length
+      ? cards.join("")
+      : '<div class="empty-state">暂无可展示的双边商品记录；采集保持暂停，页面不会用旧样本补出利润卡。</div>';
+  }
+
   function itemSearchText(item) {
     return [
       item.item_title,
@@ -336,6 +488,10 @@
   function renderFeed() {
     const target = document.getElementById("homeFeed");
     if (!target || !view.board) return;
+    if (view.dualMarketBoard) {
+      renderDualMarketFeed(target);
+      return;
+    }
     const allItems = Array.isArray(view.board.opportunities) ? view.board.opportunities.slice() : [];
     let items = allItems;
     if (view.filter === "match") {
@@ -437,11 +593,13 @@
     if (view.refreshing) return;
     view.refreshing = true;
     try {
-      const [board, commandPayload] = await Promise.all([
+      const [board, commandPayload, dualMarketBoard] = await Promise.all([
         apiGet("/api/discovery/board"),
         apiGet("/api/discovery/commands"),
+        apiGet("/api/dual-market/board").catch(() => null),
       ]);
       view.board = board || { summary: {}, pools: [], opportunities: [] };
+      view.dualMarketBoard = dualMarketBoard;
       view.commands = (commandPayload && commandPayload.items) || [];
       if (window.state) {
         window.state.opportunities = (view.board.opportunities || []).map(toLegacyOpportunity);

@@ -685,6 +685,14 @@ body.kuro .comparison-rail span:first-child { color: #786219; text-align: left; 
 body.kuro .comparison-rail span:last-child { color: var(--kuro-rose); text-align: right; }
 body.kuro .comparison-rail i { font-size: 15px; line-height: 1; color: var(--kuro-blue); font-style: normal; }
 body.kuro .comparison-catalog { margin: 12px 0 0; color: var(--kuro-muted); font-size: 12px; line-height: 1.55; word-break: break-word; }
+body.kuro .dual-market-card { border-color: rgba(111, 116, 210, 0.24); }
+body.kuro .dual-market-card .metric strong { color: var(--kuro-ink); }
+body.kuro .dual-market-card .metric:nth-child(3) strong { color: var(--kuro-crimson); }
+body.kuro .dual-market-waiting { border-style: dashed; box-shadow: none; }
+body.kuro .dual-market-waiting .analysis { background: rgba(255, 252, 240, 0.78); }
+body.kuro .dual-market-nonready { opacity: 0.86; }
+body.kuro .dual-market-nonready .analysis { background: rgba(249, 246, 248, 0.9); }
+body.kuro .dual-market-missing { align-items: center !important; justify-content: center; min-height: 150px; border: 1px dashed var(--kuro-line); color: var(--kuro-muted); font-weight: 700; text-align: center; }
 body.kuro .discovery-control-card { margin-top: 22px; }
 body.kuro .discovery-pool-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 14px; }
 body.kuro .discovery-pool { border: 1px solid var(--kuro-line); border-radius: 15px; padding: 15px; display: grid; gap: 12px; background: rgba(250,252,255,.84); }
