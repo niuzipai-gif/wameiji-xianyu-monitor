@@ -30,7 +30,6 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from cd_monitor.core.dual_market import (
-    DualMarketCostConfig,
     ListingObservation,
     is_eligible,
     observation_from_wameiji,
@@ -45,6 +44,9 @@ from cd_monitor.services.dual_market_batch import (
     wameiji_item_matches_seed,
 )
 from cd_monitor.services.dual_market_service import rebuild_current_comparison
+from cd_monitor.services.dual_market_profit_policy import (
+    strict_profit_cost_config_from_snapshot,
+)
 from cd_monitor.services.live_browser_capture import (
     capture_page_html,
     capture_search_html,
@@ -846,7 +848,9 @@ async def collect_one_seed(
             comparison = rebuild_current_comparison(
                 args.target_db,
                 str(selection.wameiji.canonical_product_key),
-                DualMarketCostConfig(),
+                strict_profit_cost_config_from_snapshot(
+                    selection.wameiji.raw_snapshot_path
+                ),
             )
             if comparison.comparison is None:
                 raise RuntimeError("persisted exact pair did not create a comparison")

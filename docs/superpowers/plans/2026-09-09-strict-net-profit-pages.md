@@ -192,7 +192,7 @@ git commit -m "feat: enforce strict net margin qualification"
 - Modify: `scripts/collect_dual_market_batch.py`
 - Modify: `tests/test_collect_dual_market_batch_script.py`
 
-- [ ] **Step 1: Write failing offline repricer tests**
+- [x] **Step 1: Write failing offline repricer tests**
 
 Build a temporary SQLite database with saved Wameiji HTML paths and paired observations. Assert the repricer:
 
@@ -204,13 +204,13 @@ Build a temporary SQLite database with saved Wameiji HTML paths and paired obser
 
 Add a source test proving `collect_dual_market_batch.py` calls `strict_profit_cost_config(...)` rather than `DualMarketCostConfig()`.
 
-- [ ] **Step 2: Run and confirm failure**
+- [x] **Step 2: Run and confirm failure**
 
 Run: `pytest tests/test_reprice_dual_market_board.py tests/test_collect_dual_market_batch_script.py -q`
 
 Expected: FAIL because the repricer is missing and collection currently creates an empty cost configuration.
 
-- [ ] **Step 3: Implement the offline command**
+- [x] **Step 3: Implement the offline command**
 
 The command writes both an audit summary and the API-shaped board used by the Pages exporter. Its concrete production invocation is:
 
@@ -220,7 +220,7 @@ python scripts/reprice_dual_market_board.py --db "F:\WAMEIJI-XIANYU\WAMEIJI-XIAN
 
 For each current paired key, load the selected Wameiji observation's `raw_snapshot_path`, parse its exchange rate/proxy/domestic-shipping evidence, and call `rebuild_current_comparison`. A missing/unreadable snapshot must create `cost_pending`; it must not fall back to constants. Patch future batch rebuilds to use the same helper after their detail snapshot is persisted.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 Run: `pytest tests/test_reprice_dual_market_board.py tests/test_collect_dual_market_batch_script.py -q`
 

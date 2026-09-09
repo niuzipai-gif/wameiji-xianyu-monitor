@@ -290,3 +290,10 @@ def test_run_uses_reverse_discovery_seeds_instead_of_forward_seed_db(
     payload = __import__("json").loads(report.read_text(encoding="utf-8"))
     assert payload["outcomes"][0]["stage"] == "reverse_discovery"
     assert payload["outcomes"][1]["status"] == "verified"
+
+
+def test_persisted_pair_uses_the_shared_strict_profit_policy() -> None:
+    source = Path("scripts/collect_dual_market_batch.py").read_text(encoding="utf-8")
+
+    assert "strict_profit_cost_config_from_snapshot" in source
+    assert "DualMarketCostConfig()" not in source

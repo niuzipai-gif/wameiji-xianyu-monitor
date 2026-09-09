@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from pathlib import Path
 
 from cd_monitor.core.dual_market import DualMarketCostConfig
 
@@ -126,3 +127,17 @@ def strict_profit_cost_config(evidence: WameijiCostEvidence) -> DualMarketCostCo
         minimum_net_margin=0.25,
         policy_version=STRICT_PROFIT_POLICY_VERSION,
     )
+
+
+def strict_profit_cost_config_from_snapshot(
+    snapshot_path: str | Path | None,
+) -> DualMarketCostConfig:
+    """Read a saved detail page; an unreadable path becomes pending, never guessed."""
+
+    html = ""
+    if snapshot_path:
+        try:
+            html = Path(snapshot_path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            html = ""
+    return strict_profit_cost_config(parse_wameiji_cost_evidence(html))
