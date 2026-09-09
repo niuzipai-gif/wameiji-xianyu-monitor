@@ -47,7 +47,7 @@
 - Create: `src/cd_monitor/services/dual_market_profit_policy.py`
 - Create: `tests/test_dual_market_profit_policy.py`
 
-- [ ] **Step 1: Write failing evidence-parser tests**
+- [x] **Step 1: Write failing evidence-parser tests**
 
 ```python
 def test_saved_detail_extracts_displayed_rate_proxy_and_seller_paid_shipping() -> None:
@@ -79,13 +79,13 @@ def test_strict_policy_uses_user_confirmed_costs_and_uncapped_fee() -> None:
     assert config.minimum_net_margin == pytest.approx(0.25)
 ```
 
-- [ ] **Step 2: Run the tests and confirm they fail because the policy module is missing**
+- [x] **Step 2: Run the tests and confirm they fail because the policy module is missing**
 
 Run: `pytest tests/test_dual_market_profit_policy.py -q`
 
 Expected: FAIL with `ModuleNotFoundError` or missing symbols.
 
-- [ ] **Step 3: Implement a fail-closed parser and versioned policy**
+- [x] **Step 3: Implement a fail-closed parser and versioned policy**
 
 ```python
 STRICT_PROFIT_POLICY_VERSION = "wameiji-xianyu-net-v1"
@@ -118,7 +118,7 @@ def strict_profit_cost_config(evidence: WameijiCostEvidence) -> DualMarketCostCo
 
 The parser must prefer explicit numeric labels, map only explicit seller-paid shipping to zero, and never substitute the observed 0.0455/200 values when labels are missing.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 Run: `pytest tests/test_dual_market_profit_policy.py -q`
 

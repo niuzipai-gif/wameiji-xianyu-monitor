@@ -232,6 +232,9 @@ class DualMarketCostConfig:
     tax_cny: float | None = None
     sales_fee_rate: float | None = None
     sales_fee_cap_cny: float | None = None
+    sales_fee_uncapped: bool | None = None
+    minimum_net_margin: float | None = None
+    policy_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
