@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -68,9 +70,68 @@ def test_pages_build_copies_verified_snapshot_and_images(tmp_path: Path) -> None
             encoding="utf-8"
         )
     )
-    cards = payload["ready"] + payload["negative_profit"] + payload["cost_pending"]
-    assert cards
+    assert payload["schema_version"] == 2
+    assert payload["strategy"] == {
+        "policy_version": "wameiji-xianyu-net-v1",
+        "trade_direction": "wameiji_jpy_to_xianyu_cny",
+        "minimum_net_margin": 0.25,
+        "margin_denominator": "xianyu_sale_price_cny",
+    }
+    assert payload["summary"] == {
+        "evaluated_count": 50,
+        "eligible_count": 4,
+        "below_margin_count": 38,
+        "cost_pending_count": 8,
+        "waiting_wameiji_count": 0,
+        "waiting_xianyu_count": 0,
+    }
+    assert payload["below_margin"] == []
+    assert payload["cost_pending"] == []
+    assert payload["waiting_wameiji"] == []
+    assert payload["waiting_xianyu"] == []
+    cards = payload["eligible"]
+    assert len(cards) == 4
     for card in cards:
+        assert card["calculation"]["status"] == "eligible"
+        assert card["calculation"]["expected_profit_cny"] > 0
+        assert card["calculation"]["net_margin"] >= 0.25
+        assert card["xianyu"]["currency"] == "CNY"
+        assert card["wameiji"]["currency"] == "JPY"
+        assert card["xianyu"]["condition_group"] == card["wameiji"]["condition_group"]
+        assert card["xianyu"]["image_url"] != card["wameiji"]["image_url"]
+
+        costs = card["calculation"]["cost_breakdown"]
+        assert costs["missing_fields"] == []
+        assert costs["policy_version"] == "wameiji-xianyu-net-v1"
+        assert costs["international_shipping_cny"] == 15
+        assert costs["china_postage_cny"] == 5
+        assert costs["packaging_cny"] == 2
+        expected_purchase = (
+            costs["wameiji_item_cny"]
+            + costs["wameiji_domestic_shipping_cny"]
+            + costs["wameiji_proxy_fee_cny"]
+        )
+        assert math.isclose(costs["wameiji_purchase_cny"], expected_purchase)
+        expected_landed = (
+            expected_purchase
+            + costs["international_shipping_cny"]
+            + costs["china_postage_cny"]
+            + costs["packaging_cny"]
+            + costs["after_sale_reserve_cny"]
+            + costs["risk_reserve_cny"]
+            + costs["tax_cny"]
+        )
+        assert math.isclose(costs["landed_cost_cny"], expected_landed)
+        expected_profit = (
+            costs["xianyu_sale_cny"]
+            - costs["xianyu_seller_fee_cny"]
+            - costs["landed_cost_cny"]
+        )
+        assert math.isclose(costs["net_profit_cny"], expected_profit)
+        assert math.isclose(
+            costs["net_margin"], expected_profit / costs["xianyu_sale_cny"]
+        )
+
         for source in ("xianyu", "wameiji"):
             relative_image = card[source]["image_url"]
             assert relative_image.startswith("assets/dual-market/")
@@ -78,3 +139,33 @@ def test_pages_build_copies_verified_snapshot_and_images(tmp_path: Path) -> None
             assert image_path.is_file()
             with Image.open(image_path) as image:
                 image.verify()
+
+    manifest = json.loads(
+        (destination / "data" / "dual-market-snapshot.manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["published_comparisons"] == 4
+    assert manifest["dropped_comparison_ids"] == []
+    assert len(manifest["assets"]) == 8
+    for asset in manifest["assets"]:
+        asset_path = destination / asset["path"]
+        assert hashlib.sha256(asset_path.read_bytes()).hexdigest() == asset["sha256"]
+
+
+def test_public_snapshot_contains_no_private_runtime_material() -> None:
+    snapshot = Path("web/data/dual-market-snapshot.json").read_text(encoding="utf-8")
+    lowered = snapshot.lower()
+
+    for forbidden in (
+        "access_token",
+        "authorization",
+        "cookie",
+        "raw_snapshot_path",
+        "screenshot_path",
+        "file://",
+        "f:\\",
+        "c:\\users\\",
+        "<html",
+    ):
+        assert forbidden not in lowered

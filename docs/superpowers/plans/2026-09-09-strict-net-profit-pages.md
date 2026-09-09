@@ -366,15 +366,15 @@ git commit -m "fix: make public opportunity feed snapshot-first"
 - Replace: generated `web/assets/dual-market/YYYYMMDDTHHMMSSZZZZ/*`
 - Modify: `tests/test_pages_discovery_ui.py`
 
-- [ ] **Step 1: Resolve the actual local database path without starting services**
+- [x] **Step 1: Resolve the actual local database path without starting services**
 
 Run read-only repository/config checks and print the absolute resolved database path. Verify it is inside the current project's local data area and has the expected observation/comparison tables.
 
-- [ ] **Step 2: Prove collection remains paused before repricing**
+- [x] **Step 2: Prove collection remains paused before repricing**
 
 Inspect the repository's scheduled-task/status helper and process list. Record that no collection process is active and the Discovery Worker task is disabled. Do not modify the task.
 
-- [ ] **Step 3: Reprice existing evidence only**
+- [x] **Step 3: Reprice existing evidence only**
 
 Run:
 
@@ -384,7 +384,7 @@ python scripts/reprice_dual_market_board.py --db "F:\WAMEIJI-XIANYU\WAMEIJI-XIAN
 
 Expected current baseline: evaluated 50, eligible 4, cost pending 8, below margin 38. If the output differs, stop publication, inspect the exact per-state records and formula inputs, fix the parser/calculator, and rerun from the tests. Never force counts to match the expectation.
 
-- [ ] **Step 4: Export the local board without collecting**
+- [x] **Step 4: Export the local board without collecting**
 
 Use either a board JSON produced directly from the same database or the already running local API after verifying its database path. Run:
 
@@ -394,11 +394,11 @@ python scripts/export_dual_market_pages_snapshot.py --board-file data/local/stri
 
 Expected: 4 qualified cards and 8 image assets for the current baseline.
 
-- [ ] **Step 5: Independently validate data, formula, images, and secret hygiene**
+- [x] **Step 5: Independently validate data, formula, images, and secret hygiene**
 
 Check that every public card has margin `>= 0.25`, two distinct existing image files, left CNY/right JPY, the cost breakdown totals correctly, no absolute local path/cookie/token/raw HTML is present, and manifest SHA-256 values match the files.
 
-- [ ] **Step 6: Extend the Pages build test and commit sanitized evidence**
+- [x] **Step 6: Extend the Pages build test and commit sanitized evidence**
 
 Run: `pytest tests/test_pages_discovery_ui.py tests/test_pages_snapshot.py -q`
 
