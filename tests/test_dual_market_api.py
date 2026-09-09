@@ -17,14 +17,17 @@ COST_CONFIG = DualMarketCostConfig(
     exchange_rate_cny_per_jpy=0.05,
     japan_domestic_shipping_jpy=100,
     proxy_fee_jpy=200,
-    international_shipping_per_item_cny=18,
-    china_reship_cny=12,
+    international_shipping_per_item_cny=15,
+    china_reship_cny=5,
     packaging_cny=2,
-    after_sale_reserve_cny=5,
-    risk_reserve_cny=8,
+    after_sale_reserve_cny=0,
+    risk_reserve_cny=0,
     tax_cny=0,
-    sales_fee_rate=0.006,
-    sales_fee_cap_cny=60,
+    sales_fee_rate=0.016,
+    sales_fee_cap_cny=None,
+    sales_fee_uncapped=True,
+    minimum_net_margin=0.25,
+    policy_version="wameiji-xianyu-net-v1",
 )
 
 
@@ -66,7 +69,9 @@ def post_json(url: str, payload: dict[str, object]) -> tuple[int, dict[str, obje
         return error.code, json.loads(error.read().decode("utf-8"))
 
 
-def test_dual_market_board_returns_exact_ready_and_waiting_streams(tmp_path: Path, monkeypatch) -> None:
+def test_dual_market_board_projects_only_eligible_cards_and_auditable_funnel(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setenv("WEB_ACCESS_TOKEN", "viewer-secret")
     monkeypatch.setenv("CD_JPY_TO_CNY", "0.047")
     db_path = tmp_path / "monitor.db"
@@ -92,7 +97,70 @@ def test_dual_market_board_returns_exact_ready_and_waiting_streams(tmp_path: Pat
             image_url="https://images.example/wameiji/m-waiting.jpg",
         ),
     )
+    insert_listing_observation(
+        db_path,
+        make_observation(
+            source="xianyu",
+            source_listing_id="x-waiting",
+            canonical_product_key="catalog:waiting-wameiji",
+            price=188,
+            currency="CNY",
+            url="https://www.goofish.com/item?id=x-waiting",
+            image_url="https://images.example/xianyu/x-waiting.jpg",
+            evidence_level="search_card",
+        ),
+    )
+    insert_listing_observation(
+        db_path,
+        make_observation(
+            source_listing_id="m-below",
+            canonical_product_key="catalog:below",
+            url="https://meruki.cn/mall/mercari/detail/m-below",
+            image_url="https://images.example/wameiji/m-below.jpg",
+        ),
+    )
+    insert_listing_observation(
+        db_path,
+        make_observation(
+            source="xianyu",
+            source_listing_id="x-below",
+            canonical_product_key="catalog:below",
+            price=120,
+            currency="CNY",
+            url="https://www.goofish.com/item?id=x-below",
+            image_url="https://images.example/xianyu/x-below.jpg",
+            evidence_level="search_card",
+        ),
+    )
+    insert_listing_observation(
+        db_path,
+        make_observation(
+            source_listing_id="m-pending",
+            canonical_product_key="catalog:pending",
+            url="https://meruki.cn/mall/mercari/detail/m-pending",
+            image_url="https://images.example/wameiji/m-pending.jpg",
+        ),
+    )
+    insert_listing_observation(
+        db_path,
+        make_observation(
+            source="xianyu",
+            source_listing_id="x-pending",
+            canonical_product_key="catalog:pending",
+            price=298,
+            currency="CNY",
+            url="https://www.goofish.com/item?id=x-pending",
+            image_url="https://images.example/xianyu/x-pending.jpg",
+            evidence_level="search_card",
+        ),
+    )
     rebuild_current_comparison(db_path, "catalog:srcl3520", COST_CONFIG)
+    rebuild_current_comparison(db_path, "catalog:below", COST_CONFIG)
+    rebuild_current_comparison(
+        db_path,
+        "catalog:pending",
+        replace(COST_CONFIG, proxy_fee_jpy=None),
+    )
     server = create_server("127.0.0.1", 0, db_path, static_dir="web")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -107,20 +175,35 @@ def test_dual_market_board_returns_exact_ready_and_waiting_streams(tmp_path: Pat
 
     assert code == 200
     assert payload["display_exchange_rate_cny_per_jpy"] == 0.047
+    assert payload["strategy"] == {
+        "policy_version": "wameiji-xianyu-net-v1",
+        "trade_direction": "wameiji_jpy_to_xianyu_cny",
+        "minimum_net_margin": 0.25,
+        "margin_denominator": "xianyu_sale_price_cny",
+    }
     assert payload["summary"] == {
-        "ready_count": 1,
-        "negative_profit_count": 0,
-        "cost_pending_count": 0,
-        "waiting_wameiji_count": 0,
+        "evaluated_count": 3,
+        "eligible_count": 1,
+        "below_margin_count": 1,
+        "cost_pending_count": 1,
+        "waiting_wameiji_count": 1,
         "waiting_xianyu_count": 1,
     }
-    [ready] = payload["ready"]
-    assert ready["xianyu"]["listing_id"] == xianyu_id
-    assert ready["wameiji"]["listing_id"] == wameiji_id
-    assert ready["xianyu"]["image_url"] == "https://images.example/xianyu/x-1.jpg"
-    assert ready["wameiji"]["image_url"] == "https://images.example/wameiji/m-1.jpg"
-    assert ready["calculation"]["status"] == "ready"
-    assert payload["waiting_xianyu"][0]["wameiji"]["listing_id"] is not None
+    [eligible] = payload["eligible"]
+    assert eligible["xianyu"]["listing_id"] == xianyu_id
+    assert eligible["wameiji"]["listing_id"] == wameiji_id
+    assert eligible["xianyu"]["image_url"] == "https://images.example/xianyu/x-1.jpg"
+    assert eligible["wameiji"]["image_url"] == "https://images.example/wameiji/m-1.jpg"
+    assert eligible["calculation"]["status"] == "eligible"
+    assert eligible["calculation"]["cost_breakdown"]["international_shipping_cny"] == 15
+    assert eligible["calculation"]["cost_breakdown"]["china_postage_cny"] == 5
+    assert payload["below_margin"] == []
+    assert payload["cost_pending"] == []
+    assert payload["waiting_xianyu"] == []
+    payload_text = json.dumps(payload, ensure_ascii=False)
+    assert "m-below" not in payload_text
+    assert "m-pending" not in payload_text
+    assert "m-waiting" not in payload_text
 
 
 def test_dual_market_board_hides_stale_evidence(tmp_path: Path, monkeypatch) -> None:

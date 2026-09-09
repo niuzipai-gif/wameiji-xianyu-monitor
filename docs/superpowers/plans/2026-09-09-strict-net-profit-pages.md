@@ -235,7 +235,7 @@ git commit -m "feat: reprice saved dual-market evidence offline"
 - Modify: `src/cd_monitor/web_server.py`
 - Modify: `tests/test_dual_market_api.py`
 
-- [ ] **Step 1: Write failing API projection tests**
+- [x] **Step 1: Write failing API projection tests**
 
 For a database containing all three comparison states, assert:
 
@@ -256,15 +256,15 @@ assert board["cost_pending"] == []
 assert board["eligible"][0]["calculation"]["cost_breakdown"]["international_shipping_cny"] == 15
 ```
 
-- [ ] **Step 2: Run and confirm the old ready/negative card projection fails**
+- [x] **Step 2: Run and confirm the old ready/negative card projection fails**
 
 Run: `pytest tests/test_dual_market_api.py -q`
 
-- [ ] **Step 3: Implement one auditable board projection**
+- [x] **Step 3: Implement one auditable board projection**
 
 Retain below-margin and pending counts, but do not serialize their product/image cards. Include strategy version, formula fields, generated/captured times, and the complete cost breakdown on each qualified card. Retain compatibility aliases only if existing local consumers need them; aliases must never reintroduce rejected cards.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 Run: `pytest tests/test_dual_market_api.py tests/test_discovery_api.py -q`
 
