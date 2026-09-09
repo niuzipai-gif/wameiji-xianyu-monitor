@@ -416,7 +416,7 @@ The staged file list must contain no `data/local`, browser profile, cookie, toke
 **Files:**
 - Verify all changed files; modify only to fix attributable failures.
 
-- [ ] **Step 1: Run focused and full regression suites**
+- [x] **Step 1: Run focused and full regression suites**
 
 ```powershell
 pytest tests/test_dual_market_profit_policy.py tests/test_dual_market_service.py tests/test_reprice_dual_market_board.py tests/test_collect_dual_market_batch_script.py tests/test_dual_market_api.py tests/test_pages_snapshot.py tests/test_dual_market_pages_loader.py tests/test_remote_pages_runtime.py tests/test_pages_dual_market_ui.py tests/test_pages_discovery_ui.py -q
@@ -427,7 +427,7 @@ node --check web/discovery-ui.js
 
 Expected: all tests PASS. Investigate failures; do not weaken assertions or publish with unexplained red tests.
 
-- [ ] **Step 2: Build and independently inspect the static site**
+- [x] **Step 2: Build and independently inspect the static site**
 
 ```powershell
 python scripts/build_pages.py --dest _site
@@ -435,15 +435,15 @@ python scripts/build_pages.py --dest _site
 
 Read `_site/data/dual-market-snapshot.json`, verify the expected eligible IDs/count and all referenced files, and confirm rejected records have no public card assets.
 
-- [ ] **Step 3: Verify local UI in both modes**
+- [x] **Step 3: Verify local UI in both modes**
 
 Open the local site normally and with `?live=1`. The normal static build must display the saved qualified snapshot; explicit live mode may use the API. Confirm the horizontal Xianyu/analysis/Wameiji order, currencies, breakdown, funnel, images, and zero-state behavior.
 
-- [ ] **Step 4: Recheck the collection safety boundary**
+- [x] **Step 4: Recheck the collection safety boundary**
 
 Repeat the scheduled-task and process checks. Expected: Discovery Worker remains disabled and there is no collection process.
 
-- [ ] **Step 5: Review the final diff against the approved specification**
+- [x] **Step 5: Review the final diff against the approved specification**
 
 Check every locked policy and exclusion, inspect `git diff --check`, and ensure `.superpowers/` remains untracked and unstaged. Commit any attributable test/integration corrections separately.
 
