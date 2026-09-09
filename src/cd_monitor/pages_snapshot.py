@@ -34,12 +34,7 @@ MAX_IMAGE_BYTES = 15 * 1024 * 1024
 MIN_IMAGE_EDGE = 80
 MAX_IMAGE_EDGE = 10_000
 DEFAULT_DISPLAY_EXCHANGE_RATE_CNY_PER_JPY = 0.046
-CATEGORIES = ("ready", "negative_profit", "cost_pending")
-EXPECTED_CALCULATION_STATUS = {
-    "ready": "ready",
-    "negative_profit": "negative_profit",
-    "cost_pending": "cost_pending",
-}
+PUBLIC_CATEGORY = "eligible"
 SOURCE_FIELDS = (
     "listing_id",
     "source",
@@ -61,6 +56,31 @@ CALCULATION_FIELDS = (
     "expected_profit_cny",
     "net_margin",
     "created_at",
+    "cost_breakdown",
+)
+COST_BREAKDOWN_FIELDS = (
+    "policy_version",
+    "minimum_net_margin",
+    "missing_fields",
+    "xianyu_sale_cny",
+    "xianyu_seller_fee_cny",
+    "wameiji_exchange_rate_cny_per_jpy",
+    "wameiji_item_jpy",
+    "wameiji_item_cny",
+    "wameiji_domestic_shipping_jpy",
+    "wameiji_domestic_shipping_cny",
+    "wameiji_proxy_fee_jpy",
+    "wameiji_proxy_fee_cny",
+    "wameiji_purchase_cny",
+    "international_shipping_cny",
+    "china_postage_cny",
+    "packaging_cny",
+    "after_sale_reserve_cny",
+    "risk_reserve_cny",
+    "tax_cny",
+    "landed_cost_cny",
+    "net_profit_cny",
+    "net_margin",
 )
 
 
@@ -187,7 +207,20 @@ def _public_source(
     return ({field: raw_source.get(field) for field in SOURCE_FIELDS}, image_url)
 
 
-def _public_card(raw_card: object, category: str) -> tuple[int, dict[str, object], dict[str, str]]:
+def _finite_number(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(value)
+    )
+
+
+def _public_card(
+    raw_card: object,
+    *,
+    minimum_net_margin: float,
+    policy_version: str,
+) -> tuple[int, dict[str, object], dict[str, str]]:
     if not isinstance(raw_card, dict):
         raise SnapshotExportError("comparison is not an object")
     comparison_id = raw_card.get("comparison_id")
@@ -212,8 +245,37 @@ def _public_card(raw_card: object, category: str) -> tuple[int, dict[str, object
     raw_calculation = raw_card.get("calculation")
     if not isinstance(raw_calculation, dict):
         raise SnapshotExportError("comparison calculation is missing")
-    if raw_calculation.get("status") != EXPECTED_CALCULATION_STATUS[category]:
-        raise SnapshotExportError("comparison calculation status does not match its category")
+    if raw_calculation.get("status") != PUBLIC_CATEGORY:
+        raise SnapshotExportError("comparison calculation is not eligible")
+    if not _finite_number(raw_calculation.get("expected_profit_cny")) or float(
+        raw_calculation["expected_profit_cny"]
+    ) <= 0:
+        raise SnapshotExportError("eligible comparison profit is invalid")
+    if not _finite_number(raw_calculation.get("net_margin")) or float(
+        raw_calculation["net_margin"]
+    ) < minimum_net_margin:
+        raise SnapshotExportError("eligible comparison is below the margin threshold")
+    raw_breakdown = raw_calculation.get("cost_breakdown")
+    if not isinstance(raw_breakdown, dict):
+        raise SnapshotExportError("eligible comparison cost breakdown is missing")
+    if raw_breakdown.get("policy_version") != policy_version:
+        raise SnapshotExportError("eligible comparison policy version does not match")
+    if raw_breakdown.get("missing_fields") != []:
+        raise SnapshotExportError("eligible comparison has missing cost fields")
+
+    required_breakdown_numbers = set(COST_BREAKDOWN_FIELDS) - {
+        "policy_version",
+        "missing_fields",
+    }
+    if any(not _finite_number(raw_breakdown.get(name)) for name in required_breakdown_numbers):
+        raise SnapshotExportError("eligible comparison cost breakdown is incomplete")
+    if float(raw_breakdown["net_margin"]) < minimum_net_margin:
+        raise SnapshotExportError("eligible cost breakdown is below the margin threshold")
+
+    calculation = {field: raw_calculation.get(field) for field in CALCULATION_FIELDS}
+    calculation["cost_breakdown"] = {
+        field: raw_breakdown.get(field) for field in COST_BREAKDOWN_FIELDS
+    }
 
     return (
         comparison_id,
@@ -222,9 +284,7 @@ def _public_card(raw_card: object, category: str) -> tuple[int, dict[str, object
             "canonical_product_key": canonical_key,
             "xianyu": xianyu,
             "wameiji": wameiji,
-            "calculation": {
-                field: raw_calculation.get(field) for field in CALCULATION_FIELDS
-            },
+            "calculation": calculation,
         },
         {"xianyu": xianyu_image, "wameiji": wameiji_image},
     )
@@ -259,6 +319,41 @@ def export_pages_snapshot(
         raise SnapshotExportError("generated_at must include a timezone")
     if not isinstance(board, dict):
         raise SnapshotExportError("board must be an object")
+    strategy = board.get("strategy")
+    if not isinstance(strategy, dict):
+        raise SnapshotExportError("board strategy is missing")
+    if strategy.get("trade_direction") != "wameiji_jpy_to_xianyu_cny":
+        raise SnapshotExportError("board trade direction is invalid")
+    policy_version = str(strategy.get("policy_version") or "").strip()
+    minimum_net_margin = strategy.get("minimum_net_margin")
+    if not policy_version or not _finite_number(minimum_net_margin):
+        raise SnapshotExportError("board profit policy is incomplete")
+    minimum_net_margin = float(minimum_net_margin)
+    if minimum_net_margin < 0.25:
+        raise SnapshotExportError("board margin threshold is below 25 percent")
+    raw_summary = board.get("summary")
+    if not isinstance(raw_summary, dict):
+        raise SnapshotExportError("board summary is missing")
+    summary_fields = (
+        "evaluated_count",
+        "eligible_count",
+        "below_margin_count",
+        "cost_pending_count",
+        "waiting_wameiji_count",
+        "waiting_xianyu_count",
+    )
+    if any(
+        isinstance(raw_summary.get(field), bool)
+        or not isinstance(raw_summary.get(field), int)
+        or int(raw_summary[field]) < 0
+        for field in summary_fields
+    ):
+        raise SnapshotExportError("board summary counts are invalid")
+    source_rows = board.get(PUBLIC_CATEGORY, [])
+    if not isinstance(source_rows, list):
+        raise SnapshotExportError("board eligible category is not a list")
+    if int(raw_summary["eligible_count"]) != len(source_rows):
+        raise SnapshotExportError("board eligible count does not match its cards")
 
     snapshot_id = generated_at.strftime("%Y%m%dT%H%M%S%z")
     web_dir = Path(web_dir)
@@ -269,22 +364,22 @@ def export_pages_snapshot(
         raise SnapshotExportError(f"snapshot asset directory already exists: {snapshot_id}")
     staging = Path(tempfile.mkdtemp(prefix=f".{snapshot_id}-", dir=assets_root))
 
-    accepted: dict[str, list[dict[str, object]]] = {name: [] for name in CATEGORIES}
+    accepted: list[dict[str, object]] = []
     dropped: list[int] = []
     manifest_assets: list[dict[str, object]] = []
     seen_comparison_ids: set[int] = set()
     try:
-        for category in CATEGORIES:
-            rows = board.get(category, [])
-            if not isinstance(rows, list):
-                raise SnapshotExportError(f"board category is not a list: {category}")
-            for raw_card in rows:
+        for raw_card in source_rows:
                 card_files: list[Path] = []
                 comparison_id = (
                     raw_card.get("comparison_id") if isinstance(raw_card, dict) else None
                 )
                 try:
-                    checked_id, card, source_images = _public_card(raw_card, category)
+                    checked_id, card, source_images = _public_card(
+                        raw_card,
+                        minimum_net_margin=minimum_net_margin,
+                        policy_version=policy_version,
+                    )
                     if checked_id in seen_comparison_ids:
                         raise SnapshotExportError("comparison id is duplicated")
                     card_assets: list[dict[str, object]] = []
@@ -310,7 +405,7 @@ def export_pages_snapshot(
                                 "height": height,
                             }
                         )
-                    accepted[category].append(card)
+                    accepted.append(card)
                     manifest_assets.extend(card_assets)
                     seen_comparison_ids.add(checked_id)
                 except (
@@ -325,39 +420,48 @@ def export_pages_snapshot(
                     if isinstance(comparison_id, int) and not isinstance(comparison_id, bool):
                         dropped.append(comparison_id)
 
-        published_count = sum(len(accepted[name]) for name in CATEGORIES)
-        if published_count == 0:
-            raise SnapshotExportError("no publishable comparisons")
+        published_count = len(accepted)
+        if source_rows and published_count == 0:
+            raise SnapshotExportError(
+                "no publishable comparisons; no publishable eligible comparisons"
+            )
 
         os.replace(staging, final_asset_dir)
+        public_summary = {field: int(raw_summary[field]) for field in summary_fields}
+        if dropped:
+            public_summary["source_eligible_count"] = public_summary["eligible_count"]
+            public_summary["eligible_count"] = published_count
         payload: dict[str, object] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "generated_at": generated_at.isoformat(),
+            "source_board_generated_at": board.get("generated_at"),
             "mode": "verified_static_snapshot",
             "display_exchange_rate_cny_per_jpy": (
                 float(board["display_exchange_rate_cny_per_jpy"])
                 if _finite_price(board.get("display_exchange_rate_cny_per_jpy"))
                 else DEFAULT_DISPLAY_EXCHANGE_RATE_CNY_PER_JPY
             ),
-            "summary": {
-                "ready_count": len(accepted["ready"]),
-                "negative_profit_count": len(accepted["negative_profit"]),
-                "cost_pending_count": len(accepted["cost_pending"]),
-                "waiting_wameiji_count": 0,
-                "waiting_xianyu_count": 0,
+            "strategy": {
+                "policy_version": policy_version,
+                "trade_direction": strategy["trade_direction"],
+                "minimum_net_margin": minimum_net_margin,
+                "margin_denominator": strategy.get("margin_denominator"),
             },
-            "ready": accepted["ready"],
-            "negative_profit": accepted["negative_profit"],
-            "cost_pending": accepted["cost_pending"],
+            "summary": public_summary,
+            "eligible": accepted,
+            "below_margin": [],
+            "cost_pending": [],
             "waiting_wameiji": [],
             "waiting_xianyu": [],
             "collector": {"state": "paused"},
         }
         manifest: dict[str, object] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "snapshot_id": snapshot_id,
             "generated_at": generated_at.isoformat(),
             "published_comparisons": published_count,
+            "source_eligible_comparisons": len(source_rows),
+            "policy_version": policy_version,
             "dropped_comparison_ids": sorted(set(dropped)),
             "assets": manifest_assets,
         }

@@ -279,7 +279,7 @@ git commit -m "feat: project eligible dual-market opportunities"
 - Modify: `src/cd_monitor/pages_snapshot.py`
 - Modify: `tests/test_pages_snapshot.py`
 
-- [ ] **Step 1: Rewrite the fixture and add failing tests**
+- [x] **Step 1: Rewrite the fixture and add failing tests**
 
 Use a fixture with one qualified card and nonzero below-margin/pending counts. Assert only the qualified card creates two image assets, rejected arrays are absent or empty, and summary counts are preserved from the input board.
 
@@ -290,15 +290,15 @@ def test_zero_eligible_board_publishes_an_honest_zero_state_without_assets(...):
 def test_failed_image_for_nonempty_eligible_input_preserves_last_good_snapshot(...): ...
 ```
 
-- [ ] **Step 2: Run and confirm current exporter publishes rejected cards**
+- [x] **Step 2: Run and confirm current exporter publishes rejected cards**
 
 Run: `pytest tests/test_pages_snapshot.py -q`
 
-- [ ] **Step 3: Implement qualified-only atomic output**
+- [x] **Step 3: Implement qualified-only atomic output**
 
 Only iterate `eligible` (or the temporary `ready` compatibility alias) for validation and asset copying. Permit a successful zero-card snapshot only when the source board itself has zero eligible cards. If source eligible rows exist but none survive validation, raise `SnapshotExportError` before replacing JSON, manifest, or the prior asset set.
 
-- [ ] **Step 4: Run and commit**
+- [x] **Step 4: Run and commit**
 
 Run: `pytest tests/test_pages_snapshot.py -q`
 
