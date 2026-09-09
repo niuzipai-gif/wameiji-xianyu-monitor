@@ -5,20 +5,22 @@ from pathlib import Path
 
 
 def extract_dual_market_renderer(javascript: str) -> str:
-    start = javascript.index("function readyComparisonCard")
+    start = javascript.index("function eligibleComparisonCard")
     end = javascript.index("function setSelectionBoardQuery")
     return javascript[start:end]
 
 
-def test_dual_market_ui_renders_source_specific_images_and_waiting_state() -> None:
+def test_dual_market_ui_renders_only_eligible_pairs_with_both_source_images() -> None:
     javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
     loader = Path("web/dual-market-data.js").read_text(encoding="utf-8")
     renderer = extract_dual_market_renderer(javascript)
 
     assert "item.xianyu.image_url" in renderer
     assert "item.wameiji.image_url" in renderer
-    assert "waiting_wameiji" in renderer
-    assert "waiting_xianyu" in renderer
+    assert "board.eligible" in renderer
+    assert "waiting_wameiji" not in renderer
+    assert "waiting_xianyu" not in renderer
+    assert "nonReadyComparisonCard" not in renderer
     assert "/api/dual-market/board" in loader
     assert "xianyu_reference_price" not in renderer
 
@@ -56,7 +58,7 @@ def test_homepage_names_cd_and_galgame_physical_media() -> None:
     homepage = Path("web/index.html").read_text(encoding="utf-8")
 
     assert "CD 与 GalGame 实体" in homepage
-    assert "已核验双边" in homepage
+    assert "达标机会" in homepage
 
 
 def test_homepage_distinguishes_xianyu_search_evidence_from_wameiji_detail() -> None:
@@ -74,6 +76,7 @@ def test_dual_market_ui_fails_closed_when_its_board_is_unavailable() -> None:
     assert 'apiGet("/api/dual-market/board").catch(() => null)' not in javascript
     assert 'mode: "unavailable"' in loader
     assert "unavailable: true" in loader
+    assert "eligible: []" in loader
     assert "双边证据流暂不可用" in javascript
     assert "不展示旧机会卡" in javascript
 
@@ -133,15 +136,18 @@ def test_dual_market_ui_states_the_china_resale_profit_direction() -> None:
     assert "闲鱼最高净利" in homepage
 
 
-def test_dual_market_kpis_label_cost_pending_pairs_without_zero_profit() -> None:
+def test_dual_market_kpis_use_only_eligible_profit_and_show_the_full_funnel() -> None:
     javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
     start = javascript.index("function renderKpis")
     end = javascript.index("function safeHttpUrl")
     renderer = javascript[start:end]
 
-    assert "verifiedPairCount" in renderer
+    assert "eligibleCount" in renderer
+    assert "evaluatedCount" in renderer
     assert "costPendingCount" in renderer
-    assert '"待算"' in renderer
+    assert '"待算"' not in renderer
+    assert 'setText("funnelEvaluated"' in renderer
+    assert 'setText("funnelEligible"' in renderer
 
 
 def test_homepage_loads_snapshot_loader_before_the_board_renderer() -> None:
@@ -154,7 +160,9 @@ def test_homepage_loads_snapshot_loader_before_the_board_renderer() -> None:
 def test_homepage_busts_cached_renderer_after_currency_and_resale_fix() -> None:
     homepage = Path("web/index.html").read_text(encoding="utf-8")
 
-    assert "discovery-ui.js?v=20260909-public-snapshot-no-prompt" in homepage
+    assert "dual-market-data.js?v=20260909-strict-net-v1" in homepage
+    assert "discovery-ui.js?v=20260909-strict-net-v1" in homepage
+    assert "styles/kuro.css?v=20260909-strict-net-v1" in homepage
 
 
 def test_board_refresh_decouples_legacy_api_failures_from_dual_market_data() -> None:
@@ -162,7 +170,27 @@ def test_board_refresh_decouples_legacy_api_failures_from_dual_market_data() -> 
 
     assert 'apiGet("/api/discovery/board").catch(() => emptyBoard)' in javascript
     assert 'apiGet("/api/discovery/commands").catch(() => ({ items: [] }))' in javascript
-    assert "window.DualMarketData.load({ apiGet })" in javascript
+    assert "window.DualMarketData.load({ apiGet, live: view.liveMode })" in javascript
+
+
+def test_eligible_card_exposes_costs_match_evidence_and_recheck_warning() -> None:
+    javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    renderer = extract_dual_market_renderer(javascript)
+    homepage = Path("web/index.html").read_text(encoding="utf-8")
+
+    assert "cost-breakdown" in javascript
+    assert "cost_breakdown.wameiji_exchange_rate_cny_per_jpy" in renderer
+    assert "15 CNY" in javascript
+    assert "5 CNY" in javascript
+    assert "闲鱼手续费" in javascript
+    assert "匹配证据" in renderer
+    assert "下单前重新核验" in renderer
+    assert 'id="profitFunnel"' in homepage
+    assert 'id="funnelEvaluated"' in homepage
+    assert 'id="funnelCostPending"' in homepage
+    assert 'id="funnelBelowMargin"' in homepage
+    assert 'id="funnelEligible"' in homepage
+    assert "净利率至少 25%" in homepage
 
 
 def test_static_snapshot_status_is_explicit_about_freshness() -> None:

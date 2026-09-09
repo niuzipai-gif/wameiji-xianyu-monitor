@@ -759,6 +759,35 @@ body.kuro #home .stat { padding: 12px; }
 body.kuro #home .mascot-stage { min-height: 310px; padding-top: 12px; }
 body.kuro #home .mascot-stage img { max-height: 245px; }
 
+body.kuro .profit-funnel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 10px;
+  margin: 0 0 15px;
+  padding: 12px;
+  border: 1px solid rgba(125, 143, 197, .2);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .68);
+  box-shadow: 0 12px 28px rgba(79, 104, 164, .08);
+}
+body.kuro .profit-funnel > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: rgba(238, 243, 254, .76);
+  color: var(--kuro-muted);
+}
+body.kuro .profit-funnel > div.eligible {
+  background: linear-gradient(135deg, rgba(127, 160, 240, .18), rgba(212, 83, 121, .14));
+  color: var(--kuro-crimson);
+}
+body.kuro .profit-funnel small { font-size: 11px; font-weight: 700; }
+body.kuro .profit-funnel strong { color: var(--kuro-ink); font-size: 20px; }
+body.kuro .profit-funnel > span { display: none; }
+
 body.kuro #homeFeed {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -801,6 +830,12 @@ body.kuro #homeFeed .discovery-op-card .product .desc {
   line-height: 1.45;
 }
 body.kuro #homeFeed .discovery-op-card .analysis { padding: 11px 8px; }
+body.kuro #homeFeed .qualified-chip {
+  display: block;
+  width: fit-content;
+  margin: 0 auto 8px;
+  font-size: 8px;
+}
 body.kuro #homeFeed .discovery-op-card .comparison-rail {
   display: block;
   margin-bottom: 8px;
@@ -849,6 +884,44 @@ body.kuro #homeFeed .discovery-op-card .reason {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+body.kuro #homeFeed .match-evidence {
+  display: grid;
+  gap: 3px;
+  margin-top: 7px;
+  padding: 7px;
+  border-radius: 9px;
+  background: rgba(224, 246, 235, .74);
+  color: #47705a;
+  font-size: 8px;
+  line-height: 1.4;
+}
+body.kuro #homeFeed .match-evidence b { color: #2f684b; }
+body.kuro #homeFeed .cost-breakdown {
+  margin-top: 7px;
+  border: 1px solid rgba(125, 143, 197, .22);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .72);
+  color: var(--kuro-muted);
+  font-size: 8px;
+}
+body.kuro #homeFeed .cost-breakdown summary {
+  padding: 7px;
+  cursor: pointer;
+  font-weight: 800;
+  line-height: 1.4;
+}
+body.kuro #homeFeed .cost-breakdown-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 6px;
+  padding: 0 7px 7px;
+  line-height: 1.35;
+}
+body.kuro #homeFeed .cost-breakdown-grid b { color: var(--kuro-ink); text-align: right; }
+body.kuro #homeFeed .recheck-warning {
+  color: #815160;
+  background: rgba(255, 238, 243, .76);
+}
 
 @media (max-width: 1180px) {
   body.kuro #homeFeed { grid-template-columns: 1fr; }
@@ -859,6 +932,7 @@ body.kuro #homeFeed .discovery-op-card .reason {
 }
 
 @media (max-width: 760px) {
+  body.kuro .profit-funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   body.kuro #homeFeed .discovery-op-card { grid-template-columns: 1fr; }
   body.kuro #homeFeed .discovery-op-card .analysis { order: -1; }
   body.kuro #homeFeed .discovery-op-card .side-product.xianyu { order: 2; }

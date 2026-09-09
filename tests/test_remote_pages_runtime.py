@@ -1,6 +1,7 @@
 """Regression checks for the GitHub Pages viewer runtime."""
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -20,6 +21,8 @@ def _run_browserless_app_harness(
     prompt_value: str = "",
     prompt_throws: bool = False,
     require_access_token: bool = False,
+    storage_values: dict[str, str] | None = None,
+    page_search: str = "",
     document_ready_state: str = "loading",
 ) -> None:
     """Run ``app.js`` with a minimal browser surface in Node.
@@ -39,7 +42,7 @@ const requests = [];
 const websocketUrls = [];
 const webSockets = [];
 const classes = {{ add() {{}}, remove() {{}}, toggle() {{}} }};
-const storageValues = {{}};
+const storageValues = {json.dumps(storage_values or {})};
 const storage = {{
   getItem(key) {{ return storageValues[key] || ""; }},
   setItem(key, value) {{ storageValues[key] = String(value); }},
@@ -58,7 +61,7 @@ const document = {{
   documentElement: {{ classList: classes, dataset: {{}}, setAttribute() {{}}, removeAttribute() {{}} }},
 }};
 const window = {{
-  location: {{ href: {page_origin!r}, origin: {page_origin!r}, search: "" }},
+  location: {{ href: {page_origin!r} + {page_search!r}, origin: {page_origin!r}, search: {page_search!r} }},
   CD_MONITOR_CONFIG: {{ apiBase: {api_base!r}, accessToken: {access_token!r} }},
   localStorage: storage,
   prompt() {{
@@ -84,8 +87,31 @@ const context = {{
     requests.push(String(url));
     const isSnapshot = String(url).includes("/data/dual-market-snapshot.json");
     const authorized = isSnapshot || !{str(require_access_token).lower()} || String(url).includes("access_token={prompt_value}");
-    const payload = isSnapshot
-      ? {{ generated_at: "2099-09-09T00:00:00+08:00", summary: {{}}, ready: [], negative_profit: [], cost_pending: [], waiting_wameiji: [], waiting_xianyu: [], collector: {{ state: "paused" }} }}
+    const strictBoard = {{
+      schema_version: 2,
+      generated_at: "2099-09-09T00:00:00+08:00",
+      strategy: {{
+        policy_version: "wameiji-xianyu-net-v1",
+        trade_direction: "wameiji_jpy_to_xianyu_cny",
+        minimum_net_margin: 0.25,
+      }},
+      summary: {{
+        evaluated_count: 1,
+        eligible_count: 1,
+        below_margin_count: 0,
+        cost_pending_count: 0,
+        waiting_wameiji_count: 0,
+        waiting_xianyu_count: 0,
+      }},
+      eligible: [{{ comparison_id: 4 }}],
+      below_margin: [],
+      cost_pending: [],
+      waiting_wameiji: [],
+      waiting_xianyu: [],
+      collector: {{ state: "paused" }},
+    }};
+    const payload = isSnapshot || String(url).includes("/api/dual-market/board")
+      ? strictBoard
       : String(url).includes("/commands") ? {{ items: [] }} : {{ summary: {{}}, pools: [], opportunities: [], collector: {{ state: "paused" }} }};
     return {{ ok: authorized, status: authorized ? 200 : 401, json: async () => payload, text: async () => "" }};
   }},
@@ -208,13 +234,36 @@ def test_remote_pages_loads_public_snapshot_without_token_prompt() -> None:
     )
 
 
-def test_remote_pages_with_token_fetches_live_board_without_prompt() -> None:
-    """An explicitly configured token can still opt the viewer into live data."""
+def test_remote_pages_ignores_stored_live_credentials_without_live_query() -> None:
+    """A stale browser token must not silently replace the public snapshot."""
 
     _run_browserless_app_harness(
         'if (promptCount !== 0) throw new Error("unexpected prompt count=" + promptCount); '
         'const remote = requests.filter((url) => url.startsWith("https://collector.example")); '
-        'if (!remote.length) throw new Error("live collector was not requested"); '
+        'if (remote.length) throw new Error("unexpected collector request: " + remote.join(", ")); '
+        'if (!requests.some((url) => url.includes("/data/dual-market-snapshot.json"))) '
+        'throw new Error("snapshot was not requested: " + requests.join(", "));',
+        api_base="https://collector.example",
+        page_origin="https://viewer.example/",
+        access_token="viewer-token",
+        include_discovery=True,
+        run_initial_timeouts=True,
+        require_access_token=True,
+        storage_values={
+            "cd_monitor_api_base": "https://collector.example",
+            "cd_monitor_access_token": "stale-token",
+        },
+    )
+
+
+def test_remote_pages_fetches_live_board_only_with_explicit_live_query() -> None:
+    """The query flag is the sole opt-in to live collector data on Pages."""
+
+    _run_browserless_app_harness(
+        'if (promptCount !== 0) throw new Error("unexpected prompt count=" + promptCount); '
+        'const remote = requests.filter((url) => url.startsWith("https://collector.example")); '
+        'if (!remote.some((url) => url.includes("/api/dual-market/board"))) '
+        'throw new Error("live board was not requested: " + requests.join(", ")); '
         'if (remote.some((url) => !url.includes("access_token=viewer-token"))) '
         'throw new Error("unauthenticated request: " + requests.join(", "));',
         api_base="https://collector.example",
@@ -223,6 +272,7 @@ def test_remote_pages_with_token_fetches_live_board_without_prompt() -> None:
         include_discovery=True,
         run_initial_timeouts=True,
         require_access_token=True,
+        page_search="?live=1",
     )
 
 

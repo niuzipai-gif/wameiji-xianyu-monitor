@@ -18,6 +18,7 @@
     advancedFilter: null,
     refreshing: false,
     liveApiBlocked: false,
+    liveMode: false,
   };
 
   function esc(value) {
@@ -213,29 +214,20 @@
   function renderKpis(summary) {
     const dualSummary = view.dualMarketBoard && view.dualMarketBoard.summary;
     if (dualSummary) {
-      const readyItems = Array.isArray(view.dualMarketBoard.ready) ? view.dualMarketBoard.ready : [];
-      const negativeItems = Array.isArray(view.dualMarketBoard.negative_profit) ? view.dualMarketBoard.negative_profit : [];
-      const readyCount = Number(dualSummary.ready_count) || 0;
-      const negativeCount = Number(dualSummary.negative_profit_count) || 0;
+      const eligibleItems = Array.isArray(view.dualMarketBoard.eligible) ? view.dualMarketBoard.eligible : [];
+      const evaluatedCount = Number(dualSummary.evaluated_count) || 0;
+      const eligibleCount = Number(dualSummary.eligible_count) || 0;
+      const belowMarginCount = Number(dualSummary.below_margin_count) || 0;
       const costPendingCount = Number(dualSummary.cost_pending_count) || 0;
-      const verifiedPairCount = readyCount + negativeCount + costPendingCount;
-      const computedItems = readyItems.concat(negativeItems);
-      const profits = computedItems.map((item) => Number(item.calculation && item.calculation.expected_profit_cny) || 0);
-      setText("kpiToday", String(verifiedPairCount));
-      if (!verifiedPairCount) {
-        setText("kpiProfit", "--");
-        setText("kpiMax", "--");
-        setText("kpiHitRate", "--");
-      } else if (costPendingCount) {
-        setText("kpiProfit", "待算");
-        setText("kpiMax", "待算");
-        setText("kpiHitRate", "待算");
-      } else {
-        setText("kpiProfit", cny(profits.reduce((total, value) => total + value, 0)));
-        setText("kpiMax", cny(profits.reduce((maximum, value) => Math.max(maximum, value), 0)));
-        const computedCount = readyCount + negativeCount;
-        setText("kpiHitRate", (computedCount ? Math.round(readyCount / computedCount * 100) : 0) + "%");
-      }
+      const profits = eligibleItems.map((item) => Number(item.calculation && item.calculation.expected_profit_cny) || 0);
+      setText("kpiToday", String(eligibleCount));
+      setText("kpiProfit", cny(profits.reduce((total, value) => total + value, 0)));
+      setText("kpiMax", cny(profits.reduce((maximum, value) => Math.max(maximum, value), 0)));
+      setText("kpiHitRate", (evaluatedCount ? Math.round(eligibleCount / evaluatedCount * 100) : 0) + "%");
+      setText("funnelEvaluated", String(evaluatedCount));
+      setText("funnelCostPending", String(costPendingCount));
+      setText("funnelBelowMargin", String(belowMarginCount));
+      setText("funnelEligible", String(eligibleCount));
       renderDiscoveryStatus(summary);
       return;
     }
@@ -369,13 +361,13 @@
     return item.evidence_level === "detail_verified" ? "详情已核验" : "搜索挂牌价样本";
   }
 
-  function dualSide(kind, item) {
+  function dualSide(kind, item, exchangeRate) {
     const isXianyu = kind === "xianyu";
     const tag = isXianyu ? "闲鱼 · 销售侧" : "挖煤姬 · 进货侧";
     const image = item && item.image_url;
     const price = isXianyu
       ? cny(item && item.price)
-      : jpy(item && item.price, displayJpyCnyRate());
+      : jpy(item && item.price, exchangeRate || displayJpyCnyRate());
     const body = [
       '<div class="thumb ' + (isXianyu ? "xianyu-thumb" : "market-thumb") + '">',
         thumbMarkup(image, tag, dualEvidenceLabel(item)),
@@ -391,21 +383,57 @@
     return sideMarkup(isXianyu ? "xianyu" : "market", item && item.url, body);
   }
 
-  function readyComparisonCard(item) {
+  function costBreakdownMarkup(cost_breakdown) {
+    const exchangeRate = Number(cost_breakdown.wameiji_exchange_rate_cny_per_jpy);
+    const rateText = Number.isFinite(exchangeRate) && exchangeRate > 0
+      ? "1 JPY ≈ " + exchangeRate.toFixed(4) + " CNY"
+      : "汇率证据缺失";
+    return [
+      '<details class="cost-breakdown">',
+        '<summary>展开完整成本 · 默认成本：头程 15 CNY · 国内包邮 5 CNY · 包材 2 CNY</summary>',
+        '<div class="cost-breakdown-grid">',
+          '<span>挖煤姬商品</span><b>' + esc(jpy(cost_breakdown.wameiji_item_jpy, exchangeRate)) + '</b>',
+          '<span>日本国内运费</span><b>' + esc(jpy(cost_breakdown.wameiji_domestic_shipping_jpy, exchangeRate)) + '</b>',
+          '<span>挖煤姬代购费</span><b>' + esc(jpy(cost_breakdown.wameiji_proxy_fee_jpy, exchangeRate)) + '</b>',
+          '<span>换算汇率</span><b>' + esc(rateText) + '</b>',
+          '<span>挖煤姬采购折合</span><b>' + esc(cny(cost_breakdown.wameiji_purchase_cny)) + '</b>',
+          '<span>日本至国内头程</span><b>' + esc(cny(cost_breakdown.international_shipping_cny)) + '</b>',
+          '<span>国内包邮运费</span><b>' + esc(cny(cost_breakdown.china_postage_cny)) + '</b>',
+          '<span>包装材料</span><b>' + esc(cny(cost_breakdown.packaging_cny)) + '</b>',
+          '<span>税费 / 售后 / 风险预留</span><b>' + esc(cny(
+            (Number(cost_breakdown.tax_cny) || 0)
+            + (Number(cost_breakdown.after_sale_reserve_cny) || 0)
+            + (Number(cost_breakdown.risk_reserve_cny) || 0),
+          )) + '</b>',
+          '<span>闲鱼手续费（1.6%）</span><b>' + esc(cny(cost_breakdown.xianyu_seller_fee_cny)) + '</b>',
+          '<span>挖煤姬落地成本</span><b>' + esc(cny(cost_breakdown.landed_cost_cny)) + '</b>',
+          '<span>闲鱼到手净利</span><b>' + esc(cny(cost_breakdown.net_profit_cny)) + '</b>',
+        '</div>',
+      '</details>',
+    ].join("");
+  }
+
+  function eligibleComparisonCard(item) {
     const calculation = item.calculation || {};
+    const cost_breakdown = calculation.cost_breakdown || {};
+    const exchangeRate = cost_breakdown.wameiji_exchange_rate_cny_per_jpy;
     const xianyuSide = dualSide("xianyu", {
       ...item.xianyu,
       image_url: item.xianyu.image_url,
-    });
+    }, exchangeRate);
     const wameijiSide = dualSide("wameiji", {
       ...item.wameiji,
       image_url: item.wameiji.image_url,
-    });
+    }, exchangeRate);
+    const evidence = "匹配证据：同款键完全一致；两侧品相均为 "
+      + String(item.xianyu.condition_group || "待核验")
+      + "；闲鱼为搜索挂牌样本，挖煤姬为商品详情已核验。";
     return [
       '<article class="op-card discovery-op-card dual-market-card" data-dual-market-comparison-id="' + esc(item.comparison_id || "") + '">',
         xianyuSide,
         '<div class="analysis">',
           '<div class="comparison-rail"><span>挖煤姬进货（JPY） → 闲鱼国内销售（CNY）</span></div>',
+          '<span class="status ok qualified-chip">净利率达标 ≥ 25%</span>',
           '<div class="grid2">',
             '<div class="metric"><small>闲鱼销售价（CNY）</small><strong>' + esc(cny(calculation.sale_price_cny)) + '</strong></div>',
             '<div class="metric"><small>挖煤姬落地成本（CNY）</small><strong>' + esc(cny(calculation.landed_cost_cny)) + '</strong></div>',
@@ -413,50 +441,11 @@
             '<div class="metric"><small>闲鱼销售利润率</small><strong>' + esc(percent(calculation.net_margin)) + '</strong></div>',
           '</div>',
           '<p class="comparison-catalog">同款键：' + esc(item.canonical_product_key) + '</p>',
-          '<div class="reason">利润 = 闲鱼销售价（CNY） - 闲鱼销售费用 - 挖煤姬采购与落地成本（折合 CNY）。闲鱼挂牌价不代表已成交价。</div>',
+          '<div class="match-evidence"><b>匹配证据</b><span>' + esc(evidence) + '</span></div>',
+          costBreakdownMarkup(cost_breakdown),
+          '<div class="reason recheck-warning">利润 = 闲鱼销售价（CNY） - 闲鱼销售费用 - 挖煤姬采购与落地成本（折合 CNY）。这是保存证据快照，不代表当前仍可买；下单前重新核验价格、库存、版本、特典、品相与闲鱼真实可售价。</div>',
         '</div>',
         wameijiSide,
-      '</article>',
-    ].join("");
-  }
-
-  function nonReadyComparisonCard(item) {
-    const calculation = item.calculation || {};
-    const costPending = calculation.status === "cost_pending";
-    const label = costPending ? "成本待确认 · 暂不判定闲鱼利润" : "闲鱼转售无利润 · 不建议收购";
-    const detail = costPending
-      ? "成本配置缺少实际输入；系统不会倒推日本售价或虚构闲鱼利润。"
-      : "利润 = 闲鱼销售价（CNY） - 闲鱼销售费用 - 挖煤姬采购与落地成本（折合 CNY）；当前结果不为正。";
-    return [
-      '<article class="op-card discovery-op-card dual-market-card dual-market-nonready">',
-        dualSide("xianyu", item.xianyu),
-        '<div class="analysis">',
-          '<div class="comparison-rail"><span>挖煤姬进货（JPY） → 闲鱼国内销售（CNY）</span><small>' + esc(label) + '</small></div>',
-          '<div class="grid2">',
-            '<div class="metric"><small>闲鱼销售价（CNY）</small><strong>' + esc(cny(calculation.sale_price_cny)) + '</strong></div>',
-            '<div class="metric"><small>挖煤姬落地成本（CNY）</small><strong>' + esc(cny(calculation.landed_cost_cny)) + '</strong></div>',
-          '</div>',
-          '<p class="comparison-catalog">同款键：' + esc(item.canonical_product_key) + '</p>',
-          '<div class="reason">' + esc(detail) + '</div>',
-        '</div>',
-        dualSide("wameiji", item.wameiji),
-      '</article>',
-    ].join("");
-  }
-
-  function waitingObservationCard(item, missingSource) {
-    const presentSide = missingSource === "wameiji" ? "xianyu" : "wameiji";
-    const missingLabel = missingSource === "wameiji" ? "等待挖煤姬最低有效进货价" : "等待闲鱼最低有效挂牌价";
-    return [
-      '<article class="op-card discovery-op-card dual-market-card dual-market-waiting">',
-        presentSide === "xianyu" ? dualSide("xianyu", item.xianyu) : '<div class="side-product xianyu dual-market-missing">闲鱼侧待配对</div>',
-        '<div class="analysis">',
-          '<div class="comparison-rail"><span>待配对</span></div>',
-          '<div class="metric"><small>当前状态</small><strong>' + esc(missingLabel) + '</strong></div>',
-          '<p class="comparison-catalog">同款键：' + esc(item.canonical_product_key) + '</p>',
-          '<div class="reason">只展示已保存的一侧真实商品；未获得另一侧证据前，系统不会展示利润。</div>',
-        '</div>',
-        presentSide === "wameiji" ? dualSide("wameiji", item.wameiji) : '<div class="side-product market dual-market-missing">挖煤姬侧待配对</div>',
       '</article>',
     ].join("");
   }
@@ -476,27 +465,23 @@
       return;
     }
     const query = String(view.query || view.advancedFilter && view.advancedFilter.q || "").trim().toLowerCase();
-    let ready = Array.isArray(board.ready) ? board.ready.slice() : [];
-    if (query) ready = ready.filter((item) => dualMarketSearchText(item).includes(query));
-    ready.sort((left, right) => (
+    let eligible = Array.isArray(board.eligible) ? board.eligible.slice() : [];
+    if (query) eligible = eligible.filter((item) => dualMarketSearchText(item).includes(query));
+    eligible.sort((left, right) => (
       (Number(right.calculation && right.calculation.expected_profit_cny) || 0)
       - (Number(left.calculation && left.calculation.expected_profit_cny) || 0)
     ));
-    const waitingWameiji = Array.isArray(board.waiting_wameiji) ? board.waiting_wameiji : [];
-    const waitingXianyu = Array.isArray(board.waiting_xianyu) ? board.waiting_xianyu : [];
-    const nonReady = [
-      ...(Array.isArray(board.cost_pending) ? board.cost_pending : []),
-      ...(Array.isArray(board.negative_profit) ? board.negative_profit : []),
-    ];
-    const cards = [
-      ...ready.map(readyComparisonCard),
-      ...waitingWameiji.map((item) => waitingObservationCard(item, "wameiji")),
-      ...waitingXianyu.map((item) => waitingObservationCard(item, "xianyu")),
-      ...nonReady.map(nonReadyComparisonCard),
-    ];
-    target.innerHTML = cards.length
-      ? cards.join("")
-      : '<div class="empty-state">暂无可展示的双边商品记录；采集保持暂停，页面不会用旧样本补出利润卡。</div>';
+    if (eligible.length) {
+      target.innerHTML = eligible.map(eligibleComparisonCard).join("");
+      return;
+    }
+    const summary = board.summary || {};
+    const evaluated = Number(summary.evaluated_count) || 0;
+    const pending = Number(summary.cost_pending_count) || 0;
+    const below = Number(summary.below_margin_count) || 0;
+    target.innerHTML = '<div class="empty-state">已评估 ' + esc(evaluated)
+      + ' 条：成本待补 ' + esc(pending) + ' 条，净利率低于 25% ' + esc(below)
+      + ' 条；当前没有净利率至少 25% 且成本证据完整的机会。采集保持暂停，页面不会用旧样本补卡。</div>';
   }
 
   function itemSearchText(item) {
@@ -660,7 +645,7 @@
       const [board, commandPayload, dualMarketBoard] = await Promise.all([
         apiGet("/api/discovery/board").catch(() => emptyBoard),
         apiGet("/api/discovery/commands").catch(() => ({ items: [] })),
-        window.DualMarketData.load({ apiGet }),
+        window.DualMarketData.load({ apiGet, live: view.liveMode }),
       ]);
       view.board = board || { summary: {}, pools: [], opportunities: [] };
       view.dualMarketBoard = dualMarketBoard;
@@ -829,10 +814,9 @@
       const separateCollector = Boolean(
         api && typeof api.isSeparateCollectorApi === "function" && api.isSeparateCollectorApi(),
       );
-      const configuredToken = String(
-        api && typeof api.configuredApiToken === "function" ? api.configuredApiToken() : "",
-      ).trim();
-      if (separateCollector && !configuredToken) {
+      const explicitLive = new URLSearchParams(window.location.search).get("live") === "1";
+      view.liveMode = !separateCollector || explicitLive;
+      if (separateCollector && !explicitLive) {
         view.liveApiBlocked = true;
       } else if (api && typeof api.ensureViewerAccessToken === "function") {
         const accessReady = await api.ensureViewerAccessToken();

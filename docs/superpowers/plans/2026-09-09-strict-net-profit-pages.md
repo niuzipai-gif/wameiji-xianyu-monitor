@@ -318,7 +318,7 @@ git commit -m "feat: publish eligible-only Pages snapshots"
 - Modify: `tests/test_remote_pages_runtime.py`
 - Modify: `tests/test_pages_dual_market_ui.py`
 
-- [ ] **Step 1: Add failing loader/runtime tests**
+- [x] **Step 1: Add failing loader/runtime tests**
 
 Extend the Node harness with `storage_values` and `page_search`. Lock these cases:
 
@@ -327,15 +327,15 @@ Extend the Node harness with `storage_values` and `page_search`. Lock these case
 3. `?live=1` plus live failure/empty invalid structure: static snapshot fallback requested and labelled.
 4. Local same-origin runtime may continue to use live data.
 
-- [ ] **Step 2: Add failing UI contract tests**
+- [x] **Step 2: Add failing UI contract tests**
 
 Assert the renderer reads `eligible` only, emits no below-margin/pending cards, displays the four funnel numbers, uses `CNY` on the Xianyu side, uses `JPY（约 ... CNY）` on the Wameiji side, and renders cost, profit, margin, matching evidence, snapshot time, and the pre-order recheck warning.
 
-- [ ] **Step 3: Run and confirm failures**
+- [x] **Step 3: Run and confirm failures**
 
 Run: `pytest tests/test_dual_market_pages_loader.py tests/test_remote_pages_runtime.py tests/test_pages_dual_market_ui.py -q`
 
-- [ ] **Step 4: Implement the explicit live gate**
+- [x] **Step 4: Implement the explicit live gate**
 
 ```javascript
 const liveRequested = new URLSearchParams(window.location.search).get("live") === "1";
@@ -344,11 +344,11 @@ const result = await window.DualMarketData.load({ apiGet, live: liveRequested })
 
 `DualMarketData.load` must request `data/dual-market-snapshot.json` directly when `live` is false. It may call `/api/dual-market/board` only when `live` is true, and must fall back to the snapshot on an error or an invalid/empty live response. Saved `localStorage` values alone never set `live=true`.
 
-- [ ] **Step 5: Implement the qualified renderer and primary feed layout**
+- [x] **Step 5: Implement the qualified renderer and primary feed layout**
 
 Keep the confirmed two-cards-per-row desktop grid, with each card horizontally ordered Xianyu / analysis / Wameiji. Remove `nonReadyComparisonCard` from `renderDualMarketFeed`; replace it with one honest zero-state. Add compact cost rows so the feed remains the largest useful section rather than expanding the hero.
 
-- [ ] **Step 6: Run and commit**
+- [x] **Step 6: Run and commit**
 
 ```powershell
 pytest tests/test_dual_market_pages_loader.py tests/test_remote_pages_runtime.py tests/test_pages_dual_market_ui.py -q

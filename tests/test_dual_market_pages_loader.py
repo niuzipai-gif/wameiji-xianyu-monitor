@@ -12,9 +12,37 @@ SNAPSHOT_URL = (
 )
 
 
+def valid_board(*, generated_at: str = "2099-09-09T00:30:00+08:00") -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "generated_at": generated_at,
+        "strategy": {
+            "policy_version": "wameiji-xianyu-net-v1",
+            "trade_direction": "wameiji_jpy_to_xianyu_cny",
+            "minimum_net_margin": 0.25,
+        },
+        "summary": {
+            "evaluated_count": 1,
+            "eligible_count": 1,
+            "below_margin_count": 0,
+            "cost_pending_count": 0,
+            "waiting_wameiji_count": 0,
+            "waiting_xianyu_count": 0,
+        },
+        "eligible": [{"comparison_id": 4}],
+        "below_margin": [],
+        "cost_pending": [],
+        "waiting_wameiji": [],
+        "waiting_xianyu": [],
+        "collector": {"state": "paused"},
+    }
+
+
 def run_loader(
     responses: dict[str, dict[str, object]],
     assertion: str,
+    *,
+    live: bool = False,
 ) -> None:
     harness = f"""
 const fs = require("fs");
@@ -44,7 +72,7 @@ const apiGet = async (path) => {{
   if (!response || !response.ok) throw new Error("GET " + path + " -> " + (response ? response.status : "network"));
   return response.body;
 }};
-window.DualMarketData.load({{ apiGet }}).then((result) => {{
+window.DualMarketData.load({{ apiGet, live: {str(live).lower()} }}).then((result) => {{
   {assertion}
 }}).catch((error) => {{
   console.error(error.stack || error);
@@ -61,14 +89,33 @@ window.DualMarketData.load({{ apiGet }}).then((result) => {{
     assert result.returncode == 0, result.stderr or result.stdout
 
 
-def test_loader_prefers_the_live_board() -> None:
+def test_loader_defaults_to_the_pages_snapshot_without_calling_live_api() -> None:
     run_loader(
         {
             "/api/dual-market/board": {
                 "ok": True,
                 "status": 200,
-                "body": {"summary": {}, "collector": {"state": "paused"}},
-            }
+                "body": valid_board(),
+            },
+            SNAPSHOT_URL: {"ok": True, "status": 200, "body": valid_board()},
+        },
+        f"""
+if (result.mode !== "verified_static_snapshot" || result.unavailable) throw new Error(JSON.stringify(result));
+if (requests.length !== 1 || requests[0].url !== {json.dumps(SNAPSHOT_URL)}) {{
+  throw new Error("unexpected requests: " + JSON.stringify(requests));
+}}
+""",
+    )
+
+
+def test_loader_uses_live_api_only_when_explicitly_requested() -> None:
+    run_loader(
+        {
+            "/api/dual-market/board": {
+                "ok": True,
+                "status": 200,
+                "body": valid_board(),
+            },
         },
         """
 if (result.mode !== "live_api" || result.unavailable) throw new Error(JSON.stringify(result));
@@ -76,46 +123,37 @@ if (requests.length !== 1 || requests[0].url !== "/api/dual-market/board") {
   throw new Error("unexpected requests: " + JSON.stringify(requests));
 }
 """,
+        live=True,
     )
 
 
-def test_loader_uses_pages_snapshot_after_api_404() -> None:
+def test_loader_falls_back_when_explicit_live_payload_is_empty_and_invalid() -> None:
     run_loader(
         {
-            "/api/dual-market/board": {"ok": False, "status": 404, "body": {}},
-            SNAPSHOT_URL: {
+            "/api/dual-market/board": {
                 "ok": True,
                 "status": 200,
-                "body": {
-                    "mode": "verified_static_snapshot",
-                    "generated_at": "2099-09-09T00:30:00+08:00",
-                    "summary": {"cost_pending_count": 3},
-                    "cost_pending": [{"comparison_id": 4}],
-                },
+                "body": {"summary": {}, "eligible": []},
             },
+            SNAPSHOT_URL: {"ok": True, "status": 200, "body": valid_board()},
         },
-        f"""
-if (result.mode !== "verified_static_snapshot" || result.unavailable || result.stale) {{
+        """
+if (result.mode !== "verified_static_snapshot" || result.unavailable) {
   throw new Error(JSON.stringify(result));
-}}
-if (!requests.some((request) => request.url === {json.dumps(SNAPSHOT_URL)})) {{
-  throw new Error("snapshot was not requested: " + JSON.stringify(requests));
-}}
+}
+if (!result.api_error.includes("schema_version")) throw new Error(result.api_error);
 """,
+        live=True,
     )
 
 
 def test_loader_marks_an_old_snapshot_as_stale() -> None:
     run_loader(
         {
-            "/api/dual-market/board": {"ok": False, "status": 404, "body": {}},
             SNAPSHOT_URL: {
                 "ok": True,
                 "status": 200,
-                "body": {
-                    "generated_at": "2000-01-01T00:00:00+08:00",
-                    "summary": {},
-                },
+                "body": valid_board(generated_at="2000-01-01T00:00:00+08:00"),
             },
         },
         """
@@ -126,7 +164,7 @@ if (result.mode !== "verified_static_snapshot" || !result.stale) {
     )
 
 
-def test_loader_returns_honest_unavailable_state_when_both_sources_fail() -> None:
+def test_loader_returns_honest_unavailable_when_requested_live_and_snapshot_fail() -> None:
     run_loader(
         {
             "/api/dual-market/board": {"ok": False, "status": 404, "body": {}},
@@ -134,11 +172,10 @@ def test_loader_returns_honest_unavailable_state_when_both_sources_fail() -> Non
         },
         """
 if (!result.unavailable || result.mode !== "unavailable") throw new Error(JSON.stringify(result));
-if (!result.error.includes("live=") || !result.error.includes("snapshot=")) {
-  throw new Error(result.error);
-}
-if (result.cost_pending.length !== 0 || result.collector.state !== "paused") {
+if (!result.error.includes("live=") || !result.error.includes("snapshot=")) throw new Error(result.error);
+if (result.eligible.length !== 0 || result.collector.state !== "paused") {
   throw new Error(JSON.stringify(result));
 }
 """,
+        live=True,
     )
