@@ -18,6 +18,7 @@ def _run_browserless_app_harness(
     include_discovery: bool = False,
     run_initial_timeouts: bool = False,
     prompt_value: str = "",
+    prompt_throws: bool = False,
     require_access_token: bool = False,
     document_ready_state: str = "loading",
 ) -> None:
@@ -60,7 +61,11 @@ const window = {{
   location: {{ href: {page_origin!r}, origin: {page_origin!r}, search: "" }},
   CD_MONITOR_CONFIG: {{ apiBase: {api_base!r}, accessToken: {access_token!r} }},
   localStorage: storage,
-  prompt() {{ promptCount += 1; return {prompt_value!r}; }},
+  prompt() {{
+    promptCount += 1;
+    if ({str(prompt_throws).lower()}) throw new Error("prompt() is not supported");
+    return {prompt_value!r};
+  }},
 }};
 window.window = window;
 const context = {{
@@ -215,5 +220,23 @@ def test_cancelled_remote_token_still_loads_the_public_pages_snapshot() -> None:
         include_discovery=True,
         run_initial_timeouts=True,
         prompt_value="",
+        require_access_token=True,
+    )
+
+
+def test_unsupported_remote_token_prompt_still_loads_the_public_pages_snapshot() -> None:
+    """A browser without prompt support must still render the public snapshot."""
+
+    _run_browserless_app_harness(
+        'if (promptCount !== 1) throw new Error("expected one prompt, got " + promptCount); '
+        'if (requests.some((url) => url.startsWith("https://collector.example"))) '
+        'throw new Error("remote request without token: " + requests.join(", ")); '
+        'if (!requests.some((url) => url.includes("/data/dual-market-snapshot.json"))) '
+        'throw new Error("snapshot was not requested: " + requests.join(", "));',
+        api_base="https://collector.example",
+        page_origin="https://viewer.example/",
+        include_discovery=True,
+        run_initial_timeouts=True,
+        prompt_throws=True,
         require_access_token=True,
     )
