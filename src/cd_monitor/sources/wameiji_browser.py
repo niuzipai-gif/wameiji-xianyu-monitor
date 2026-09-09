@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from html.parser import HTMLParser
-from urllib.parse import parse_qs, quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 from cd_monitor.core.identifiers import (
     extract_catalog_candidates,
@@ -541,16 +541,35 @@ def _json_ld_has_product_type(value: object) -> bool:
 
 
 def _json_ld_product_matches_item(product: dict[str, object], external_item_id: str) -> bool:
-    if str(product.get("sku") or "").strip() == external_item_id:
+    item_identities = _listing_identity_candidates(external_item_id)
+    if item_identities.intersection(
+        _listing_identity_candidates(str(product.get("sku") or ""))
+    ):
         return True
     for key in ("@id", "url", "mainEntityOfPage"):
         value = product.get(key)
         if isinstance(value, dict):
             value = value.get("@id") or value.get("url")
-        candidate = str(value or "").strip().rstrip("/")
-        if candidate.endswith("/" + external_item_id):
+        if item_identities.intersection(_listing_identity_candidates(str(value or ""))):
             return True
     return False
+
+
+def _listing_identity_candidates(value: str) -> set[str]:
+    """Normalize direct ids and Wameiji's URL-encoded marketplace ids."""
+
+    raw = unquote(str(value or "").strip()).strip().rstrip("/")
+    if not raw:
+        return set()
+    parsed = urlparse(raw)
+    path = parsed.path if parsed.scheme and parsed.netloc else raw
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    candidates = {raw.lower()}
+    if parts:
+        candidates.add(parts[-1].lower())
+    if len(parts) >= 2:
+        candidates.add("/".join(parts[-2:]).lower())
+    return candidates
 
 
 def _json_ld_image_values(value: object) -> list[str]:
@@ -647,6 +666,19 @@ def _detect_condition_from_text(text: str) -> str | None:
     _detect_condition_text() takes a list[str]; for the card parser we already
     have a joined string, so we split by whitespace and reuse the same keyword table.
     """
+    labeled = re.search(
+        r"(?:^|\s)(?:商品)?(?:状態|状态|狀態)\s*[:：]?\s*"
+        r"(?P<value>.{1,160}?)"
+        r"(?=\s+(?:数量|個数|价格|価格|日本国内运费|日本国内運費|"
+        r"代购手续费|代購手續費|店铺|店鋪|ショップ|加入购物车|"
+        r"加入購物車|立即购买|立即購買)(?:\s|$)|$)",
+        text,
+        re.IGNORECASE,
+    )
+    if labeled is not None:
+        value = " ".join(labeled.group("value").split()).strip()
+        if value:
+            return value
     tokens = text.split() if text else []
     return _detect_condition_text(tokens)
 
@@ -954,6 +986,7 @@ def _first_attr_text(attr: dict[str, str | None], *keys: str) -> str:
 
 
 _HARD_SECURITY_MARKERS = (
+    "403 forbidden",
     "captcha",
     "cloudflare",
     "rgv587_error",
@@ -975,7 +1008,7 @@ _TITLE_SECURITY_MARKERS = (
     "需要登录",
     "请登录",
 )
-_HTML_TITLE_RE = re.compile(r"<title\\b[^>]*>(.*?)</title\\s*>", re.IGNORECASE | re.DOTALL)
+_HTML_TITLE_RE = re.compile(r"<title\b[^>]*>(.*?)</title\s*>", re.IGNORECASE | re.DOTALL)
 
 
 def _requires_human(html: str) -> bool:

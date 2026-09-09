@@ -7,6 +7,7 @@ later from two independently eligible observations.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
@@ -72,6 +73,14 @@ _RISK_CONDITION_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "功能未測",
             "未检测",
             "未檢測",
+            "不保证正常播放",
+            "不保證正常播放",
+            "不保证播放",
+            "不保證播放",
+            "不保读取",
+            "不保讀取",
+            "未试听",
+            "未試聽",
         ),
     ),
     (
@@ -165,6 +174,8 @@ _RISK_CONDITION_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 _NEGATED_RISK_MARKERS = (
+    "映像不良等でない限り",
+    "動作不良等でない限り",
     "目立った傷や汚れなし",
     "目立つ傷や汚れなし",
     "傷や汚れなし",
@@ -297,9 +308,26 @@ def observation_from_wameiji(
     if item.source != "wameiji":
         raise ValueError("Wameiji observations require a wameiji MarketItem")
     url = _require_http_url(item.url, base_url="https://meruki.cn")
-    condition_group = normalize_condition_group(
-        " ".join(text for text in (item.condition_text, item.raw_text) if text)
-    )
+    # A marketplace's labeled condition is the authoritative product scope.
+    # Full detail text can contain unrelated recommendation titles (including
+    # words such as ``新品``), so appending it would silently turn an explicit
+    # used listing into a new one. Fall back to the page text only when the
+    # detail parser could not isolate a condition field.
+    condition_evidence = item.condition_text or item.raw_text or item.title
+    condition_group = normalize_condition_group(condition_evidence)
+    if item.condition_text and item.raw_text:
+        raw_group = normalize_condition_group(item.raw_text)
+        if raw_group in {
+            "defective",
+            "untested",
+            "box_damage",
+            "heavy_damage",
+            "minor_damage",
+        }:
+            # Explicit defects in the product description still outrank a
+            # benign selector label; only generic new/sealed words from
+            # recommendation copy are ignored.
+            condition_group = raw_group
     return ListingObservation(
         source="wameiji",
         source_listing_id=_source_listing_id(item.external_item_id, url),
@@ -452,6 +480,24 @@ def normalize_condition_group(condition_text: str | None) -> str:
 def classify_completeness(title: str | None, raw_text: str | None) -> str:
     """Exclude explicit shell/bonus-only or missing-core-media records."""
 
+    normalized_title = str(title or "")
+    if re.search(
+        r"(?:^|】)\s*(?:コレクションカード|トレーディングカード|"
+        r"生写真|ブロマイド)",
+        normalized_title,
+    ):
+        return "incomplete"
+    if re.search(
+        r"(?:トレカ|フォトカード|photocard|写真卡|小卡|卡片)",
+        normalized_title,
+        re.IGNORECASE,
+    ) and not re.search(
+        r"(?:(?<![A-Za-z])(?:CD|DVD|BD)(?![A-Za-z])|ゲームソフト|"
+        r"游戏卡|遊戲卡|卡带|卡帶|ソフト)",
+        normalized_title,
+        re.IGNORECASE,
+    ):
+        return "incomplete"
     value = f"{title or ''} {raw_text or ''}".casefold()
     incomplete_markers = (
         "外箱のみ",
@@ -459,6 +505,14 @@ def classify_completeness(title: str | None, raw_text: str | None) -> str:
         "ケースのみ",
         "特典のみ",
         "カードのみ",
+        "帯のみ",
+        "帯だけ",
+        "ジャケットのみ",
+        "ジャケットだけ",
+        "ブックレットのみ",
+        "ブックレットだけ",
+        "歌詞カードのみ",
+        "歌詞カードだけ",
         "ディスクなし",
         "本体なし",
         "空盒",
@@ -467,6 +521,17 @@ def classify_completeness(title: str | None, raw_text: str | None) -> str:
         "仅卡",
         "缺盘",
         "缺少本体",
+        "没有cd",
+        "无cd",
+        "不含cd",
+        "不带cd",
+        "没有游戏卡",
+        "无游戏卡",
+        "トレカのみ",
+        "フォトカードのみ",
+        "フォトカード1枚のみ",
+        "不含游戏卡",
+        "只出特典",
     )
     return "incomplete" if any(marker in value for marker in incomplete_markers) else "complete"
 

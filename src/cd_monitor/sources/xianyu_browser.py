@@ -93,6 +93,25 @@ class XianyuBrowserAdapter(BrowserHarnessAdapter):
             parser.items = _extract_generic_samples(html, watch_item)
         return AdapterStatus(status="ok", items=parser.items)
 
+    def parse_discovery_html(self, html: str, *, query_label: str) -> AdapterStatus:
+        """Return every rendered Goofish feed card for bounded discovery.
+
+        Unlike ``parse_search_html``, broad discovery must not require every
+        card title to repeat generic query words such as ``日版`` or ``CD``.
+        Exact-product filtering is deliberately performed by the staged
+        reverse collector before any Wameiji lookup or database write.
+        """
+
+        if _requires_human(html):
+            return AdapterStatus(
+                status="human_required",
+                error_type="security_check",
+                error_message="Captcha, security check, or login challenge detected.",
+            )
+        parser = _XianyuCardParser(str(query_label or "discovery"))
+        parser.feed(html)
+        return AdapterStatus(status="ok", items=parser.items)
+
 
 class _XianyuCardParser(HTMLParser):
     _VOID_TAGS = frozenset(
@@ -486,6 +505,7 @@ _HARD_SECURITY_MARKERS = (
     "x5step",
     "闲鱼app扫码查看",
     "跨境商品请前往闲鱼app端查看",
+    "请使用正常浏览器访问闲鱼",
 )
 _TITLE_SECURITY_MARKERS = (
     "安全验证",

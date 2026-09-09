@@ -274,7 +274,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "web"
 DEFAULT_WAMEIJI = PROJECT_ROOT / "data/mock/wameiji_items.sample.json"
 DEFAULT_XIANYU = PROJECT_ROOT / "data/mock/xianyu_samples.sample.json"
-DUAL_MARKET_OBSERVATION_FRESHNESS_MINUTES = 180
+# A manual collection session can span a full workday. Keep all evidence from
+# that bounded session visible while still dropping yesterday-old listings.
+DUAL_MARKET_OBSERVATION_FRESHNESS_MINUTES = 24 * 60
 
 
 def _dual_market_collection_paused() -> bool:

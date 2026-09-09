@@ -26,6 +26,7 @@ async def capture_search_html(
     network_log_path: str | Path | None = None,
     timeout_seconds: int = 30,
     headless: bool = False,
+    xianyu_result_scroll_rounds: int = 0,
     playwright_factory: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     watch = WatchItem(catalog_no=catalog_no)
@@ -67,12 +68,16 @@ async def capture_search_html(
             try:
                 if use_persistent_profile:
                     profile.mkdir(parents=True, exist_ok=True)
-                    context = await playwright.chromium.launch_persistent_context(
+                    context = await _launch_persistent_context(
+                        playwright.chromium,
                         user_data_dir=str(profile),
                         headless=headless,
                     )
                 else:
-                    browser = await playwright.chromium.launch(headless=headless)
+                    browser = await _launch_browser(
+                        playwright.chromium,
+                        headless=headless,
+                    )
                     context_kwargs: dict[str, Any] = {}
                     if source == "xianyu" and state_file:
                         context_kwargs["storage_state"] = str(state_file)
@@ -98,6 +103,11 @@ async def capture_search_html(
                 # and still captures challenge/login HTML when no card ever
                 # appears. Xianyu can take ~20 seconds on a fresh profile.
                 await _wait_for_result_surface(page, source, timeout_seconds)
+                await _hydrate_result_images(
+                    page,
+                    source,
+                    result_scroll_rounds=xianyu_result_scroll_rounds,
+                )
                 html = await _read_page_content(page)
                 if screenshot is not None:
                     screenshot.parent.mkdir(parents=True, exist_ok=True)
@@ -192,12 +202,16 @@ async def capture_page_html(
             try:
                 if use_persistent_profile:
                     profile.mkdir(parents=True, exist_ok=True)
-                    context = await playwright.chromium.launch_persistent_context(
+                    context = await _launch_persistent_context(
+                        playwright.chromium,
                         user_data_dir=str(profile),
                         headless=headless,
                     )
                 else:
-                    browser = await playwright.chromium.launch(headless=headless)
+                    browser = await _launch_browser(
+                        playwright.chromium,
+                        headless=headless,
+                    )
                     context_kwargs: dict[str, Any] = {}
                     if source == "xianyu" and state_file:
                         context_kwargs["storage_state"] = str(state_file)
@@ -278,6 +292,38 @@ async def capture_page_html(
     }
 
 
+async def _launch_persistent_context(
+    chromium: Any, *, user_data_dir: str, headless: bool
+) -> Any:
+    try:
+        return await chromium.launch_persistent_context(
+            user_data_dir=user_data_dir,
+            headless=headless,
+        )
+    except Exception as exc:
+        if not _managed_playwright_browser_missing(exc):
+            raise
+        return await chromium.launch_persistent_context(
+            user_data_dir=user_data_dir,
+            headless=headless,
+            channel="chrome",
+        )
+
+
+async def _launch_browser(chromium: Any, *, headless: bool) -> Any:
+    try:
+        return await chromium.launch(headless=headless)
+    except Exception as exc:
+        if not _managed_playwright_browser_missing(exc):
+            raise
+        return await chromium.launch(headless=headless, channel="chrome")
+
+
+def _managed_playwright_browser_missing(exc: Exception) -> bool:
+    message = str(exc).casefold()
+    return "executable doesn't exist" in message and "playwright install" in message
+
+
 async def _read_page_content(page: Any) -> str:
     """Read content after redirects settle, without hiding navigation errors."""
     last_error: Exception | None = None
@@ -315,6 +361,47 @@ async def _wait_for_result_surface(page: Any, source: str, timeout_seconds: int)
             # challenge, an empty result set, or a slow network response.
             pass
     await page.wait_for_timeout(5000 if source == "wameiji" else min(max(1, timeout_seconds) * 1000, 2000))
+
+
+async def _hydrate_result_images(
+    page: Any,
+    source: str,
+    *,
+    result_scroll_rounds: int = 0,
+) -> None:
+    """Boundedly expand Xianyu results and hydrate their lazy product images."""
+
+    if source != "xianyu":
+        return
+    evaluate = getattr(page, "evaluate", None)
+    if not callable(evaluate):
+        return
+    max_rounds = max(0, min(int(result_scroll_rounds), 8))
+    script = """
+        async () => {
+          const selector = '[class^="feeds-item-wrap-"], [class*="feeds-item-wrap-"]';
+          const maxRounds = __MAX_ROUNDS__;
+          const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          for (let round = 0; round < maxRounds; round += 1) {
+            const before = document.querySelectorAll(selector).length;
+            window.scrollTo({top: document.body.scrollHeight, behavior: 'instant'});
+            await pause(900);
+            const after = document.querySelectorAll(selector).length;
+            if (after <= before) {
+              await pause(600);
+              if (document.querySelectorAll(selector).length <= before) break;
+            }
+          }
+          const cards = Array.from(document.querySelectorAll(selector));
+          for (let index = 0; index < cards.length; index += 4) {
+            cards[index].scrollIntoView({block: 'center', inline: 'nearest'});
+            await pause(90);
+          }
+          window.scrollTo({top: 0, behavior: 'instant'});
+          await pause(350);
+        }
+        """.replace("__MAX_ROUNDS__", str(max_rounds))
+    await evaluate(script)
 
 
 async def _wait_for_detail_surface(page: Any, source: str, timeout_seconds: int) -> None:

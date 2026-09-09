@@ -11,7 +11,12 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from cd_monitor.pages_snapshot import DownloadedImage, SnapshotExportError, export_pages_snapshot
+from cd_monitor.pages_snapshot import (
+    ALLOWED_IMAGE_HOSTS,
+    DownloadedImage,
+    SnapshotExportError,
+    export_pages_snapshot,
+)
 
 
 def png_bytes(colour: str) -> bytes:
@@ -67,6 +72,17 @@ def verified_board() -> dict[str, object]:
         "waiting_xianyu": [],
         "collector": {"state": "paused"},
     }
+
+
+def test_publish_image_allowlist_covers_verified_wameiji_marketplace_cdns() -> None:
+    assert {
+        "auctions.c.yimg.jp",
+        "thumbnail.image.rakuten.co.jp",
+        "assets.mercari-shops-static.com",
+        "static.mercdn.net",
+        "img.fril.jp",
+    }.issubset(ALLOWED_IMAGE_HOSTS)
+    assert "meruki.cn" not in ALLOWED_IMAGE_HOSTS
 
 
 def test_export_rewrites_both_images_and_writes_hash_manifest(tmp_path: Path) -> None:

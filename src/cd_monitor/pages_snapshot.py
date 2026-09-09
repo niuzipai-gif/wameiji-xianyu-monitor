@@ -19,7 +19,16 @@ import requests
 from PIL import Image
 
 
-ALLOWED_IMAGE_HOSTS = frozenset({"img.alicdn.com", "auctions.c.yimg.jp"})
+ALLOWED_IMAGE_HOSTS = frozenset(
+    {
+        "img.alicdn.com",
+        "auctions.c.yimg.jp",
+        "thumbnail.image.rakuten.co.jp",
+        "assets.mercari-shops-static.com",
+        "static.mercdn.net",
+        "img.fril.jp",
+    }
+)
 IMAGE_EXTENSIONS = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
 MIN_IMAGE_EDGE = 80
@@ -85,7 +94,7 @@ def _parsed_https_url(value: object) -> object:
 
 
 def download_public_image(url: str) -> DownloadedImage:
-    """Download one image from the two marketplace CDN hosts we publish."""
+    """Download one image from an observed marketplace CDN we publish."""
 
     parsed = _parsed_https_url(url)
     if parsed.hostname.casefold() not in ALLOWED_IMAGE_HOSTS:
