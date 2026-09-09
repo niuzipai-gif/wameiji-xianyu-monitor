@@ -71,8 +71,9 @@ def test_build_comparison_references_each_side_lowest_eligible_observation(tmp_p
     assert outcome.comparison is not None
     assert outcome.comparison.wameiji_observation_id == wameiji_id
     assert outcome.comparison.xianyu_observation_id == xianyu_id
-    assert outcome.comparison.expected_profit_cny is not None
-    assert outcome.comparison.expected_profit_cny > 0
+    assert outcome.comparison.sale_price_cny == 298
+    assert outcome.comparison.landed_cost_cny == 124
+    assert outcome.comparison.expected_profit_cny == 172.21
 
 
 def test_build_comparison_returns_waiting_when_only_one_source_has_an_eligible_listing(

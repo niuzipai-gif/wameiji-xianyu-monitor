@@ -3,6 +3,7 @@ from __future__ import annotations
 
 
 import json
+import math
 import mimetypes
 import os
 import datetime
@@ -282,6 +283,14 @@ DUAL_MARKET_OBSERVATION_FRESHNESS_MINUTES = 24 * 60
 def _dual_market_collection_paused() -> bool:
     value = os.getenv("DUAL_MARKET_COLLECTION_PAUSED", "1").strip().casefold()
     return value not in {"0", "false", "no", "off"}
+
+
+def _dual_market_display_exchange_rate() -> float:
+    try:
+        value = float(os.getenv("CD_JPY_TO_CNY", "0.046"))
+    except (TypeError, ValueError):
+        return 0.046
+    return round(value, 6) if math.isfinite(value) and value > 0 else 0.046
 
 
 class BadJsonRequest(ValueError):
@@ -2694,6 +2703,7 @@ def _dual_market_board(db_path: str | Path) -> dict[str, object]:
             )
 
     return {
+        "display_exchange_rate_cny_per_jpy": _dual_market_display_exchange_rate(),
         "summary": {
             "ready_count": len(ready),
             "negative_profit_count": len(negative_profit),
@@ -3836,7 +3846,7 @@ def _ws_send_ping(sock: socket.socket) -> None:
     """Best-effort ping frame; the client is expected to pong but we
     ignore the response ? we just want a keep-alive on the wire."""
     try:
-        sock.sendall(b"\x89\x80")  # FIN + ping opcode, MASK=0, length 0
+        sock.sendall(b"\x89\x00")  # FIN + ping opcode, MASK=0, length 0
     except OSError:
         pass
 

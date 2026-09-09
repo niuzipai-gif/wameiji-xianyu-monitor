@@ -30,13 +30,30 @@
   function cny(value) {
     if (value === null || value === undefined || value === "") return "--";
     const number = Number(value);
-    return Number.isFinite(number) ? "¥" + number.toLocaleString("zh-CN", { maximumFractionDigits: 0 }) : "--";
+    return Number.isFinite(number)
+      ? number.toLocaleString("zh-CN", { maximumFractionDigits: 2 }) + " CNY"
+      : "--";
   }
 
-  function jpy(value) {
+  function jpy(value, exchangeRate) {
     if (value === null || value === undefined || value === "") return "--";
     const number = Number(value);
-    return Number.isFinite(number) ? number.toLocaleString("ja-JP", { maximumFractionDigits: 0 }) + " 日元" : "--";
+    const rate = Number(exchangeRate);
+    if (!Number.isFinite(number)) return "--";
+    const raw = number.toLocaleString("ja-JP", { maximumFractionDigits: 0 }) + " JPY";
+    if (!Number.isFinite(rate) || rate <= 0) return raw + "（折合 CNY 待配置）";
+    const converted = (number * rate).toLocaleString("zh-CN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return raw + "（约 " + converted + " CNY）";
+  }
+
+  function displayJpyCnyRate() {
+    const boardRate = Number(view.dualMarketBoard && view.dualMarketBoard.display_exchange_rate_cny_per_jpy);
+    if (Number.isFinite(boardRate) && boardRate > 0) return boardRate;
+    const configuredRate = Number(window.JPY_TO_CNY || window.JPY_RATE);
+    return Number.isFinite(configuredRate) && configuredRate > 0 ? configuredRate : 0.046;
   }
 
   function percent(value) {
@@ -318,7 +335,7 @@
         '<span class="tag hot">挖煤姬 · 进货侧</span>',
         '<span class="tag source-tag">' + esc(typeLabel(item.media_type)) + '</span>',
         '<h4>' + esc(title) + '</h4>',
-        '<div class="price">' + esc(jpy(purchasePrice)) + '</div>',
+        '<div class="price">' + esc(jpy(purchasePrice, displayJpyCnyRate())) + '</div>',
         '<div class="desc">品番 / JAN：' + esc(catalogNo) + (sourceUrl ? ' · 点击进入商品详情' : '') + '</div>',
       '</div>',
     ].join("");
@@ -329,10 +346,10 @@
       '<article class="op-card discovery-op-card" data-discovery-opportunity-id="' + esc(item.id || "") + '">',
         sideMarkup("xianyu", xianyuUrl, xianyuSide),
         '<div class="analysis">',
-          '<div class="comparison-rail"><span>闲鱼销售侧</span><i aria-hidden="true">↔</i><span>挖煤姬进货侧</span></div>',
+          '<div class="comparison-rail"><span>挖煤姬进货（JPY） → 闲鱼国内销售（CNY）</span></div>',
           '<div class="grid2">',
-            '<div class="metric"><small>预估净利</small><strong>' + esc(cny(expectedProfit)) + '</strong></div>',
-            '<div class="metric"><small>利润率</small><strong>' + esc(percent(item.net_margin)) + '</strong></div>',
+            '<div class="metric"><small>闲鱼预计净利（CNY）</small><strong>' + esc(cny(expectedProfit)) + '</strong></div>',
+            '<div class="metric"><small>闲鱼销售利润率</small><strong>' + esc(percent(item.net_margin)) + '</strong></div>',
             '<div class="metric"><small>匹配度</small><strong>' + esc(percent(item.match_confidence)) + '</strong></div>',
             '<div class="metric"><small>判定</small><strong>' + decisionChip(item.decision) + '</strong></div>',
           '</div>',
@@ -353,7 +370,9 @@
     const isXianyu = kind === "xianyu";
     const tag = isXianyu ? "闲鱼 · 销售侧" : "挖煤姬 · 进货侧";
     const image = item && item.image_url;
-    const price = isXianyu ? cny(item && item.price) : jpy(item && item.price);
+    const price = isXianyu
+      ? cny(item && item.price)
+      : jpy(item && item.price, displayJpyCnyRate());
     const body = [
       '<div class="thumb ' + (isXianyu ? "xianyu-thumb" : "market-thumb") + '">',
         thumbMarkup(image, tag, dualEvidenceLabel(item)),
@@ -383,15 +402,15 @@
       '<article class="op-card discovery-op-card dual-market-card" data-dual-market-comparison-id="' + esc(item.comparison_id || "") + '">',
         xianyuSide,
         '<div class="analysis">',
-          '<div class="comparison-rail"><span>闲鱼最低有效挂牌价</span><i aria-hidden="true">↔</i><span>挖煤姬最低有效进货价</span></div>',
+          '<div class="comparison-rail"><span>挖煤姬进货（JPY） → 闲鱼国内销售（CNY）</span></div>',
           '<div class="grid2">',
-            '<div class="metric"><small>销售侧挂牌价</small><strong>' + esc(cny(calculation.sale_price_cny)) + '</strong></div>',
-            '<div class="metric"><small>落地成本</small><strong>' + esc(cny(calculation.landed_cost_cny)) + '</strong></div>',
-            '<div class="metric"><small>预计净利</small><strong>' + esc(cny(calculation.expected_profit_cny)) + '</strong></div>',
-            '<div class="metric"><small>利润率</small><strong>' + esc(percent(calculation.net_margin)) + '</strong></div>',
+            '<div class="metric"><small>闲鱼销售价（CNY）</small><strong>' + esc(cny(calculation.sale_price_cny)) + '</strong></div>',
+            '<div class="metric"><small>挖煤姬落地成本（CNY）</small><strong>' + esc(cny(calculation.landed_cost_cny)) + '</strong></div>',
+            '<div class="metric"><small>闲鱼预计净利（CNY）</small><strong>' + esc(cny(calculation.expected_profit_cny)) + '</strong></div>',
+            '<div class="metric"><small>闲鱼销售利润率</small><strong>' + esc(percent(calculation.net_margin)) + '</strong></div>',
           '</div>',
           '<p class="comparison-catalog">同款键：' + esc(item.canonical_product_key) + '</p>',
-          '<div class="reason">两侧均为本次比较快照引用的真实商品；闲鱼价格是当前最低有效挂牌价，不代表已成交价。</div>',
+          '<div class="reason">利润 = 闲鱼销售价（CNY） - 闲鱼销售费用 - 挖煤姬采购与落地成本（折合 CNY）。闲鱼挂牌价不代表已成交价。</div>',
         '</div>',
         wameijiSide,
       '</article>',
@@ -401,18 +420,18 @@
   function nonReadyComparisonCard(item) {
     const calculation = item.calculation || {};
     const costPending = calculation.status === "cost_pending";
-    const label = costPending ? "成本待确认" : "当前无利润，不建议收购";
+    const label = costPending ? "成本待确认 · 暂不判定闲鱼利润" : "闲鱼转售无利润 · 不建议收购";
     const detail = costPending
-      ? "成本配置缺少实际输入，系统未计算利润。"
-      : "两侧价格已记录，但按当前成本计算没有正利润。";
+      ? "成本配置缺少实际输入；系统不会倒推日本售价或虚构闲鱼利润。"
+      : "利润 = 闲鱼销售价（CNY） - 闲鱼销售费用 - 挖煤姬采购与落地成本（折合 CNY）；当前结果不为正。";
     return [
       '<article class="op-card discovery-op-card dual-market-card dual-market-nonready">',
         dualSide("xianyu", item.xianyu),
         '<div class="analysis">',
-          '<div class="comparison-rail"><span>' + esc(label) + '</span></div>',
+          '<div class="comparison-rail"><span>挖煤姬进货（JPY） → 闲鱼国内销售（CNY）</span><small>' + esc(label) + '</small></div>',
           '<div class="grid2">',
-            '<div class="metric"><small>销售侧挂牌价</small><strong>' + esc(cny(calculation.sale_price_cny)) + '</strong></div>',
-            '<div class="metric"><small>落地成本</small><strong>' + esc(cny(calculation.landed_cost_cny)) + '</strong></div>',
+            '<div class="metric"><small>闲鱼销售价（CNY）</small><strong>' + esc(cny(calculation.sale_price_cny)) + '</strong></div>',
+            '<div class="metric"><small>挖煤姬落地成本（CNY）</small><strong>' + esc(cny(calculation.landed_cost_cny)) + '</strong></div>',
           '</div>',
           '<p class="comparison-catalog">同款键：' + esc(item.canonical_product_key) + '</p>',
           '<div class="reason">' + esc(detail) + '</div>',

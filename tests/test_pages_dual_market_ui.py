@@ -94,13 +94,43 @@ def test_dual_market_ui_does_not_coerce_missing_landed_cost_to_zero() -> None:
     assert 'value === null || value === undefined || value === ""' in currency_formatter
 
 
-def test_wameiji_price_is_explicitly_labeled_as_japanese_yen() -> None:
+def test_market_prices_use_explicit_cny_and_jpy_units_with_conversion() -> None:
     javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
-    start = javascript.index("function jpy")
+    start = javascript.index("function cny")
     end = javascript.index("function percent")
     currency_formatter = javascript[start:end]
+    harness = f"""
+{currency_formatter}
+if (cny(30) !== "30 CNY") throw new Error("unexpected CNY: " + cny(30));
+if (jpy(110, 0.046) !== "110 JPY（约 5.06 CNY）") {{
+  throw new Error("unexpected JPY conversion: " + jpy(110, 0.046));
+}}
+if (cny(null) !== "--" || jpy(null, 0.046) !== "--") {{
+  throw new Error("missing prices must remain unknown");
+}}
+"""
 
-    assert "日元" in currency_formatter
+    result = subprocess.run(
+        ["node", "-e", harness],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_dual_market_ui_states_the_china_resale_profit_direction() -> None:
+    javascript = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    renderer = extract_dual_market_renderer(javascript)
+    homepage = Path("web/index.html").read_text(encoding="utf-8")
+
+    assert "挖煤姬进货（JPY） → 闲鱼国内销售（CNY）" in renderer
+    assert "闲鱼预计净利（CNY）" in renderer
+    assert "闲鱼销售利润率" in renderer
+    assert "利润 = 闲鱼销售价（CNY）" in renderer
+    assert "闲鱼预计净利" in homepage
+    assert "闲鱼最高净利" in homepage
 
 
 def test_dual_market_kpis_label_cost_pending_pairs_without_zero_profit() -> None:
@@ -121,10 +151,10 @@ def test_homepage_loads_snapshot_loader_before_the_board_renderer() -> None:
     assert homepage.index("dual-market-data.js") < homepage.index("discovery-ui.js")
 
 
-def test_homepage_busts_cached_renderer_after_yen_and_image_fix() -> None:
+def test_homepage_busts_cached_renderer_after_currency_and_resale_fix() -> None:
     homepage = Path("web/index.html").read_text(encoding="utf-8")
 
-    assert "discovery-ui.js?v=20260909-yen-image-fix" in homepage
+    assert "discovery-ui.js?v=20260909-cny-jpy-resale-fix" in homepage
 
 
 def test_board_refresh_decouples_legacy_api_failures_from_dual_market_data() -> None:

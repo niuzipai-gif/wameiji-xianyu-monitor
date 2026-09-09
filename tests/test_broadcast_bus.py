@@ -16,7 +16,7 @@ from cd_monitor.core.models import WatchItem
 from cd_monitor.services.broadcast_bus import BroadcastBus
 from cd_monitor.services.watch_action_service import WatchActionService
 from cd_monitor.storage.sqlite import add_watch, init_db
-from cd_monitor.web_server import _build_handler, _get_broadcast_bus
+from cd_monitor.web_server import _build_handler, _get_broadcast_bus, _ws_send_ping
 
 
 def _make_db(tmp_path: Path) -> Path:
@@ -150,6 +150,21 @@ def test_watch_action_service_emits_lifecycle_events(tmp_path: Path, monkeypatch
 
 
 # -------- WebSocket integration --------
+
+
+def test_server_ping_frame_is_unmasked() -> None:
+    class RecordingSocket:
+        def __init__(self) -> None:
+            self.payload = b""
+
+        def sendall(self, payload: bytes) -> None:
+            self.payload += payload
+
+    sock = RecordingSocket()
+
+    _ws_send_ping(sock)  # type: ignore[arg-type]
+
+    assert sock.payload == b"\x89\x00"
 
 
 def _http_request(base, path, payload=None, method="POST"):

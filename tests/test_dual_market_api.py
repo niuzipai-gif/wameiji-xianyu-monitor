@@ -68,6 +68,7 @@ def post_json(url: str, payload: dict[str, object]) -> tuple[int, dict[str, obje
 
 def test_dual_market_board_returns_exact_ready_and_waiting_streams(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("WEB_ACCESS_TOKEN", "viewer-secret")
+    monkeypatch.setenv("CD_JPY_TO_CNY", "0.047")
     db_path = tmp_path / "monitor.db"
     wameiji_id = insert_listing_observation(db_path, make_observation())
     xianyu_id = insert_listing_observation(
@@ -105,6 +106,7 @@ def test_dual_market_board_returns_exact_ready_and_waiting_streams(tmp_path: Pat
         server.server_close()
 
     assert code == 200
+    assert payload["display_exchange_rate_cny_per_jpy"] == 0.047
     assert payload["summary"] == {
         "ready_count": 1,
         "negative_profit_count": 0,

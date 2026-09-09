@@ -33,6 +33,7 @@ IMAGE_EXTENSIONS = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
 MIN_IMAGE_EDGE = 80
 MAX_IMAGE_EDGE = 10_000
+DEFAULT_DISPLAY_EXCHANGE_RATE_CNY_PER_JPY = 0.046
 CATEGORIES = ("ready", "negative_profit", "cost_pending")
 EXPECTED_CALCULATION_STATUS = {
     "ready": "ready",
@@ -333,6 +334,11 @@ def export_pages_snapshot(
             "schema_version": 1,
             "generated_at": generated_at.isoformat(),
             "mode": "verified_static_snapshot",
+            "display_exchange_rate_cny_per_jpy": (
+                float(board["display_exchange_rate_cny_per_jpy"])
+                if _finite_price(board.get("display_exchange_rate_cny_per_jpy"))
+                else DEFAULT_DISPLAY_EXCHANGE_RATE_CNY_PER_JPY
+            ),
             "summary": {
                 "ready_count": len(accepted["ready"]),
                 "negative_profit_count": len(accepted["negative_profit"]),

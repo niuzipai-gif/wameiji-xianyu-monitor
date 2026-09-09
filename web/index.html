@@ -10,7 +10,7 @@
   <script src="runtime-config.js"></script>
   <script src="app.js?v=20260909-pages-prompt-fallback" defer></script>
   <script src="dual-market-data.js?v=20260909-pages-snapshot" defer></script>
-  <script src="discovery-ui.js?v=20260909-yen-image-fix" defer></script>
+  <script src="discovery-ui.js?v=20260909-cny-jpy-resale-fix" defer></script>
 </head>
 <body class="kuro" data-kuro-theme="rose">
     <button class="feed-new-pill" data-feed-new-pill type="button"></button>
@@ -71,11 +71,11 @@
           <div class="hero-copy">
             <div class="eyebrow">Kuro Atelier · Premium Dashboard</div>
             <h2>智能发现高价值交易机会<br/>用更有设计感的方式做日系 CD 与 GalGame 实体价差监控</h2>
-            <p class="lead">图片优先信息流：左侧闲鱼以淡黄色显示搜索挂牌价样本，右侧挖煤姬以淡粉白显示详情已核验进货价；中间集中展示成本、净利、版本和匹配证据。闲鱼样本须在下单前完成详情或人工验货。</p>
+            <p class="lead">图片优先信息流：左侧闲鱼以淡黄色显示搜索挂牌价样本与国内销售价（CNY），右侧挖煤姬以淡粉白显示详情已核验进货价（JPY 与折合 CNY）；中间利润只按“挖煤姬进货 → 闲鱼国内销售”计算。闲鱼样本须在下单前完成详情或人工验货。</p>
             <div class="stats">
               <div class="stat"><small>已核验双边</small><strong id="kpiToday">--</strong></div>
-              <div class="stat"><small>预计利润</small><strong id="kpiProfit">--</strong></div>
-              <div class="stat"><small>最高利润</small><strong id="kpiMax">--</strong></div>
+              <div class="stat"><small>闲鱼预计净利</small><strong id="kpiProfit">--</strong></div>
+              <div class="stat"><small>闲鱼最高净利</small><strong id="kpiMax">--</strong></div>
               <div class="stat"><small>命中率</small><strong id="kpiHitRate">--</strong></div>
             </div>
           </div>

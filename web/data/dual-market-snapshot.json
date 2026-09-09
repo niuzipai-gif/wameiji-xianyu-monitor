@@ -2,6 +2,7 @@
   "schema_version": 1,
   "generated_at": "2026-09-09T07:52:12.938735+08:00",
   "mode": "verified_static_snapshot",
+  "display_exchange_rate_cny_per_jpy": 0.046,
   "summary": {
     "ready_count": 0,
     "negative_profit_count": 0,

@@ -28,6 +28,7 @@ def png_bytes(colour: str) -> bytes:
 def verified_board() -> dict[str, object]:
     canonical_key = "catalog:nzs955|edition:initial_limited|condition:sealed"
     return {
+        "display_exchange_rate_cny_per_jpy": 0.046,
         "summary": {
             "ready_count": 0,
             "negative_profit_count": 0,
@@ -111,6 +112,7 @@ def test_export_rewrites_both_images_and_writes_hash_manifest(tmp_path: Path) ->
     assert "auctions.c.yimg.jp" not in snapshot_text
     assert "must-not-publish" not in snapshot_text
     assert payload["mode"] == "verified_static_snapshot"
+    assert payload["display_exchange_rate_cny_per_jpy"] == 0.046
     assert payload["summary"]["cost_pending_count"] == 1
 
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))

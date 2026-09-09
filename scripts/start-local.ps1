@@ -1,7 +1,7 @@
 param(
     [ValidateRange(1, 65535)]
     [int]$Port = 9890,
-    [string]$Database = 'data/local/takeover.db'
+    [string]$Database = 'data/local/dual-market.db'
 )
 
 $ErrorActionPreference = 'Stop'
