@@ -154,7 +154,7 @@ def test_homepage_loads_snapshot_loader_before_the_board_renderer() -> None:
 def test_homepage_busts_cached_renderer_after_currency_and_resale_fix() -> None:
     homepage = Path("web/index.html").read_text(encoding="utf-8")
 
-    assert "discovery-ui.js?v=20260909-cny-jpy-resale-fix" in homepage
+    assert "discovery-ui.js?v=20260909-public-snapshot-no-prompt" in homepage
 
 
 def test_board_refresh_decouples_legacy_api_failures_from_dual_market_data() -> None:

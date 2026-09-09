@@ -190,13 +190,15 @@ def test_live_feed_uses_bridged_refresh_helper() -> None:
     )
 
 
-def test_remote_pages_prompts_before_the_selection_board_fetches() -> None:
-    """The first Pages visit should not emit unauthenticated Render requests."""
+def test_remote_pages_loads_public_snapshot_without_token_prompt() -> None:
+    """The fixed Pages URL must render without asking visitors for a secret."""
 
     _run_browserless_app_harness(
-        'if (promptCount !== 1) throw new Error("expected one prompt, got " + promptCount); '
-        'if (requests.some((url) => !url.includes("access_token=viewer-token"))) '
-        'throw new Error("unauthenticated request: " + requests.join(", "));',
+        'if (promptCount !== 0) throw new Error("unexpected prompt count=" + promptCount); '
+        'if (requests.some((url) => url.startsWith("https://collector.example"))) '
+        'throw new Error("unexpected collector request: " + requests.join(", ")); '
+        'if (!requests.some((url) => url.includes("/data/dual-market-snapshot.json"))) '
+        'throw new Error("snapshot was not requested: " + requests.join(", "));',
         api_base="https://collector.example",
         page_origin="https://viewer.example",
         include_discovery=True,
@@ -206,29 +208,29 @@ def test_remote_pages_prompts_before_the_selection_board_fetches() -> None:
     )
 
 
-def test_cancelled_remote_token_still_loads_the_public_pages_snapshot() -> None:
-    """Static evidence remains visible when a viewer does not enter a Render token."""
+def test_remote_pages_with_token_fetches_live_board_without_prompt() -> None:
+    """An explicitly configured token can still opt the viewer into live data."""
 
     _run_browserless_app_harness(
-        'if (promptCount !== 1) throw new Error("expected one prompt, got " + promptCount); '
-        'if (requests.some((url) => url.startsWith("https://collector.example"))) '
-        'throw new Error("remote request without token: " + requests.join(", ")); '
-        'if (!requests.some((url) => url.includes("/data/dual-market-snapshot.json"))) '
-        'throw new Error("snapshot was not requested: " + requests.join(", "));',
+        'if (promptCount !== 0) throw new Error("unexpected prompt count=" + promptCount); '
+        'const remote = requests.filter((url) => url.startsWith("https://collector.example")); '
+        'if (!remote.length) throw new Error("live collector was not requested"); '
+        'if (remote.some((url) => !url.includes("access_token=viewer-token"))) '
+        'throw new Error("unauthenticated request: " + requests.join(", "));',
         api_base="https://collector.example",
         page_origin="https://viewer.example/",
+        access_token="viewer-token",
         include_discovery=True,
         run_initial_timeouts=True,
-        prompt_value="",
         require_access_token=True,
     )
 
 
-def test_unsupported_remote_token_prompt_still_loads_the_public_pages_snapshot() -> None:
+def test_remote_pages_never_calls_an_unsupported_prompt_for_public_snapshot() -> None:
     """A browser without prompt support must still render the public snapshot."""
 
     _run_browserless_app_harness(
-        'if (promptCount !== 1) throw new Error("expected one prompt, got " + promptCount); '
+        'if (promptCount !== 0) throw new Error("unexpected prompt count=" + promptCount); '
         'if (requests.some((url) => url.startsWith("https://collector.example"))) '
         'throw new Error("remote request without token: " + requests.join(", ")); '
         'if (!requests.some((url) => url.includes("/data/dual-market-snapshot.json"))) '

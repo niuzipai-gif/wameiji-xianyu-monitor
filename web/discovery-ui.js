@@ -183,6 +183,9 @@
   }
 
   function apiPost(path, payload) {
+    if (view.liveApiBlocked) {
+      return Promise.reject(new Error("public snapshot mode is read-only"));
+    }
     if (typeof window.postJson === "function") return window.postJson(path, payload);
     return fetch(path, {
       method: "POST",
@@ -669,7 +672,11 @@
       renderKpis(view.board.summary || {});
       renderFeed();
       renderPools();
-      setCommandMessage(commandLabel(view.commands));
+      setCommandMessage(
+        view.liveApiBlocked
+          ? "Pages 公开快照模式 · 无需访问令牌 · 实时操作仅限已配置的本机"
+          : commandLabel(view.commands),
+      );
     } catch (error) {
       setCommandMessage("读取选品广场失败：" + error.message, true);
       const target = document.getElementById("homeFeed");
@@ -819,7 +826,15 @@
     // listener. Queue one tick so this module always uses the same Page token.
     setTimeout(async () => {
       const api = window.CD_MONITOR_API;
-      if (api && typeof api.ensureViewerAccessToken === "function") {
+      const separateCollector = Boolean(
+        api && typeof api.isSeparateCollectorApi === "function" && api.isSeparateCollectorApi(),
+      );
+      const configuredToken = String(
+        api && typeof api.configuredApiToken === "function" ? api.configuredApiToken() : "",
+      ).trim();
+      if (separateCollector && !configuredToken) {
+        view.liveApiBlocked = true;
+      } else if (api && typeof api.ensureViewerAccessToken === "function") {
         const accessReady = await api.ensureViewerAccessToken();
         if (!accessReady) {
           view.liveApiBlocked = true;
