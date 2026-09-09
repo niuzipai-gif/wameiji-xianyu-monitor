@@ -924,6 +924,7 @@ def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
             _migrate_watchlist_filter_columns(conn)
             _migrate_market_items_cover_columns(conn)
             _migrate_market_item_detail_fee_columns(conn)
+            _migrate_price_comparison_statuses(conn)
             _migrate_discovery_selection_board(conn)
             _migrate_detail_first_discovery(conn)
             _migrate_duplicate_source_candidates(conn)
@@ -932,6 +933,63 @@ def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
             _migrate_title_only_xianyu_rechecks(conn)
     finally:
         conn.close()
+
+
+def _migrate_price_comparison_statuses(conn: sqlite3.Connection) -> None:
+    """Replace the legacy profit-sign states with strict margin states."""
+
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='price_comparisons'"
+    ).fetchone()
+    table_sql = str(row[0] or "") if row else ""
+    if "'eligible'" in table_sql and "'below_margin'" in table_sql:
+        return
+
+    conn.execute("ALTER TABLE price_comparisons RENAME TO price_comparisons_legacy_status")
+    conn.execute(
+        """
+        CREATE TABLE price_comparisons (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          canonical_product_key TEXT NOT NULL,
+          wameiji_observation_id INTEGER NOT NULL REFERENCES listing_observations(id),
+          xianyu_observation_id INTEGER NOT NULL REFERENCES listing_observations(id),
+          cost_config_json TEXT NOT NULL,
+          landed_cost_cny REAL,
+          sale_price_cny REAL NOT NULL,
+          expected_profit_cny REAL,
+          net_margin REAL,
+          status TEXT NOT NULL CHECK(status IN ('eligible', 'below_margin', 'cost_pending')),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO price_comparisons (
+          id, canonical_product_key, wameiji_observation_id, xianyu_observation_id,
+          cost_config_json, landed_cost_cny, sale_price_cny, expected_profit_cny,
+          net_margin, status, created_at
+        )
+        SELECT
+          id, canonical_product_key, wameiji_observation_id, xianyu_observation_id,
+          cost_config_json, landed_cost_cny, sale_price_cny, expected_profit_cny,
+          net_margin,
+          CASE status
+            WHEN 'ready' THEN 'eligible'
+            WHEN 'negative_profit' THEN 'below_margin'
+            ELSE status
+          END,
+          created_at
+        FROM price_comparisons_legacy_status
+        """
+    )
+    conn.execute("DROP TABLE price_comparisons_legacy_status")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_price_comparisons_product_time
+        ON price_comparisons(canonical_product_key, created_at DESC)
+        """
+    )
 
 
 def _migrate_candidate_rechecks_pending_unique(conn: sqlite3.Connection) -> None:

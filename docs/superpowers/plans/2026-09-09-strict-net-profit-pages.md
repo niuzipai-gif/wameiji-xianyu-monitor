@@ -134,7 +134,7 @@ git commit -m "feat: define strict dual-market profit policy"
 - Modify: `src/cd_monitor/services/dual_market_service.py`
 - Modify: `tests/test_dual_market_service.py`
 
-- [ ] **Step 1: Add failing calculation tests**
+- [x] **Step 1: Add failing calculation tests**
 
 Add tests that assert:
 
@@ -153,13 +153,13 @@ assert breakdown["tax_cny"] == 0
 
 Also construct one comparison whose exact raw margin is `0.25` and one at `0.249999`; expect `eligible` and `below_margin` respectively. Assert JPY/CNY reversal raises `ValueError`, and every unknown cost returns `cost_pending` with its missing field names.
 
-- [ ] **Step 2: Run the targeted tests and confirm the new behavior fails**
+- [x] **Step 2: Run the targeted tests and confirm the new behavior fails**
 
 Run: `pytest tests/test_dual_market_service.py -q`
 
 Expected: FAIL because the current statuses are `ready/negative_profit` and the service rounds profit before qualification.
 
-- [ ] **Step 3: Extend the immutable policy snapshot and calculator**
+- [x] **Step 3: Extend the immutable policy snapshot and calculator**
 
 Add these fields to `DualMarketCostConfig`:
 
@@ -171,13 +171,13 @@ policy_version: str | None = None
 
 Use raw floats for qualification, round only stored/display values, and persist `eligible`, `below_margin`, or `cost_pending`. Add a pure `comparison_cost_breakdown(...)` helper returning every formula component and `missing_fields` without refetching data.
 
-- [ ] **Step 4: Run focused domain/storage tests**
+- [x] **Step 4: Run focused domain/storage tests**
 
 Run: `pytest tests/test_dual_market_service.py tests/test_dual_market_storage.py tests/test_dual_market_core.py -q`
 
 Expected: PASS; update legacy assertions only where the approved state vocabulary intentionally changed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add -- src/cd_monitor/core/dual_market.py src/cd_monitor/services/dual_market_service.py tests/test_dual_market_service.py tests/test_dual_market_storage.py tests/test_dual_market_core.py

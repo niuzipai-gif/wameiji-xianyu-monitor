@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 
@@ -100,3 +101,57 @@ def test_initialize_database_preserves_legacy_market_items_when_adding_observati
 
     assert legacy_id > 0
     assert get_listing_observation(db_path, observation_id) is not None
+
+
+def test_initialize_database_migrates_legacy_comparison_statuses(tmp_path: Path) -> None:
+    db_path = tmp_path / "monitor.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE price_comparisons (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              canonical_product_key TEXT NOT NULL,
+              wameiji_observation_id INTEGER NOT NULL,
+              xianyu_observation_id INTEGER NOT NULL,
+              cost_config_json TEXT NOT NULL,
+              landed_cost_cny REAL,
+              sale_price_cny REAL NOT NULL,
+              expected_profit_cny REAL,
+              net_margin REAL,
+              status TEXT NOT NULL CHECK(status IN ('ready', 'negative_profit', 'cost_pending')),
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO price_comparisons (
+              canonical_product_key, wameiji_observation_id, xianyu_observation_id,
+              cost_config_json, sale_price_cny, status
+            ) VALUES (?, 1, 2, '{}', 100, ?)
+            """,
+            (("catalog:ready", "ready"), ("catalog:negative", "negative_profit")),
+        )
+
+    init_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        table_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='price_comparisons'"
+        ).fetchone()[0]
+        statuses = [
+            row[0]
+            for row in conn.execute("SELECT status FROM price_comparisons ORDER BY id").fetchall()
+        ]
+        conn.execute(
+            """
+            INSERT INTO price_comparisons (
+              canonical_product_key, wameiji_observation_id, xianyu_observation_id,
+              cost_config_json, sale_price_cny, status
+            ) VALUES ('catalog:new', 1, 2, '{}', 100, 'eligible')
+            """
+        )
+
+    assert "'eligible'" in table_sql
+    assert "'below_margin'" in table_sql
+    assert statuses == ["eligible", "below_margin"]

@@ -249,7 +249,7 @@ class PriceComparison:
     sale_price_cny: float
     expected_profit_cny: float | None
     net_margin: float | None
-    status: Literal["ready", "negative_profit", "cost_pending"]
+    status: Literal["eligible", "below_margin", "cost_pending"]
     id: int | None = None
     created_at: str | None = None
 
@@ -259,8 +259,8 @@ class ComparisonOutcome:
     """A board-safe result: waiting states never invent a profit card."""
 
     status: Literal[
-        "ready",
-        "negative_profit",
+        "eligible",
+        "below_margin",
         "cost_pending",
         "waiting_wameiji",
         "waiting_xianyu",

@@ -12,7 +12,10 @@ from cd_monitor.core.dual_market import (
     observation_from_xianyu,
 )
 from cd_monitor.core.models import MarketItem, XianyuPriceSample
-from cd_monitor.services.dual_market_service import rebuild_current_comparison
+from cd_monitor.services.dual_market_service import (
+    comparison_cost_breakdown,
+    rebuild_current_comparison,
+)
 from cd_monitor.storage.sqlite import insert_listing_observation
 
 COST_CONFIG = DualMarketCostConfig(
@@ -27,6 +30,9 @@ COST_CONFIG = DualMarketCostConfig(
     tax_cny=0,
     sales_fee_rate=0.006,
     sales_fee_cap_cny=60,
+    sales_fee_uncapped=False,
+    minimum_net_margin=0,
+    policy_version="legacy-test-v1",
 )
 
 
@@ -67,7 +73,7 @@ def test_build_comparison_references_each_side_lowest_eligible_observation(tmp_p
 
     outcome = rebuild_current_comparison(db_path, "catalog:srcl3520", COST_CONFIG)
 
-    assert outcome.status == "ready"
+    assert outcome.status == "eligible"
     assert outcome.comparison is not None
     assert outcome.comparison.wameiji_observation_id == wameiji_id
     assert outcome.comparison.xianyu_observation_id == xianyu_id
@@ -169,7 +175,7 @@ def test_build_comparison_never_pairs_complete_used_with_a_risk_condition(
     assert outcome.comparison is None
 
 
-def test_lower_xianyu_price_creates_negative_profit_history_not_buy_recommendation(
+def test_lower_xianyu_price_creates_below_margin_history_not_buy_recommendation(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "monitor.db"
@@ -189,7 +195,7 @@ def test_lower_xianyu_price_creates_negative_profit_history_not_buy_recommendati
 
     outcome = rebuild_current_comparison(db_path, "catalog:srcl3520", COST_CONFIG)
 
-    assert outcome.status == "negative_profit"
+    assert outcome.status == "below_margin"
     assert outcome.comparison is not None
     assert outcome.comparison.expected_profit_cny is not None
     assert outcome.comparison.expected_profit_cny < 0
@@ -222,3 +228,195 @@ def test_missing_tax_configuration_creates_cost_pending_without_inventing_profit
     assert outcome.status == "cost_pending"
     assert outcome.comparison is not None
     assert outcome.comparison.expected_profit_cny is None
+
+
+def test_strict_breakdown_includes_every_confirmed_cost_component(tmp_path: Path) -> None:
+    db_path = tmp_path / "monitor.db"
+    insert_listing_observation(
+        db_path,
+        make_observation(price=1000, source_detail_fee=230),
+    )
+    insert_listing_observation(
+        db_path,
+        make_observation(
+            source="xianyu",
+            source_listing_id="x-breakdown",
+            price=200,
+            currency="CNY",
+            url="https://www.goofish.com/item?id=x-breakdown",
+            image_url="https://images.example/xianyu/x-breakdown.jpg",
+            evidence_level="search_card",
+        ),
+    )
+    config = DualMarketCostConfig(
+        exchange_rate_cny_per_jpy=0.0455,
+        japan_domestic_shipping_jpy=230,
+        proxy_fee_jpy=200,
+        international_shipping_per_item_cny=15,
+        china_reship_cny=5,
+        packaging_cny=2,
+        after_sale_reserve_cny=0,
+        risk_reserve_cny=0,
+        tax_cny=0,
+        sales_fee_rate=0.016,
+        sales_fee_cap_cny=None,
+        sales_fee_uncapped=True,
+        minimum_net_margin=0.25,
+        policy_version="wameiji-xianyu-net-v1",
+    )
+
+    outcome = rebuild_current_comparison(db_path, "catalog:srcl3520", config)
+
+    assert outcome.status == "eligible"
+    assert outcome.comparison is not None
+    observations = {
+        observation.source: observation
+        for observation in (
+            make_observation(price=1000, source_detail_fee=230, id=outcome.comparison.wameiji_observation_id),
+            make_observation(
+                source="xianyu",
+                source_listing_id="x-breakdown",
+                price=200,
+                currency="CNY",
+                url="https://www.goofish.com/item?id=x-breakdown",
+                image_url="https://images.example/xianyu/x-breakdown.jpg",
+                evidence_level="search_card",
+                id=outcome.comparison.xianyu_observation_id,
+            ),
+        )
+    }
+    breakdown = comparison_cost_breakdown(
+        observations["wameiji"], observations["xianyu"], config
+    )
+    assert breakdown["xianyu_sale_cny"] == pytest.approx(200)
+    assert breakdown["xianyu_seller_fee_cny"] == pytest.approx(3.2)
+    assert breakdown["wameiji_item_jpy"] == pytest.approx(1000)
+    assert breakdown["wameiji_item_cny"] == pytest.approx(45.5)
+    assert breakdown["wameiji_domestic_shipping_jpy"] == pytest.approx(230)
+    assert breakdown["wameiji_domestic_shipping_cny"] == pytest.approx(10.465)
+    assert breakdown["wameiji_proxy_fee_jpy"] == pytest.approx(200)
+    assert breakdown["wameiji_proxy_fee_cny"] == pytest.approx(9.1)
+    assert breakdown["international_shipping_cny"] == 15
+    assert breakdown["china_postage_cny"] == 5
+    assert breakdown["packaging_cny"] == 2
+    assert breakdown["tax_cny"] == 0
+    assert breakdown["landed_cost_cny"] == pytest.approx(87.065)
+    assert breakdown["net_profit_cny"] == pytest.approx(109.735)
+    assert breakdown["net_margin"] == pytest.approx(109.735 / 200)
+    assert breakdown["missing_fields"] == []
+
+
+@pytest.mark.parametrize(
+    ("purchase_price_jpy", "expected_status"),
+    [(75.0, "eligible"), (75.0001, "below_margin")],
+)
+def test_margin_threshold_uses_unrounded_values(
+    tmp_path: Path,
+    purchase_price_jpy: float,
+    expected_status: str,
+) -> None:
+    db_path = tmp_path / "monitor.db"
+    insert_listing_observation(db_path, make_observation(price=purchase_price_jpy))
+    insert_listing_observation(
+        db_path,
+        make_observation(
+            source="xianyu",
+            source_listing_id="x-boundary",
+            price=100,
+            currency="CNY",
+            url="https://www.goofish.com/item?id=x-boundary",
+            image_url="https://images.example/xianyu/x-boundary.jpg",
+            evidence_level="search_card",
+        ),
+    )
+    config = DualMarketCostConfig(
+        exchange_rate_cny_per_jpy=1,
+        japan_domestic_shipping_jpy=0,
+        proxy_fee_jpy=0,
+        international_shipping_per_item_cny=0,
+        china_reship_cny=0,
+        packaging_cny=0,
+        after_sale_reserve_cny=0,
+        risk_reserve_cny=0,
+        tax_cny=0,
+        sales_fee_rate=0,
+        sales_fee_cap_cny=None,
+        sales_fee_uncapped=True,
+        minimum_net_margin=0.25,
+        policy_version="threshold-test-v1",
+    )
+
+    outcome = rebuild_current_comparison(db_path, "catalog:srcl3520", config)
+
+    assert outcome.status == expected_status
+
+
+def test_uncapped_seller_fee_is_not_silently_limited_to_sixty_cny(tmp_path: Path) -> None:
+    db_path = tmp_path / "monitor.db"
+    insert_listing_observation(db_path, make_observation(price=100))
+    insert_listing_observation(
+        db_path,
+        make_observation(
+            source="xianyu",
+            source_listing_id="x-high",
+            price=5000,
+            currency="CNY",
+            url="https://www.goofish.com/item?id=x-high",
+            image_url="https://images.example/xianyu/x-high.jpg",
+            evidence_level="search_card",
+        ),
+    )
+    config = replace(
+        COST_CONFIG,
+        exchange_rate_cny_per_jpy=1,
+        japan_domestic_shipping_jpy=0,
+        proxy_fee_jpy=0,
+        international_shipping_per_item_cny=0,
+        china_reship_cny=0,
+        packaging_cny=0,
+        after_sale_reserve_cny=0,
+        risk_reserve_cny=0,
+        sales_fee_rate=0.016,
+        sales_fee_cap_cny=None,
+        sales_fee_uncapped=True,
+        minimum_net_margin=0,
+    )
+
+    outcome = rebuild_current_comparison(db_path, "catalog:srcl3520", config)
+
+    assert outcome.comparison is not None
+    assert outcome.comparison.expected_profit_cny == pytest.approx(4820)
+
+
+def test_cost_pending_breakdown_names_unknown_buyer_paid_shipping() -> None:
+    config = DualMarketCostConfig(
+        exchange_rate_cny_per_jpy=0.0455,
+        japan_domestic_shipping_jpy=None,
+        proxy_fee_jpy=200,
+        international_shipping_per_item_cny=15,
+        china_reship_cny=5,
+        packaging_cny=2,
+        after_sale_reserve_cny=0,
+        risk_reserve_cny=0,
+        tax_cny=0,
+        sales_fee_rate=0.016,
+        sales_fee_cap_cny=None,
+        sales_fee_uncapped=True,
+        minimum_net_margin=0.25,
+        policy_version="wameiji-xianyu-net-v1",
+    )
+    xianyu = make_observation(
+        source="xianyu",
+        source_listing_id="x-pending",
+        price=200,
+        currency="CNY",
+        url="https://www.goofish.com/item?id=x-pending",
+        image_url="https://images.example/xianyu/x-pending.jpg",
+        evidence_level="search_card",
+    )
+
+    breakdown = comparison_cost_breakdown(make_observation(), xianyu, config)
+
+    assert breakdown["missing_fields"] == ["japan_domestic_shipping_jpy"]
+    assert breakdown["landed_cost_cny"] is None
+    assert breakdown["net_profit_cny"] is None

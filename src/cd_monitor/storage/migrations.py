@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS price_comparisons (
   sale_price_cny REAL NOT NULL,
   expected_profit_cny REAL,
   net_margin REAL,
-  status TEXT NOT NULL CHECK(status IN ('ready', 'negative_profit', 'cost_pending')),
+  status TEXT NOT NULL CHECK(status IN ('eligible', 'below_margin', 'cost_pending')),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
