@@ -447,7 +447,7 @@ Repeat the scheduled-task and process checks. Expected: Discovery Worker remains
 
 Check every locked policy and exclusion, inspect `git diff --check`, and ensure `.superpowers/` remains untracked and unstaged. Commit any attributable test/integration corrections separately.
 
-- [ ] **Step 6: Push the verified branch to GitHub Pages**
+- [x] **Step 6: Push the verified branch to GitHub Pages**
 
 ```powershell
 git push origin HEAD:main
@@ -455,7 +455,7 @@ git push origin HEAD:main
 
 Wait for the Pages workflow rather than assuming deployment succeeded.
 
-- [ ] **Step 7: Verify the public artifact and UI**
+- [x] **Step 7: Verify the public artifact and UI**
 
 Read back:
 
@@ -466,6 +466,6 @@ https://niuzipai-gif.github.io/wameiji-xianyu-monitor/
 
 Use both a clean browser context and a context preloaded with an old API URL/token. Both plain URLs must show the same qualified snapshot and working local images. Verify every image response, committed `generated_at`, policy version, funnel, currencies, and the 25% threshold. Only `?live=1` may attempt the live collector.
 
-- [ ] **Step 8: Report observable completion evidence**
+- [x] **Step 8: Report observable completion evidence**
 
 Report commit SHA, public URL, public snapshot generation time, evaluated/eligible/below-margin/pending counts, tested image count, test totals, Pages workflow/readback status, and a final statement that collection remained paused throughout.
