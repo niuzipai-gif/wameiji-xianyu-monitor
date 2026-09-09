@@ -42,6 +42,7 @@ const requests = [];
 const websocketUrls = [];
 const webSockets = [];
 const classes = {{ add() {{}}, remove() {{}}, toggle() {{}} }};
+const liveFeedIndicator = {{ style: {{ display: "flex" }} }};
 const storageValues = {json.dumps(storage_values or {})};
 const storage = {{
   getItem(key) {{ return storageValues[key] || ""; }},
@@ -56,7 +57,7 @@ const document = {{
   addEventListener(name, listener) {{ (listeners[name] ||= []).push(listener); }},
   querySelectorAll() {{ return []; }},
   querySelector() {{ return null; }},
-  getElementById() {{ return null; }},
+  getElementById(id) {{ return id === "liveFeedIndicator" ? liveFeedIndicator : null; }},
   body: {{ classList: classes, dataset: {{}}, setAttribute() {{}}, removeAttribute() {{}} }},
   documentElement: {{ classList: classes, dataset: {{}}, setAttribute() {{}}, removeAttribute() {{}} }},
 }};
@@ -224,7 +225,9 @@ def test_remote_pages_loads_public_snapshot_without_token_prompt() -> None:
         'if (requests.some((url) => url.startsWith("https://collector.example"))) '
         'throw new Error("unexpected collector request: " + requests.join(", ")); '
         'if (!requests.some((url) => url.includes("/data/dual-market-snapshot.json"))) '
-        'throw new Error("snapshot was not requested: " + requests.join(", "));',
+        'throw new Error("snapshot was not requested: " + requests.join(", ")); '
+        'if (liveFeedIndicator.style.display !== "none") '
+        'throw new Error("static viewer still shows the live indicator");',
         api_base="https://collector.example",
         page_origin="https://viewer.example",
         include_discovery=True,

@@ -2121,7 +2121,11 @@ function connectLiveFeed() {
 (function _kuroBootstrap() {
   const wire = () => {
     const api = window.CD_MONITOR_API;
-    if (api && typeof api.isSeparateCollectorApi === "function" && api.isSeparateCollectorApi()) return;
+    if (api && typeof api.isSeparateCollectorApi === "function" && api.isSeparateCollectorApi()) {
+      const liveIndicator = document.getElementById("liveFeedIndicator");
+      if (liveIndicator) liveIndicator.style.display = "none";
+      return;
+    }
     bindNewSettingsForms();
     renderNotificationsAndAI();
     connectLiveFeed();
