@@ -11,6 +11,7 @@ from cd_monitor.services.reference_memory import (
     build_reference_product_profile,
     import_reference_samples,
     list_reference_market_observations,
+    list_reference_product_profiles,
     record_reference_market_observation,
     reference_memory_status,
 )
@@ -149,6 +150,27 @@ def test_reference_product_profile_breaks_same_timestamp_ties_by_latest_record(
     )
 
     assert build_reference_product_profile(db_path, product_id=product_id)["markets"]["wameiji"] == second
+
+
+def test_reference_product_profile_reads_initialized_database_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path, product_id = _seed_reference_product(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        before_dump = "\n".join(conn.iterdump())
+
+    def _fail_if_schema_is_initialized(_db_path: str | Path) -> None:
+        pytest.fail("profile reads must not initialize or migrate the database")
+
+    monkeypatch.setattr("cd_monitor.services.reference_memory.init_db", _fail_if_schema_is_initialized)
+
+    profile = build_reference_product_profile(db_path, product_id=product_id)
+    profiles = list_reference_product_profiles(db_path)
+
+    assert profile["product_id"] == product_id
+    assert profiles == [profile]
+    with sqlite3.connect(db_path) as conn:
+        assert "\n".join(conn.iterdump()) == before_dump
 
 
 @pytest.mark.parametrize(

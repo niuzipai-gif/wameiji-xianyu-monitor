@@ -445,12 +445,16 @@ def list_reference_market_observations(
     return [_market_observation_dict(row) for row in rows]
 
 
+def _connect_existing_database_read_only(db_path: str | Path) -> sqlite3.Connection:
+    uri = f"{Path(db_path).resolve().as_uri()}?mode=ro"
+    return sqlite3.connect(uri, uri=True)
+
+
 def build_reference_product_profile(db_path: str | Path, *, product_id: int) -> dict[str, object]:
     """Build a local, deterministic evidence profile for one reference product."""
 
     _require_positive_int(product_id, "product_id")
-    init_db(db_path)
-    with sqlite3.connect(db_path) as conn:
+    with _connect_existing_database_read_only(db_path) as conn:
         row = conn.execute(
             """
             SELECT id, stable_key, barcode, tokens_json, sample_count
@@ -481,8 +485,7 @@ def list_reference_product_profiles(
 
     if type(limit) is not int or isinstance(limit, bool) or not 1 <= limit <= 200:
         raise ValueError("limit must be an integer from 1 to 200")
-    init_db(db_path)
-    with sqlite3.connect(db_path) as conn:
+    with _connect_existing_database_read_only(db_path) as conn:
         rows = conn.execute(
             """
             SELECT id, stable_key, barcode, tokens_json, sample_count
