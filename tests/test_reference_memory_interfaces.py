@@ -11,12 +11,14 @@ from pathlib import Path
 import pytest
 
 from cd_monitor import web_server
+from cd_monitor.core.discovery import DiscoveryCandidate
 from cd_monitor.services.reference_memory import (
     ExtractedReferenceSample,
     import_reference_samples,
     record_reference_market_observation,
 )
 from cd_monitor.web_server import create_server
+from cd_monitor.storage.sqlite import init_db, list_discovery_pools, upsert_discovery_candidate
 
 
 def _get_json(url: str) -> dict[str, object]:
@@ -64,6 +66,21 @@ def _seed_reference_observation(
         source_url="https://meruki.example/item/milet",
     )
     return observation, product_id
+
+
+def _seed_direction_candidate(db_path: Path) -> int:
+    init_db(db_path)
+    pool = list_discovery_pools(db_path)[0]
+    return upsert_discovery_candidate(
+        db_path,
+        DiscoveryCandidate(
+            pool_id=pool.id or 1,
+            media_type="fixture",
+            identity_key="fixture:direction-candidate",
+            title="初回限定 CD",
+            raw_text="店铺规则",
+        ),
+    )
 
 
 def test_reference_import_cli_requires_explicit_folder_and_reports_local_counts(
@@ -114,6 +131,104 @@ def test_reference_memory_api_only_exposes_read_only_status_and_matches(tmp_path
         assert status["sample_count"] == 0
         assert status["network_requests"] == 0
         assert matches == {"items": []}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_reference_direction_endpoints_are_read_only(tmp_path: Path) -> None:
+    db_path = tmp_path / "reference.db"
+    _observation, _product_id = _seed_reference_observation(tmp_path, db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE reference_product_samples SET extracted_text = '初回限定 CD'"
+        )
+    candidate_id = _seed_direction_candidate(db_path)
+    server = create_server("127.0.0.1", 0, db_path, static_dir="web")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        directions = _get_json(f"{base_url}/api/reference-memory/directions")
+        candidates = _get_json(
+            f"{base_url}/api/reference-memory/candidate-directions?limit=20"
+        )
+
+        assert directions == {
+            "source": "approved_reference_samples",
+            "reference_product_count": 1,
+            "network_requests": 0,
+            "directions": [
+                {
+                    "key": "physical_music",
+                    "label": "实体音乐",
+                    "reference_product_count": 1,
+                    "reference_share": 1.0,
+                },
+                {
+                    "key": "limited_or_first_edition",
+                    "label": "初回/限定/特典",
+                    "reference_product_count": 1,
+                    "reference_share": 1.0,
+                },
+            ],
+        }
+        assert candidates == {
+            "items": [
+                {
+                    "candidate_id": candidate_id,
+                    "directions": directions["directions"],
+                    "state": "positive_direction_covered",
+                    "decision_effect": "none",
+                }
+            ]
+        }
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("raw_limit", ["0", "201", "abc"])
+def test_reference_candidate_directions_api_rejects_invalid_limit(
+    tmp_path: Path, raw_limit: str
+) -> None:
+    db_path = tmp_path / "reference.db"
+    server = create_server("127.0.0.1", 0, db_path, static_dir="web")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        status, payload = _get_json_with_status(
+            f"{base_url}/api/reference-memory/candidate-directions?limit={raw_limit}"
+        )
+
+        assert status == 400
+        assert payload == {"error": "invalid_limit"}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_reference_directions_api_masks_local_read_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "reference.db"
+
+    def fail_direction_read(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise sqlite3.OperationalError("fixture read failure")
+
+    monkeypatch.setattr(web_server, "list_reference_direction_summary", fail_direction_read)
+    server = create_server("127.0.0.1", 0, db_path, static_dir="web")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        status, payload = _get_json_with_status(
+            f"{base_url}/api/reference-memory/directions"
+        )
+
+        assert status == 500
+        assert payload == {"error": "reference_directions_unavailable"}
     finally:
         server.shutdown()
         server.server_close()

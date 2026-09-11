@@ -84,7 +84,9 @@ from cd_monitor.services.watch_action_service import WatchActionService
 from cd_monitor.services.live_scan import record_live_scan_status, scan_live_status
 from cd_monitor.services.notify_dispatcher import notify_opportunities
 from cd_monitor.services.reference_memory import (
+    list_discovery_candidate_direction_evidence,
     list_reference_candidate_matches,
+    list_reference_direction_summary,
     list_reference_market_observations,
     list_reference_product_profiles,
     reference_memory_status,
@@ -540,6 +542,39 @@ def _build_handler(
                 return
             if route == "/api/reference-memory/status":
                 self._json(reference_memory_status(db_path))
+                return
+            if route == "/api/reference-memory/directions":
+                try:
+                    self._json(list_reference_direction_summary(db_path))
+                except (TypeError, ValueError, sqlite3.Error):
+                    self._json(
+                        {"error": "reference_directions_unavailable"},
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
+                return
+            if route == "/api/reference-memory/candidate-directions":
+                raw_limit = _query_param(urlparse(self.path).query, "limit")
+                if raw_limit is None:
+                    reference_limit = 100
+                elif re.fullmatch(r"[0-9]{1,3}", raw_limit) is None:
+                    self._json({"error": "invalid_limit"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                else:
+                    reference_limit = int(raw_limit)
+                    if not 1 <= reference_limit <= 200:
+                        self._json({"error": "invalid_limit"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                try:
+                    items = list_discovery_candidate_direction_evidence(
+                        db_path, limit=reference_limit
+                    )
+                except (TypeError, ValueError, sqlite3.Error):
+                    self._json(
+                        {"error": "reference_candidate_directions_unavailable"},
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
+                    return
+                self._json({"items": items})
                 return
             if route == "/api/reference-memory/profiles":
                 raw_limit = _query_param(urlparse(self.path).query, "limit")
