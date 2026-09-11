@@ -21,6 +21,10 @@ def test_extract_reference_directions_supports_game_and_book_text() -> None:
     )
 
 
+def test_extract_reference_directions_supports_visual_novel_game_text() -> None:
+    assert extract_reference_directions("galgame 视觉小说 游戏") == ("console_game",)
+
+
 def test_page_shell_cannot_create_a_direction() -> None:
     assert extract_reference_directions("闲鱼 交易 角色 搜索 邮费 自理") == ()
 

@@ -73,7 +73,7 @@ def test_reference_direction_summary_counts_unique_products_not_screenshots(tmp_
             },
             {
                 "key": "console_game",
-                "label": "主机游戏",
+                "label": "游戏/视觉小说",
                 "reference_product_count": 1,
                 "reference_share": 0.5,
             },

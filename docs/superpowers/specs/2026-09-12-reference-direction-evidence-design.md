@@ -57,7 +57,7 @@
 | key | 显示名 | 典型证据 |
 | --- | --- | --- |
 | `physical_music` | 实体音乐 | CD、专辑、音楽、album |
-| `console_game` | 主机游戏 | Switch、PS Vita、ゲーム、Nintendo |
+| `console_game` | 游戏/视觉小说 | Switch、PS Vita、游戏、galgame、视觉小说、Nintendo |
 | `art_or_book` | 画集/设定集/书籍 | 画集、設定集、设定集、小说、小説、book |
 | `doujin_or_anime` | 同人/动画作品 | 同人、アニメ |
 | `limited_or_first_edition` | 初回/限定/特典 | 初回、限定、限定版、特典、limited |

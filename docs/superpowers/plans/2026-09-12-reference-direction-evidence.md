@@ -16,7 +16,7 @@
 
 - [ ] Write tests that assert `初回限定 CD 同人 音楽` yields `physical_music`, `doujin_or_anime`, and `limited_or_first_edition`; `闲鱼 交易 角色 搜索 邮费 自理` yields no direction; and a candidate with `title="STEINS;GATE Switch 限定版"` plus raw page text containing CD must retain only the structured title text.
 - [ ] Run `PYTHONPATH=$PWD/src python -m pytest -q tests/test_reference_directions.py` and verify imports fail before implementation.
-- [ ] Add fixed labels and patterns: physical music (CD/专辑/音楽/album), console game (Switch/PS Vita/ゲーム/Nintendo), art/book (画集/设定集/小说/book), doujin/anime (同人/アニメ), and limited/first edition (初回/限定/特典/limited). Expose `extract_reference_directions(text)` and `build_candidate_direction_text(...)`. Use raw text only if all structured fields are empty; do not import database, browser, price, or availability code.
+- [ ] Add fixed labels and patterns: physical music (CD/专辑/音楽/album), game/visual novel (Switch/PS Vita/游戏/galgame/视觉小说/Nintendo), art/book (画集/设定集/小说/book), doujin/anime (同人/アニメ), and limited/first edition (初回/限定/特典/limited). Expose `extract_reference_directions(text)` and `build_candidate_direction_text(...)`. Use raw text only if all structured fields are empty; do not import database, browser, price, or availability code.
 - [ ] Re-run the test; commit `feat: extract approved reference directions`.
 
 ### Task 2: Read-only aggregation and candidate evidence

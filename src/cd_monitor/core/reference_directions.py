@@ -13,7 +13,7 @@ from typing import Final
 
 REFERENCE_DIRECTION_LABELS: Final = {
     "physical_music": "实体音乐",
-    "console_game": "主机游戏",
+    "console_game": "游戏/视觉小说",
     "art_or_book": "画集/设定集/书籍",
     "doujin_or_anime": "同人/动画作品",
     "limited_or_first_edition": "初回/限定/特典",
@@ -26,11 +26,13 @@ _DIRECTION_PATTERNS: Final = (
     ),
     (
         "console_game",
-        re.compile(r"(?i)(?:\bswitch\b|ps[ -]?vita|playstation|ゲーム|\bgame\b|任天堂|nintendo)"),
+        re.compile(
+            r"(?i)(?:\bswitch\b|ps[ -]?vita|playstation|ゲーム|\bgame\b|galgame|视觉小说|游戏|任天堂|nintendo)"
+        ),
     ),
     (
         "art_or_book",
-        re.compile(r"(?i)(?:画集|設定集|设定集|攻略本|\bbook\b|小説|小说)"),
+        re.compile(r"(?i)(?:画集|設定集|设定集|攻略本|\bbook\b|小説|(?<!视觉)小说)"),
     ),
     ("doujin_or_anime", re.compile(r"(?i)(?:同人|アニメ)")),
     (
