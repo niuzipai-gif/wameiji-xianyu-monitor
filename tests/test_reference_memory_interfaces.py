@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from cd_monitor import web_server
 from cd_monitor.services.reference_memory import (
     ExtractedReferenceSample,
     import_reference_samples,
@@ -216,6 +217,31 @@ def test_reference_memory_profiles_api_masks_malformed_persisted_evidence(
     try:
         status, payload = _get_json_with_status(
             f"{base_url}/api/reference-memory/profiles"
+        )
+
+        assert status == 500
+        assert payload == {"error": "reference_profiles_unavailable"}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_reference_memory_profiles_api_masks_sqlite_read_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "reference.db"
+
+    def fail_profile_read(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+        raise sqlite3.OperationalError("fixture read failure")
+
+    monkeypatch.setattr(web_server, "list_reference_product_profiles", fail_profile_read)
+    server = create_server("127.0.0.1", 0, db_path, static_dir="web")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        status, payload = _get_json_with_status(
+            f"{base_url}/api/reference-memory/profiles?limit=1"
         )
 
         assert status == 500

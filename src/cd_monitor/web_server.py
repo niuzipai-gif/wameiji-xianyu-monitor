@@ -552,7 +552,7 @@ def _build_handler(
                         return
                 try:
                     items = list_reference_product_profiles(db_path, limit=reference_limit)
-                except ValueError:
+                except (ValueError, sqlite3.Error):
                     self._json({"error": "reference_profiles_unavailable"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                     return
                 self._json({"items": items})
