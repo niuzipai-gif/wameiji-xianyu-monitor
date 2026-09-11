@@ -39,14 +39,16 @@ class _FixtureExtractor:
         )
 
 
-def _seed_reference_observation(tmp_path: Path, db_path: Path) -> dict[str, object]:
+def _seed_reference_observation(
+    tmp_path: Path, db_path: Path
+) -> tuple[dict[str, object], int]:
     folder = tmp_path / "samples"
     folder.mkdir()
     (folder / "milet.png").write_bytes(b"fixture")
     import_reference_samples(db_path, folder, extractor=_FixtureExtractor())
     with sqlite3.connect(db_path) as conn:
         product_id = int(conn.execute("SELECT id FROM reference_products").fetchone()[0])
-    return record_reference_market_observation(
+    observation = record_reference_market_observation(
         db_path,
         product_id=product_id,
         market="wameiji",
@@ -58,6 +60,7 @@ def _seed_reference_observation(tmp_path: Path, db_path: Path) -> dict[str, obje
         currency="JPY",
         source_url="https://meruki.example/item/milet",
     )
+    return observation, product_id
 
 
 def test_reference_import_cli_requires_explicit_folder_and_reports_local_counts(
@@ -117,7 +120,7 @@ def test_reference_memory_observations_api_reads_recorded_market_evidence(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "reference.db"
-    observation = _seed_reference_observation(tmp_path, db_path)
+    observation, _product_id = _seed_reference_observation(tmp_path, db_path)
     server = create_server("127.0.0.1", 0, db_path, static_dir="web")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -129,6 +132,42 @@ def test_reference_memory_observations_api_reads_recorded_market_evidence(
 
         assert code == 200
         assert payload == {"items": [observation]}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_reference_memory_profiles_api_exposes_evidence_and_latest_market_state(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "reference.db"
+    observation, product_id = _seed_reference_observation(tmp_path, db_path)
+    record_reference_market_observation(
+        db_path,
+        product_id=product_id,
+        market="xianyu",
+        observation_state="found",
+        observed_title="milet Walkin In My Lane 初回限定盤",
+        catalog_no="SECL-9999",
+        observed_at="2026-09-11T00:00:00+00:00",
+    )
+    server = create_server("127.0.0.1", 0, db_path, static_dir="web")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        status = _get_json(f"{base_url}/api/reference-memory/status")
+        profiles = _get_json(f"{base_url}/api/reference-memory/profiles?limit=1")
+        error_status, error = _get_json_with_status(
+            f"{base_url}/api/reference-memory/profiles?limit=0"
+        )
+
+        assert status["latest_market_coverage"]["xianyu"]["states"] == {"found": 1}
+        assert profiles["items"][0]["product_id"] == product_id
+        assert profiles["items"][0]["markets"]["wameiji"] == observation
+        assert profiles["items"][0]["markets"]["xianyu"]["catalog_no"] == "SECL-9999"
+        assert error_status == 400
+        assert error == {"error": "invalid_limit"}
     finally:
         server.shutdown()
         server.server_close()
