@@ -14,7 +14,7 @@
     commands: [],
     referenceStatus: null,
     referenceObservations: [],
-    referenceProfiles: [],
+    referenceProfiles: null,
     filter: "all",
     query: "",
     advancedFilter: null,
@@ -201,6 +201,15 @@
     return labels[state] || "待复核";
   }
 
+  function referenceMissingEvidenceLabel(value) {
+    const labels = {
+      "barcode": "条码",
+      "xianyu:market_observation": "闲鱼市场观察",
+      "wameiji:market_observation": "挖煤姬市场观察",
+    };
+    return labels[String(value)] || "其他待核验信息";
+  }
+
   function latestMarketLabel(coverage) {
     const safeCoverage = coverage && typeof coverage === "object" ? coverage : {};
     const states = safeCoverage.states && typeof safeCoverage.states === "object"
@@ -233,7 +242,7 @@
         observationsElement.innerHTML = '<div class="empty-state">参考库暂不可用；不影响当前机会流。</div>';
       }
       if (profilesElement) {
-        profilesElement.innerHTML = '<div class="empty-state">身份与待核验信息暂不可用；不影响当前机会流。</div>';
+        profilesElement.innerHTML = '<div class="empty-state">身份与待核验信息暂不可用</div>';
       }
       return;
     }
@@ -263,8 +272,10 @@
         : "本地记忆已就绪";
     }
     if (profilesElement) {
-      const profiles = Array.isArray(view.referenceProfiles) ? view.referenceProfiles : [];
-      if (!profiles.length) {
+      const profiles = view.referenceProfiles;
+      if (!Array.isArray(profiles)) {
+        profilesElement.innerHTML = '<div class="empty-state">身份与待核验信息暂不可用</div>';
+      } else if (!profiles.length) {
         profilesElement.innerHTML = '<div class="empty-state">尚无参考身份档案；导入样本不会自动联网或触发采购。</div>';
       } else {
         profilesElement.innerHTML = profiles.slice(0, 3).map((item) => {
@@ -284,7 +295,7 @@
             : "";
           const missingEvidence = Array.isArray(profile.missing_evidence) ? profile.missing_evidence : [];
           const missingText = missingEvidence.length
-            ? missingEvidence.map((value) => String(value)).join("、")
+            ? missingEvidence.map(referenceMissingEvidenceLabel).join("、")
             : "无";
           return [
             '<article class="reference-profile">',
@@ -583,7 +594,7 @@
       view.referenceObservations = (referenceObservationPayload && referenceObservationPayload.items) || [];
       view.referenceProfiles = referenceProfilePayload && Array.isArray(referenceProfilePayload.items)
         ? referenceProfilePayload.items
-        : [];
+        : null;
       if (window.state) {
         window.state.opportunities = (view.board.opportunities || []).map(toLegacyOpportunity);
         window.state.totalOpportunities = window.state.opportunities.length;

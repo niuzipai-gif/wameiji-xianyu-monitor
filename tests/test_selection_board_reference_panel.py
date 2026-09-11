@@ -57,7 +57,7 @@ def _assert_reference_panel_contract(html: str, script: str, styles: str) -> Non
     assert (
         "view.referenceProfiles = referenceProfilePayload && "
         "Array.isArray(referenceProfilePayload.items) ? "
-        "referenceProfilePayload.items : [];"
+        "referenceProfilePayload.items : null;"
     ) in _compact(refresh_board)
 
     reference_memory = _function_block(script, "renderReferenceMemory")
@@ -66,7 +66,7 @@ def _assert_reference_panel_contract(html: str, script: str, styles: str) -> Non
     assert 'setText("referenceXianyuLatest", "--");' in null_status
     assert 'setText("referenceWameijiLatest", "--");' in null_status
     assert "profilesElement.innerHTML" in null_status
-    assert "empty-state" in null_status
+    assert "身份与待核验信息暂不可用" in null_status
 
     coverage_start = reference_memory.index("const latestMarketCoverage")
     coverage_end = reference_memory.index("if (stateElement)", coverage_start)
@@ -76,6 +76,15 @@ def _assert_reference_panel_contract(html: str, script: str, styles: str) -> Non
     assert "latestMarketCoverage.wameiji" in latest_coverage
     assert "const loginPending = Number(xianyuStates.login_required) || 0;" in latest_coverage
 
+    missing_evidence_formatter = _function_block(script, "referenceMissingEvidenceLabel")
+    for raw_value, label in (
+        ("barcode", "条码"),
+        ("xianyu:market_observation", "闲鱼市场观察"),
+        ("wameiji:market_observation", "挖煤姬市场观察"),
+    ):
+        assert f'"{raw_value}": "{label}"' in missing_evidence_formatter
+    assert 'return labels[String(value)] || "其他待核验信息";' in missing_evidence_formatter
+
     profiles_start = reference_memory.index("if (profilesElement) {")
     profiles_end = reference_memory.index("if (!observationsElement) return;", profiles_start)
     profile_renderer = reference_memory[profiles_start:profiles_end]
@@ -83,6 +92,12 @@ def _assert_reference_panel_contract(html: str, script: str, styles: str) -> Non
     assert "referenceStateLabel(xianyuState)" in profile_renderer
     assert "referenceStateLabel(wameijiState)" in profile_renderer
     assert "仍待确认：" in profile_renderer
+    assert "if (!Array.isArray(profiles)) {" in profile_renderer
+    assert "身份与待核验信息暂不可用" in profile_renderer
+    assert "尚无参考身份档案" in profile_renderer
+    assert "missingEvidence.map(referenceMissingEvidenceLabel).join(\"、\")" in profile_renderer
+    assert "missingEvidence.map((value) => String(value))" not in profile_renderer
+    assert "missingEvidence.join" not in profile_renderer
     for profile_field in (
         "profile.stable_key",
         "profile.barcode",
