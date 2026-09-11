@@ -27,6 +27,11 @@ from cd_monitor.core.reference_memory import (
     normalize_reference_tokens,
     score_candidate_against_product,
 )
+from cd_monitor.core.reference_directions import (
+    REFERENCE_DIRECTION_LABELS,
+    build_candidate_direction_text,
+    extract_reference_directions,
+)
 from cd_monitor.storage.sqlite import init_db
 
 _CHECKSUM_RE = re.compile(r"[0-9a-f]{64}")
@@ -558,6 +563,127 @@ def reference_memory_status(db_path: str | Path) -> dict[str, object]:
         ),
         "network_requests": 0,
     }
+
+
+def list_reference_direction_summary(db_path: str | Path) -> dict[str, object]:
+    """Summarize product directions found in approved local reference samples.
+
+    A direction's count represents unique approved products, never screenshot
+    volume.  The result is positive-only evidence and has no market or
+    commercial-decision fields.
+    """
+
+    with _connect_existing_database_read_only(db_path) as conn:
+        reference_product_count, counts = _reference_direction_counts(conn)
+    return _reference_direction_summary(
+        reference_product_count=reference_product_count,
+        direction_counts=counts,
+    )
+
+
+def list_discovery_candidate_direction_evidence(
+    db_path: str | Path, *, limit: int = 200
+) -> list[dict[str, object]]:
+    """Return positive direction coverage for local discovery candidates.
+
+    Missing direction coverage is explicitly an evidence gap, not a negative
+    label or a change to candidate collection, price, or opportunity state.
+    """
+
+    if type(limit) is not int or isinstance(limit, bool) or not 1 <= limit <= 200:
+        raise ValueError("limit must be an integer from 1 to 200")
+    with _connect_existing_database_read_only(db_path) as conn:
+        reference_product_count, direction_counts = _reference_direction_counts(conn)
+        rows = conn.execute(
+            """
+            SELECT id, title, artist, edition, catalog_no, jan, raw_text
+            FROM discovery_candidates
+            ORDER BY id
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    evidence: list[dict[str, object]] = []
+    for row in rows:
+        candidate_text = build_candidate_direction_text(
+            title=str(row[1]) if row[1] is not None else None,
+            artist=str(row[2]) if row[2] is not None else None,
+            edition=str(row[3]) if row[3] is not None else None,
+            catalog_no=str(row[4]) if row[4] is not None else None,
+            jan=str(row[5]) if row[5] is not None else None,
+            raw_text=str(row[6]) if row[6] is not None else None,
+        )
+        candidate_keys = set(extract_reference_directions(candidate_text))
+        directions = _direction_items(
+            reference_product_count=reference_product_count,
+            direction_counts=direction_counts,
+            include_keys=candidate_keys,
+        )
+        evidence.append(
+            {
+                "candidate_id": int(row[0]),
+                "directions": directions,
+                "state": "positive_direction_covered" if directions else "no_direction_evidence",
+                "decision_effect": "none",
+            }
+        )
+    return evidence
+
+
+def _reference_direction_counts(conn: sqlite3.Connection) -> tuple[int, dict[str, int]]:
+    rows = conn.execute(
+        """
+        SELECT p.id, s.extracted_text
+        FROM reference_products AS p
+        LEFT JOIN reference_product_samples AS s ON s.product_id = p.id
+        ORDER BY p.id, s.id
+        """
+    ).fetchall()
+    directions_by_product: dict[int, set[str]] = {}
+    for product_id, extracted_text in rows:
+        directions_by_product.setdefault(int(product_id), set()).update(
+            extract_reference_directions(str(extracted_text or ""))
+        )
+    counts = {key: 0 for key in REFERENCE_DIRECTION_LABELS}
+    for directions in directions_by_product.values():
+        for key in directions:
+            counts[key] += 1
+    return len(directions_by_product), counts
+
+
+def _reference_direction_summary(
+    *, reference_product_count: int, direction_counts: dict[str, int]
+) -> dict[str, object]:
+    return {
+        "source": "approved_reference_samples",
+        "reference_product_count": reference_product_count,
+        "network_requests": 0,
+        "directions": _direction_items(
+            reference_product_count=reference_product_count,
+            direction_counts=direction_counts,
+            include_keys=set(REFERENCE_DIRECTION_LABELS),
+        ),
+    }
+
+
+def _direction_items(
+    *,
+    reference_product_count: int,
+    direction_counts: dict[str, int],
+    include_keys: set[str],
+) -> list[dict[str, object]]:
+    if reference_product_count <= 0:
+        return []
+    return [
+        {
+            "key": key,
+            "label": label,
+            "reference_product_count": direction_counts[key],
+            "reference_share": round(direction_counts[key] / reference_product_count, 4),
+        }
+        for key, label in REFERENCE_DIRECTION_LABELS.items()
+        if key in include_keys and direction_counts[key] > 0
+    ]
 
 
 def list_reference_research_queue(
