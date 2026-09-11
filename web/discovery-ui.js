@@ -15,6 +15,8 @@
     referenceStatus: null,
     referenceObservations: [],
     referenceProfiles: null,
+    referenceDirections: null,
+    candidateDirections: [],
     selectionFeedbackStatus: null,
     selectionFeedback: [],
     filter: "all",
@@ -227,6 +229,7 @@
   function renderReferenceMemory() {
     const status = view.referenceStatus;
     const stateElement = document.getElementById("referenceMemoryState");
+    const directionsElement = document.getElementById("referenceDirectionList");
     const observationsElement = document.getElementById("referenceObservationList");
     const profilesElement = document.getElementById("referenceProfileList");
     if (!status) {
@@ -245,6 +248,9 @@
       }
       if (profilesElement) {
         profilesElement.innerHTML = '<div class="empty-state">身份与待核验信息暂不可用</div>';
+      }
+      if (directionsElement) {
+        directionsElement.innerHTML = '<div class="empty-state">正样本方向证据暂不可用</div>';
       }
       return;
     }
@@ -272,6 +278,29 @@
       stateElement.textContent = loginPending > 0
         ? "闲鱼待登录 " + loginPending + " 条"
         : "本地记忆已就绪";
+    }
+    if (directionsElement) {
+      const summary = view.referenceDirections;
+      const directions = summary && Array.isArray(summary.directions) ? summary.directions : null;
+      const referenceCount = Math.max(0, Number(summary && summary.reference_product_count) || 0);
+      if (!directions) {
+        directionsElement.innerHTML = '<div class="empty-state">正样本方向证据暂不可用</div>';
+      } else if (!directions.length || !referenceCount) {
+        directionsElement.innerHTML = '<div class="empty-state">尚无可展示的正样本方向证据；不会影响当前候选。</div>';
+      } else {
+        directionsElement.innerHTML = directions.slice(0, 3).map((item) => {
+          const direction = item && typeof item === "object" ? item : {};
+          const label = direction.label || "未命名方向";
+          const covered = Math.max(0, Number(direction.reference_product_count) || 0);
+          return [
+            '<article class="reference-profile">',
+              '<b>' + esc(label) + "</b>",
+              '<p>认可样本覆盖 ' + esc(covered) + "/" + esc(referenceCount) + "</p>",
+              '<p>正样本方向证据，仍需详情核验</p>',
+            "</article>",
+          ].join("");
+        }).join("");
+      }
     }
     if (profilesElement) {
       const profiles = view.referenceProfiles;
@@ -389,6 +418,20 @@
     return '<a class="side-product ' + kind + ' side-link" href="' + esc(safeHref) + '" target="_blank" rel="noopener" title="' + esc(title) + '">' + body + '</a>';
   }
 
+  function candidateDirectionMarkup(candidateId) {
+    if (!Number.isSafeInteger(candidateId) || candidateId <= 0) return "";
+    const item = (Array.isArray(view.candidateDirections) ? view.candidateDirections : []).find(
+      (candidate) => Number(candidate && candidate.candidate_id) === candidateId
+    );
+    if (!item || item.state !== "positive_direction_covered") return "";
+    const directions = Array.isArray(item.directions) ? item.directions : [];
+    const labels = directions
+      .map((direction) => direction && direction.label ? String(direction.label) : "")
+      .filter(Boolean);
+    if (!labels.length) return "";
+    return '<div class="reason reference-direction-evidence">正样本方向证据，仍需详情核验：' + esc(labels.join("、")) + '</div>';
+  }
+
   function opportunityCard(item) {
     const sourceUrl = safeHttpUrl(item.url || item.source_url);
     const xianyuUrl = safeHttpUrl(item.xianyu_url);
@@ -406,6 +449,7 @@
       (feedback) => Number(feedback && feedback.candidate_id) === candidateId
     );
     const currentOutcome = currentFeedback && currentFeedback.outcome ? String(currentFeedback.outcome) : "";
+    const directionMarkup = candidateDirectionMarkup(candidateId);
     const xianyuSide = [
       '<div class="thumb xianyu-thumb">',
         thumbMarkup(item.xianyu_image_url, "闲鱼可售样本", "有效样本 " + sampleCount + " 条"),
@@ -455,6 +499,7 @@
             '<div class="metric"><small>判定</small><strong>' + decisionChip(item.decision) + '</strong></div>',
           '</div>',
            '<p class="comparison-catalog">品番 / JAN：' + esc(catalogNo) + (item.edition ? ' · ' + esc(item.edition) : '') + '</p>',
+           directionMarkup,
            '<div class="reason">' + esc(reason) + '</div>',
            feedbackMarkup,
          '</div>',
@@ -616,12 +661,14 @@
     if (view.refreshing) return;
     view.refreshing = true;
     try {
-      const [board, commandPayload, referenceStatus, referenceObservationPayload, referenceProfilePayload, selectionFeedbackStatus, selectionFeedbackPayload] = await Promise.all([
+      const [board, commandPayload, referenceStatus, referenceObservationPayload, referenceProfilePayload, referenceDirectionPayload, candidateDirectionPayload, selectionFeedbackStatus, selectionFeedbackPayload] = await Promise.all([
         apiGet("/api/discovery/board"),
         apiGet("/api/discovery/commands"),
         apiGet("/api/reference-memory/status").catch(() => null),
         apiGet("/api/reference-memory/observations?limit=3").catch(() => null),
         apiGet("/api/reference-memory/profiles?limit=3").catch(() => null),
+        apiGet("/api/reference-memory/directions").catch(() => null),
+        apiGet("/api/reference-memory/candidate-directions?limit=200").catch(() => null),
         apiGet("/api/selection-feedback/status").catch(() => null),
         apiGet("/api/selection-feedback?current=1&limit=200").catch(() => null),
       ]);
@@ -632,6 +679,10 @@
       view.referenceProfiles = referenceProfilePayload && Array.isArray(referenceProfilePayload.items)
         ? referenceProfilePayload.items
         : null;
+      view.referenceDirections = referenceDirectionPayload;
+      view.candidateDirections = candidateDirectionPayload && Array.isArray(candidateDirectionPayload.items)
+        ? candidateDirectionPayload.items
+        : [];
       view.selectionFeedbackStatus = selectionFeedbackStatus;
       view.selectionFeedback = (selectionFeedbackPayload && selectionFeedbackPayload.items) || [];
       if (window.state) {

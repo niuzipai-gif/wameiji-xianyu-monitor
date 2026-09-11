@@ -96,7 +96,7 @@ def _assert_reference_panel_contract(html: str, script: str, styles: str) -> Non
         assert f'"{raw_value}": "{label}"' in missing_evidence_formatter
     assert 'return labels[String(value)] || "其他待核验信息";' in missing_evidence_formatter
 
-    profiles_start = reference_memory.index("if (profilesElement) {")
+    profiles_start = reference_memory.rindex("if (profilesElement) {")
     profiles_end = reference_memory.index("if (!observationsElement) return;", profiles_start)
     profile_renderer = reference_memory[profiles_start:profiles_end]
     assert "profiles.slice(0, 3)" in profile_renderer
@@ -185,3 +185,27 @@ def test_reference_panel_has_latest_market_and_profile_contract() -> None:
     styles = (ROOT / "web" / "styles" / "kuro.css").read_text(encoding="utf-8")
 
     _assert_reference_panel_contract(html, script, styles)
+
+
+def test_reference_panel_renders_non_decisive_direction_evidence() -> None:
+    html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    script = (ROOT / "web" / "discovery-ui.js").read_text(encoding="utf-8")
+
+    assert 'id="referenceDirectionList"' in html
+    refresh_board = _function_block(script, "refreshBoard")
+    assert 'apiGet("/api/reference-memory/directions").catch(() => null)' in refresh_board
+    assert (
+        'apiGet("/api/reference-memory/candidate-directions?limit=200").catch(() => null)'
+        in refresh_board
+    )
+    reference_memory = _function_block(script, "renderReferenceMemory")
+    assert "正样本方向证据，仍需详情核验" in reference_memory
+    for forbidden_value in ("item.price", "item.availability", "买入", "购买", "拒绝", "淘汰"):
+        assert forbidden_value not in reference_memory
+
+    direction_markup = _function_block(script, "candidateDirectionMarkup")
+    assert "positive_direction_covered" in direction_markup
+    assert "no_direction_evidence" not in direction_markup
+    assert "正样本方向证据，仍需详情核验" in direction_markup
+    for forbidden_value in ("item.price", "item.availability", "买入", "购买", "拒绝", "淘汰"):
+        assert forbidden_value not in direction_markup
