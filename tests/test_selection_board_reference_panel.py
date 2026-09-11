@@ -1,6 +1,129 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _brace_block(source: str, start: int) -> str:
+    opening = source.index("{", start)
+    depth = 0
+    for position in range(opening, len(source)):
+        if source[position] == "{":
+            depth += 1
+        elif source[position] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : position + 1]
+    raise AssertionError("unterminated block")
+
+
+def _function_block(source: str, name: str) -> str:
+    match = re.search(
+        rf"^  (?:async )?function {re.escape(name)}\([^)]*\) \{{",
+        source,
+        flags=re.MULTILINE,
+    )
+    assert match, f"missing function: {name}"
+    return _brace_block(source, match.start())
+
+
+def _css_rule(styles: str, selector: str) -> str:
+    return _brace_block(styles, styles.index(selector + " {"))
+
+
+def _media_block(styles: str, width: int) -> str:
+    reference_panel = styles.index("body.kuro .reference-memory-panel")
+    media_start = styles.index(f"@media (max-width: {width}px)", reference_panel)
+    return _brace_block(styles, media_start)
+
+
+def _compact(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _assert_reference_panel_contract(html: str, script: str, styles: str) -> None:
+    assert 'id="referenceXianyuLatest"' in html
+    assert 'id="referenceWameijiLatest"' in html
+    assert 'id="referenceProfileList"' in html
+
+    refresh_board = _function_block(script, "refreshBoard")
+    assert 'apiGet("/api/reference-memory/profiles?limit=3").catch(() => null)' in refresh_board
+    assert (
+        "view.referenceProfiles = referenceProfilePayload && "
+        "Array.isArray(referenceProfilePayload.items) ? "
+        "referenceProfilePayload.items : [];"
+    ) in _compact(refresh_board)
+
+    reference_memory = _function_block(script, "renderReferenceMemory")
+    null_status = _brace_block(reference_memory, reference_memory.index("if (!status) {"))
+    assert 'setText("referenceXianyuLatest", "--");' in null_status
+    assert 'setText("referenceWameijiLatest", "--");' in null_status
+    assert "profilesElement.innerHTML" in null_status
+    assert "empty-state" in null_status
+
+    coverage_start = reference_memory.index("const latestMarketCoverage")
+    coverage_end = reference_memory.index("if (stateElement)", coverage_start)
+    latest_coverage = reference_memory[coverage_start:coverage_end]
+    assert "status.latest_market_coverage" in latest_coverage
+    assert "latestMarketCoverage.xianyu" in latest_coverage
+    assert "latestMarketCoverage.wameiji" in latest_coverage
+    assert "const loginPending = Number(xianyuStates.login_required) || 0;" in latest_coverage
+    assert "market_observation_states" not in latest_coverage
+
+    profiles_start = reference_memory.index("if (profilesElement) {")
+    profiles_end = reference_memory.index("if (!observationsElement) return;", profiles_start)
+    profile_renderer = reference_memory[profiles_start:profiles_end]
+    assert "profiles.slice(0, 3)" in profile_renderer
+    assert "referenceStateLabel(xianyuState)" in profile_renderer
+    assert "referenceStateLabel(wameijiState)" in profile_renderer
+    assert "仍待确认：" in profile_renderer
+    for profile_field in (
+        "profile.stable_key",
+        "profile.barcode",
+        "profile.sample_count",
+        "profile.catalog_numbers",
+        "profile.markets",
+        "profile.missing_evidence",
+    ):
+        assert profile_field in profile_renderer
+    for escaped_value in (
+        "esc(identity)",
+        "esc(sampleCount)",
+        "esc(catalogText)",
+        "esc(referenceStateLabel(xianyuState))",
+        "esc(referenceStateLabel(wameijiState))",
+        "esc(missingText)",
+    ):
+        assert escaped_value in profile_renderer
+    assert not re.search(r"<a(?:\s|>)", profile_renderer)
+    for forbidden_value in (
+        "item.price",
+        "source_url",
+        "safeHttpUrl",
+        ".href",
+        "window.open",
+        "买入",
+        "购买",
+        "拒绝",
+        "淘汰",
+    ):
+        assert forbidden_value not in profile_renderer
+
+    metrics_rule = _css_rule(styles, "body.kuro .reference-memory-metrics")
+    profiles_rule = _css_rule(styles, "body.kuro .reference-profiles")
+    assert "grid-template-columns: repeat(6, 1fr);" in metrics_rule
+    assert "grid-template-columns: repeat(3, 1fr);" in profiles_rule
+
+    media_900 = _compact(_media_block(styles, 900))
+    media_560 = _compact(_media_block(styles, 560))
+    assert (
+        "body.kuro .reference-memory-metrics, body.kuro .reference-profiles "
+        "{ grid-template-columns: repeat(2, 1fr); }"
+    ) in media_900
+    assert (
+        "body.kuro .reference-memory-metrics, body.kuro .reference-profiles "
+        "{ grid-template-columns: 1fr; }"
+    ) in media_560
 
 
 def test_reference_panel_has_latest_market_and_profile_contract() -> None:
@@ -8,10 +131,4 @@ def test_reference_panel_has_latest_market_and_profile_contract() -> None:
     script = (ROOT / "web" / "discovery-ui.js").read_text(encoding="utf-8")
     styles = (ROOT / "web" / "styles" / "kuro.css").read_text(encoding="utf-8")
 
-    assert 'id="referenceXianyuLatest"' in html
-    assert 'id="referenceWameijiLatest"' in html
-    assert 'id="referenceProfileList"' in html
-    assert 'apiGet("/api/reference-memory/profiles?limit=3")' in script
-    assert "latest_market_coverage" in script
-    assert "missing_evidence" in script
-    assert ".reference-profiles" in styles
+    _assert_reference_panel_contract(html, script, styles)
