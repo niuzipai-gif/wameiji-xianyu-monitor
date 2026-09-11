@@ -8,6 +8,8 @@ import threading
 import urllib.request
 from pathlib import Path
 
+import pytest
+
 from cd_monitor.services.reference_memory import (
     ExtractedReferenceSample,
     import_reference_samples,
@@ -168,6 +170,56 @@ def test_reference_memory_profiles_api_exposes_evidence_and_latest_market_state(
         assert profiles["items"][0]["markets"]["xianyu"]["catalog_no"] == "SECL-9999"
         assert error_status == 400
         assert error == {"error": "invalid_limit"}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize(
+    "raw_limit",
+    ["", "abc", "1.5", "+1", "-1", "1_0", "0", "201"],
+)
+def test_reference_memory_profiles_api_rejects_invalid_limit_spellings(
+    tmp_path: Path, raw_limit: str
+) -> None:
+    db_path = tmp_path / "reference.db"
+    server = create_server("127.0.0.1", 0, db_path, static_dir="web")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        status, payload = _get_json_with_status(
+            f"{base_url}/api/reference-memory/profiles?limit={raw_limit}"
+        )
+
+        assert status == 400
+        assert payload == {"error": "invalid_limit"}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_reference_memory_profiles_api_masks_malformed_persisted_evidence(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "reference.db"
+    _observation, product_id = _seed_reference_observation(tmp_path, db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE reference_products SET tokens_json = ? WHERE id = ?",
+            ("not-json", product_id),
+        )
+    server = create_server("127.0.0.1", 0, db_path, static_dir="web")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        status, payload = _get_json_with_status(
+            f"{base_url}/api/reference-memory/profiles"
+        )
+
+        assert status == 500
+        assert payload == {"error": "reference_profiles_unavailable"}
     finally:
         server.shutdown()
         server.server_close()

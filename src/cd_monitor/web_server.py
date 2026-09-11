@@ -540,11 +540,20 @@ def _build_handler(
                 return
             if route == "/api/reference-memory/profiles":
                 raw_limit = _query_param(urlparse(self.path).query, "limit")
-                try:
-                    reference_limit = int(raw_limit) if raw_limit is not None else 100
-                    items = list_reference_product_profiles(db_path, limit=reference_limit)
-                except (TypeError, ValueError):
+                if raw_limit is None:
+                    reference_limit = 100
+                elif re.fullmatch(r"[0-9]+", raw_limit) is None:
                     self._json({"error": "invalid_limit"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                else:
+                    reference_limit = int(raw_limit)
+                    if not 1 <= reference_limit <= 200:
+                        self._json({"error": "invalid_limit"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                try:
+                    items = list_reference_product_profiles(db_path, limit=reference_limit)
+                except ValueError:
+                    self._json({"error": "reference_profiles_unavailable"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                     return
                 self._json({"items": items})
                 return
