@@ -108,6 +108,39 @@ class TestPostLoginState:
         finally:
             server.shutdown(); server.server_close()
 
+    def test_posted_anonymous_xianyu_content_reports_not_ready(self, tmp_path):
+        xf = tmp_path / "xianyu_state.json"
+        wf = tmp_path / "wameiji_state.json"
+        server, thread, base = _start_server(tmp_path, xf, wf)
+        try:
+            content = json.dumps({"cookies": [{"name": "cookie2", "value": "anonymous", "domain": ".goofish.com"}], "origins": []})
+            code, body = _post_json(f"{base}/api/login-state/xianyu", {"content": content})
+            assert code == 200
+            assert body["saved"] is True
+            assert body["login_state_ready"] is False
+            assert _get(f"{base}/api/login-state/xianyu")["status"] == "invalid"
+        finally:
+            server.shutdown(); server.server_close()
+
+    def test_posted_anonymous_xianyu_snapshot_reports_not_ready(self, tmp_path):
+        xf = tmp_path / "xianyu_state.json"
+        wf = tmp_path / "wameiji_state.json"
+        server, thread, base = _start_server(tmp_path, xf, wf)
+        try:
+            snapshot = json.dumps({
+                "capturedAt": "2026-09-11T00:00:00Z",
+                "pageUrl": "https://www.goofish.com/",
+                "cookies": [{"name": "cookie2", "value": "anonymous", "domain": ".goofish.com"}],
+                "storage": {"local": {}, "session": {}},
+            })
+            code, body = _post_json(f"{base}/api/login-state/xianyu", {"snapshot": snapshot})
+            assert code == 200
+            assert body["saved"] is True
+            assert body["login_state_ready"] is False
+            assert _get(f"{base}/api/login-state/xianyu")["status"] == "invalid"
+        finally:
+            server.shutdown(); server.server_close()
+
     def test_post_invalid_json_returns_400(self, tmp_path):
         xf = tmp_path / "xianyu_state.json"
         wf = tmp_path / "wameiji_state.json"
@@ -204,7 +237,7 @@ class TestInspectAfterPost:
         wf = tmp_path / "wameiji_state.json"
         server, thread, base = _start_server(tmp_path, xf, wf)
         try:
-            content = json.dumps({"cookies": [{"name": "sid", "value": "y", "domain": ".goofish.com"}], "origins": []})
+            content = json.dumps({"cookies": [{"name": "tracknick", "value": "y", "domain": ".goofish.com"}], "origins": []})
             _post_json(f"{base}/api/login-state/xianyu", {"content": content})
             body = _get(f"{base}/api/login-state/xianyu")
             assert body["status"] == "ready"

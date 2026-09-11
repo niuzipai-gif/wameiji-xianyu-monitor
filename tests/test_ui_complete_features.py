@@ -119,7 +119,7 @@ def test_login_state_accepts_snapshot_field(running_server, tmp_path) -> None:
         "pageUrl": "https://www.goofish.com/",
         "cookies": [
             {
-                "name": "session",
+                "name": "tracknick",
                 "value": "PASTE-TEST",
                 "domain": ".goofish.com",
                 "path": "/",
@@ -144,7 +144,7 @@ def test_login_state_accepts_snapshot_field(running_server, tmp_path) -> None:
     parsed = json.loads(out_xianyu.read_text(encoding="utf-8"))
     assert parsed["format"] == "xianyu-storage-state-v1"
     cookies = parsed["playwright_storage_state"]["cookies"]
-    assert cookies[0]["name"] == "session"
+    assert cookies[0]["name"] == "tracknick"
     assert cookies[0]["value"] == "PASTE-TEST"
 
     snapshot_w = dict(snapshot, pageUrl="https://meruki.cn/")

@@ -50,7 +50,7 @@ def _sample_xianyu_snapshot() -> dict:
         "capturedAt": "2026-06-26T00:00:00Z",
         "pageUrl": "https://www.goofish.com/",
         "cookies": [
-            {"name": "cookie2", "value": "SECRET", "domain": ".goofish.com",
+            {"name": "tracknick", "value": "SECRET", "domain": ".goofish.com",
              "path": "/", "expires": 9999999999, "httpOnly": True, "secure": True, "sameSite": "Lax"}
         ],
         "storage": {"local": {"_m_h5_tk": "SECRET-LOCAL"}, "session": {}},

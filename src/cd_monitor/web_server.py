@@ -1220,7 +1220,7 @@ def _build_handler(
                         "platform": platform,
                         "path": summary.get("output_path", output_path),
                         "cookie_count": int(summary.get("cookie_count", 0)),
-                        "login_state_ready": True,
+                        "login_state_ready": bool(summary.get("login_state_ready", False)),
                     })
                     return
                 # Fallback: raw storage_state JSON in `content`.
@@ -1255,12 +1255,17 @@ def _build_handler(
                     self._json({"error": "write_failed", "detail": str(exc)},
                                status=HTTPStatus.INTERNAL_SERVER_ERROR)
                     return
+                login_state_ready = (
+                    inspect_xianyu_login_state(state_path).get("status") == "ready"
+                    if platform == "xianyu"
+                    else True
+                )
                 self._json({
                     "saved": True,
                     "platform": platform,
                     "path": str(state_path),
                     "cookie_count": len(cookies),
-                    "login_state_ready": True,
+                    "login_state_ready": login_state_ready,
                 })
                 return
             if route == "/api/user-settings":

@@ -355,7 +355,7 @@ def test_xianyu_status_reports_ready_playwright_storage_state_without_cookie_val
             {
                 "cookies": [
                     {
-                        "name": "cookie2",
+                        "name": "tracknick",
                         "value": "SECRET-COOKIE-VALUE",
                         "domain": ".goofish.com",
                         "path": "/",
@@ -390,6 +390,23 @@ def test_xianyu_status_reports_ready_playwright_storage_state_without_cookie_val
 def test_xianyu_status_rejects_invalid_storage_state_file(tmp_path) -> None:
     state_path = tmp_path / "xianyu_state.json"
     state_path.write_text('{"cookies": [{"name": "cookie2", "value": "SECRET"}]}', encoding="utf-8")
+
+    status = XianyuBrowserAdapter(enabled=True, state_file=state_path).search_status(
+        WatchItem("SRCL-3520"),
+    )
+
+    assert status.error_type == "invalid_state_file"
+    assert status.login_state_ready is False
+    assert status.state_file_status == "invalid"
+    assert "SECRET" not in json.dumps(asdict(status))
+
+
+def test_xianyu_status_rejects_anonymous_storage_state_file(tmp_path) -> None:
+    state_path = tmp_path / "xianyu_state.json"
+    state_path.write_text(
+        '{"cookies": [{"name": "cookie2", "value": "SECRET", "domain": ".goofish.com"}], "origins": []}',
+        encoding="utf-8",
+    )
 
     status = XianyuBrowserAdapter(enabled=True, state_file=state_path).search_status(
         WatchItem("SRCL-3520"),

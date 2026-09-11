@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -14,6 +13,7 @@ from cd_monitor.core.identifiers import (
 )
 from cd_monitor.core.models import AdapterStatus, WatchItem, XianyuPriceSample
 from cd_monitor.core.title_query import matches_title_search_query
+from cd_monitor.services.xianyu_login_state import inspect_xianyu_login_state
 from cd_monitor.sources.base import BrowserHarnessAdapter
 
 
@@ -407,71 +407,14 @@ class _StorageStateInspection:
     cookie_domains: list[str] | None = None
 
 
-_XIANYU_AUTH_DOMAINS = ("goofish.com", "xianyu", "taobao.com", "alibaba.com", "tmall.com")
-
-
 def _inspect_storage_state(state_file: str) -> _StorageStateInspection:
-    if not state_file:
-        return _StorageStateInspection(status="not_configured", cookie_domains=[])
-    path = Path(state_file)
-    if not path.exists() or not path.is_file():
-        return _StorageStateInspection(
-            status="missing",
-            error_type="state_file_missing",
-            error_message="Configured Xianyu storage_state file does not exist.",
-            cookie_domains=[],
-        )
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return _StorageStateInspection(
-            status="invalid",
-            error_type="invalid_state_file",
-            error_message="Configured Xianyu storage_state file is not valid JSON.",
-            cookie_domains=[],
-        )
-    if not isinstance(data, dict):
-        return _StorageStateInspection(
-            status="invalid",
-            error_type="invalid_state_file",
-            error_message="Configured Xianyu storage_state file must be a JSON object.",
-            cookie_domains=[],
-        )
-    cookies = data.get("cookies")
-    if not isinstance(cookies, list) or not cookies:
-        return _StorageStateInspection(
-            status="invalid",
-            error_type="invalid_state_file",
-            error_message="Configured Xianyu storage_state file must include a non-empty cookies list.",
-            cookie_domains=[],
-        )
-    domains = sorted(
-        {
-            str(cookie.get("domain", "")).strip()
-            for cookie in cookies
-            if isinstance(cookie, dict) and str(cookie.get("domain", "")).strip()
-        }
+    inspection = inspect_xianyu_login_state(state_file)
+    return _StorageStateInspection(
+        status=str(inspection.get("status") or "invalid"),
+        error_type=inspection.get("error_type"),
+        error_message=inspection.get("error_message"),
+        cookie_domains=list(inspection.get("cookie_domains") or []),
     )
-    if not domains:
-        return _StorageStateInspection(
-            status="invalid",
-            error_type="invalid_state_file",
-            error_message="Configured Xianyu storage_state cookies are missing domains.",
-            cookie_domains=[],
-        )
-    if not any(_is_xianyu_auth_domain(domain) for domain in domains):
-        return _StorageStateInspection(
-            status="invalid",
-            error_type="invalid_state_file",
-            error_message="Configured Xianyu storage_state file does not contain Goofish/Xianyu auth domains.",
-            cookie_domains=domains,
-        )
-    return _StorageStateInspection(status="ready", cookie_domains=domains)
-
-
-def _is_xianyu_auth_domain(domain: str) -> bool:
-    lowered = domain.lower()
-    return any(token in lowered for token in _XIANYU_AUTH_DOMAINS)
 
 
 _HARD_SECURITY_MARKERS = (
