@@ -35,6 +35,7 @@ _MAX_EXTRACTED_TEXT_CHARS = 16_000
 _TESSERACT_DEFAULT_PATH = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
 _BARCODE_TYPES = frozenset({"EAN13", "EAN8", "UPCA"})
 _OBSERVATION_MARKETS = frozenset({"wameiji", "xianyu"})
+_PROFILE_MARKETS = ("wameiji", "xianyu")
 _OBSERVATION_STATES = frozenset(
     {"found", "price_unfavorable", "not_currently_listed", "login_required", "blocked"}
 )
@@ -444,6 +445,68 @@ def list_reference_market_observations(
     return [_market_observation_dict(row) for row in rows]
 
 
+def build_reference_product_profile(db_path: str | Path, *, product_id: int) -> dict[str, object]:
+    """Build a local, deterministic evidence profile for one reference product."""
+
+    _require_positive_int(product_id, "product_id")
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT id, stable_key, barcode, tokens_json, sample_count
+            FROM reference_products
+            WHERE id = ?
+            """,
+            (product_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"reference product does not exist: {product_id}")
+        latest_by_market = _latest_observations_by_product(
+            conn, product_ids=(product_id,)
+        ).get(product_id, {})
+        extraction_states = _extraction_states_by_product(
+            conn, product_ids=(product_id,)
+        ).get(product_id, [])
+    return _reference_product_profile(
+        row,
+        latest_by_market=latest_by_market,
+        extraction_states=extraction_states,
+    )
+
+
+def list_reference_product_profiles(
+    db_path: str | Path, *, limit: int = 100
+) -> list[dict[str, object]]:
+    """List local reference-product profiles in deterministic product-ID order."""
+
+    if type(limit) is not int or isinstance(limit, bool) or not 1 <= limit <= 200:
+        raise ValueError("limit must be an integer from 1 to 200")
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, stable_key, barcode, tokens_json, sample_count
+            FROM reference_products
+            ORDER BY id
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        product_ids = tuple(int(row[0]) for row in rows)
+        latest_by_product = _latest_observations_by_product(conn, product_ids=product_ids)
+        extraction_states_by_product = _extraction_states_by_product(
+            conn, product_ids=product_ids
+        )
+    return [
+        _reference_product_profile(
+            row,
+            latest_by_market=latest_by_product.get(int(row[0]), {}),
+            extraction_states=extraction_states_by_product.get(int(row[0]), []),
+        )
+        for row in rows
+    ]
+
+
 def reference_memory_status(db_path: str | Path) -> dict[str, object]:
     """Return local coverage counts without reading files or the network."""
 
@@ -474,6 +537,11 @@ def reference_memory_status(db_path: str | Path) -> dict[str, object]:
             ORDER BY observation_state
             """
         ).fetchall()
+        product_ids = tuple(
+            int(row[0])
+            for row in conn.execute("SELECT id FROM reference_products ORDER BY id").fetchall()
+        )
+        latest_by_product = _latest_observations_by_product(conn, product_ids=product_ids)
     return {
         "product_count": product_count,
         "sample_count": sample_count,
@@ -481,6 +549,10 @@ def reference_memory_status(db_path: str | Path) -> dict[str, object]:
         "matched_candidate_count": matched_candidate_count,
         "market_observation_count": market_observation_count,
         "market_observation_states": {str(state): int(count) for state, count in state_rows},
+        "latest_market_coverage": _latest_market_coverage(
+            product_count=product_count,
+            latest_by_product=latest_by_product,
+        ),
         "network_requests": 0,
     }
 
@@ -657,6 +729,126 @@ def _tokens_from_json(value: object) -> frozenset[str]:
     if not isinstance(decoded, list) or not all(isinstance(item, str) for item in decoded):
         raise ValueError("persisted reference tokens must be a text list")
     return normalize_reference_tokens(frozenset(decoded))
+
+
+def _latest_observations_by_product(
+    conn: sqlite3.Connection, *, product_ids: tuple[int, ...]
+) -> dict[int, dict[str, dict[str, object]]]:
+    if not product_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in product_ids)
+    rows = conn.execute(
+        f"""
+        WITH ranked AS (
+          SELECT id, reference_product_id, market, observation_state, observed_at,
+                 observed_title, version_evidence, catalog_no, barcode, price,
+                 currency, source_url, note,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY reference_product_id, market
+                   ORDER BY observed_at DESC, id DESC
+                 ) AS row_number
+          FROM reference_market_observations
+          WHERE reference_product_id IN ({placeholders})
+        )
+        SELECT id, reference_product_id, market, observation_state, observed_at,
+               observed_title, version_evidence, catalog_no, barcode, price,
+               currency, source_url, note
+        FROM ranked
+        WHERE row_number = 1
+        ORDER BY reference_product_id, market
+        """,
+        product_ids,
+    ).fetchall()
+    latest_by_product: dict[int, dict[str, dict[str, object]]] = {
+        product_id: {} for product_id in product_ids
+    }
+    for row in rows:
+        observation = _market_observation_dict(row)
+        product_id = int(observation["product_id"])
+        latest_by_product.setdefault(product_id, {})[str(observation["market"])] = observation
+    return latest_by_product
+
+
+def _extraction_states_by_product(
+    conn: sqlite3.Connection, *, product_ids: tuple[int, ...]
+) -> dict[int, list[str]]:
+    if not product_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in product_ids)
+    rows = conn.execute(
+        f"""
+        SELECT product_id, extraction_state
+        FROM reference_product_samples
+        WHERE product_id IN ({placeholders})
+        GROUP BY product_id, extraction_state
+        ORDER BY product_id, extraction_state
+        """,
+        product_ids,
+    ).fetchall()
+    states_by_product: dict[int, list[str]] = {}
+    for product_id, extraction_state in rows:
+        states_by_product.setdefault(int(product_id), []).append(str(extraction_state))
+    return states_by_product
+
+
+def _reference_product_profile(
+    row: sqlite3.Row | tuple[object, ...],
+    *,
+    latest_by_market: dict[str, dict[str, object]],
+    extraction_states: list[str],
+) -> dict[str, object]:
+    barcode = str(row[2]) if row[2] is not None else None
+    markets = {market: latest_by_market.get(market) for market in _PROFILE_MARKETS}
+    catalog_numbers = sorted(
+        {
+            str(observation["catalog_no"])
+            for observation in markets.values()
+            if observation is not None and observation["catalog_no"] is not None
+        }
+    )
+    missing_evidence = (["barcode"] if barcode is None else []) + [
+        f"{market}:market_observation"
+        for market in _PROFILE_MARKETS
+        if markets[market] is None
+    ]
+    return {
+        "product_id": int(row[0]),
+        "stable_key": str(row[1]),
+        "barcode": barcode,
+        "identity_tokens": sorted(_tokens_from_json(row[3])),
+        "sample_count": int(row[4]),
+        "extraction_states": extraction_states,
+        "catalog_numbers": catalog_numbers,
+        "markets": markets,
+        "missing_evidence": missing_evidence,
+    }
+
+
+def _latest_market_coverage(
+    *,
+    product_count: int,
+    latest_by_product: dict[int, dict[str, dict[str, object]]],
+) -> dict[str, dict[str, object]]:
+    coverage: dict[str, dict[str, object]] = {}
+    for market in _PROFILE_MARKETS:
+        observations = [
+            latest_by_market[market]
+            for latest_by_market in latest_by_product.values()
+            if market in latest_by_market
+        ]
+        state_counts: dict[str, int] = {}
+        for observation in observations:
+            state = str(observation["observation_state"])
+            state_counts[state] = state_counts.get(state, 0) + 1
+        coverage[market] = {
+            "covered_product_count": len(observations),
+            "unobserved_product_count": product_count - len(observations),
+            "states": {state: state_counts[state] for state in sorted(state_counts)},
+            "latest_observed_at": max(
+                (str(observation["observed_at"]) for observation in observations), default=None
+            ),
+        }
+    return coverage
 
 
 def _market_observation_dict(row: sqlite3.Row | tuple[object, ...]) -> dict[str, object]:

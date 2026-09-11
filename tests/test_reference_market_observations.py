@@ -8,6 +8,7 @@ import pytest
 
 from cd_monitor.services.reference_memory import (
     ExtractedReferenceSample,
+    build_reference_product_profile,
     import_reference_samples,
     list_reference_market_observations,
     record_reference_market_observation,
@@ -75,6 +76,79 @@ def test_market_observation_is_timestamped_and_does_not_change_positive_identity
     assert status["product_count"] == 1
     assert status["market_observation_count"] == 1
     assert status["market_observation_states"] == {"price_unfavorable": 1}
+
+
+def test_reference_product_profile_uses_latest_market_evidence_and_coverage(
+    tmp_path: Path,
+) -> None:
+    db_path, product_id = _seed_reference_product(tmp_path)
+
+    record_reference_market_observation(
+        db_path,
+        product_id=product_id,
+        market="xianyu",
+        observation_state="login_required",
+        observed_at="2026-09-10T00:00:00+00:00",
+    )
+    current_found = record_reference_market_observation(
+        db_path,
+        product_id=product_id,
+        market="xianyu",
+        observation_state="found",
+        catalog_no="SECL-9999",
+        price=9_999,
+        currency="CNY",
+        source_url="https://goofish.example/item/milet",
+        observed_at="2026-09-11T00:00:00+00:00",
+    )
+
+    profile = build_reference_product_profile(db_path, product_id=product_id)
+    assert profile["catalog_numbers"] == ["SECL-9999"]
+    assert profile["markets"] == {"wameiji": None, "xianyu": current_found}
+    assert profile["missing_evidence"] == ["wameiji:market_observation"]
+
+    status = reference_memory_status(db_path)
+    assert status["market_observation_states"] == {"found": 1, "login_required": 1}
+    assert status["latest_market_coverage"] == {
+        "xianyu": {
+            "covered_product_count": 1,
+            "unobserved_product_count": 0,
+            "states": {"found": 1},
+            "latest_observed_at": "2026-09-11T00:00:00Z",
+        },
+        "wameiji": {
+            "covered_product_count": 0,
+            "unobserved_product_count": 1,
+            "states": {},
+            "latest_observed_at": None,
+        },
+    }
+
+
+def test_reference_product_profile_breaks_same_timestamp_ties_by_latest_record(
+    tmp_path: Path,
+) -> None:
+    db_path, product_id = _seed_reference_product(tmp_path)
+    observed_at = "2026-09-11T00:00:00+00:00"
+
+    record_reference_market_observation(
+        db_path,
+        product_id=product_id,
+        market="wameiji",
+        observation_state="found",
+        observed_title="first listing",
+        observed_at=observed_at,
+    )
+    second = record_reference_market_observation(
+        db_path,
+        product_id=product_id,
+        market="wameiji",
+        observation_state="not_currently_listed",
+        observed_title="second listing",
+        observed_at=observed_at,
+    )
+
+    assert build_reference_product_profile(db_path, product_id=product_id)["markets"]["wameiji"] == second
 
 
 @pytest.mark.parametrize(

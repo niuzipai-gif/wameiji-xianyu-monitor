@@ -11,6 +11,7 @@ from cd_monitor.services.reference_memory import (
     _parse_tesseract_languages,
     import_reference_samples,
     read_candidate_reference_match,
+    record_reference_market_observation,
     refresh_discovery_candidate_reference_match,
 )
 from cd_monitor.storage.sqlite import list_discovery_pools, upsert_discovery_candidate
@@ -252,6 +253,22 @@ def test_candidate_match_is_persisted_without_rejecting_an_unmatched_candidate(
     assert persisted is not None
     assert persisted["match_kind"] == "token_overlap"
     assert persisted["score"] == matched.score
+    with sqlite3.connect(db_path) as conn:
+        product_id = int(conn.execute("SELECT id FROM reference_products").fetchone()[0])
+    record_reference_market_observation(
+        db_path,
+        product_id=product_id,
+        market="xianyu",
+        observation_state="price_unfavorable",
+        price=9_999,
+        currency="CNY",
+        observed_at="2026-09-11T00:00:00+00:00",
+    )
+    refreshed = refresh_discovery_candidate_reference_match(db_path, candidate_id)
+    refreshed_persisted = read_candidate_reference_match(db_path, candidate_id)
+    assert refreshed.score == matched.score
+    assert refreshed_persisted is not None
+    assert refreshed_persisted["score"] == matched.score
     assert unmatched.match_kind == "no_match"
     assert read_candidate_reference_match(db_path, unmatched_id) == {
         "candidate_id": unmatched_id,
