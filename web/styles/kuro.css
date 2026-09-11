@@ -489,6 +489,20 @@ body.kuro .mini-stat { background: rgba(255, 255, 255, 0.78); border: 1px solid 
 body.kuro .mini-stat small { color: var(--kuro-muted); display: block; font-size: 12px; margin-bottom: 4px; }
 body.kuro .mini-stat strong { font-size: 22px; }
 
+/* Approved local screenshots are evidence memory, never an automatic buy list. */
+body.kuro .reference-memory-panel { margin: 0 0 24px; padding: 22px; border: 1px solid var(--kuro-line); border-radius: 22px; background: linear-gradient(135deg, rgba(241, 247, 255, 0.94), rgba(255, 250, 252, 0.9)); box-shadow: 0 12px 36px rgba(80, 105, 150, 0.06); }
+body.kuro .reference-memory-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+body.kuro .reference-memory-head h3 { margin: 4px 0 6px; font-size: 20px; }
+body.kuro .reference-memory-head p { margin: 0; max-width: 740px; color: var(--kuro-muted); font-size: 13px; line-height: 1.7; }
+body.kuro .reference-memory-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 18px 0 14px; }
+body.kuro .reference-memory-metrics > div { padding: 13px 15px; border: 1px solid var(--kuro-line); border-radius: 15px; background: rgba(255, 255, 255, 0.72); }
+body.kuro .reference-memory-metrics small { display: block; color: var(--kuro-muted); font-size: 12px; margin-bottom: 3px; }
+body.kuro .reference-memory-metrics strong { font-size: 22px; }
+body.kuro .reference-observations { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+body.kuro .reference-observation { display: flex; align-items: flex-start; gap: 9px; padding: 12px; border: 1px solid rgba(219, 230, 246, 0.8); border-radius: 14px; background: rgba(255, 255, 255, 0.56); min-width: 0; }
+body.kuro .reference-observation b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+body.kuro .reference-observation p { margin: 5px 0 0; color: var(--kuro-muted); font-size: 12px; }
+
 body.kuro .rank-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
 body.kuro .ranking-table-wrap { overflow-x: auto; }
 body.kuro .ranking-table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -545,6 +559,11 @@ body.kuro .setting-card { background: rgba(255, 255, 255, 0.6); border: 1px soli
 body.kuro .setting-card h4 { margin: 0 0 6px; font-size: 14px; color: var(--kuro-ink); }
 body.kuro .setting-line { color: var(--kuro-muted); font-size: 13px; line-height: 1.7; }
 body.kuro .doctor-pre { background: #0e1530; color: #cfe1ff; padding: 18px; border-radius: 14px; font-size: 12px; line-height: 1.6; overflow-x: auto; max-height: 360px; }
+
+@media (max-width: 900px) {
+  body.kuro .reference-memory-metrics { grid-template-columns: repeat(2, 1fr); }
+  body.kuro .reference-observations { grid-template-columns: 1fr; }
+}
 
 /* Empty state */
 body.kuro .empty-state { padding: 28px; text-align: center; color: var(--kuro-muted); font-size: 13px; background: rgba(255, 255, 255, 0.4); border: 1px dashed var(--kuro-line); border-radius: 14px; }

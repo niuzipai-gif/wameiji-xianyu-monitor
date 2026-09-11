@@ -12,6 +12,8 @@
   const view = {
     board: null,
     commands: [],
+    referenceStatus: null,
+    referenceObservations: [],
     filter: "all",
     query: "",
     advancedFilter: null,
@@ -185,6 +187,70 @@
     setText("kpiMax", cny(highestProfit));
     setText("kpiHitRate", hitRate + "%");
     renderDiscoveryStatus(summary);
+  }
+
+  function referenceStateLabel(state) {
+    const labels = {
+      found: "已找到",
+      price_unfavorable: "暂不合算",
+      not_currently_listed: "当前未见",
+      login_required: "等待登录",
+      blocked: "受阻",
+    };
+    return labels[state] || "待复核";
+  }
+
+  function renderReferenceMemory() {
+    const status = view.referenceStatus;
+    const stateElement = document.getElementById("referenceMemoryState");
+    const observationsElement = document.getElementById("referenceObservationList");
+    if (!status) {
+      setText("referenceProductCount", "--");
+      setText("referenceSampleCount", "--");
+      setText("referenceBarcodeCount", "--");
+      setText("referenceObservationCount", "--");
+      if (stateElement) {
+        stateElement.className = "status idle";
+        stateElement.textContent = "暂未读取";
+      }
+      if (observationsElement) {
+        observationsElement.innerHTML = '<div class="empty-state">参考库暂不可用；不影响当前机会流。</div>';
+      }
+      return;
+    }
+    setText("referenceProductCount", String(Number(status.product_count) || 0));
+    setText("referenceSampleCount", String(Number(status.sample_count) || 0));
+    setText("referenceBarcodeCount", String(Number(status.barcode_sample_count) || 0));
+    setText("referenceObservationCount", String(Number(status.market_observation_count) || 0));
+    const states = status.market_observation_states || {};
+    const loginPending = Number(states.login_required) || 0;
+    if (stateElement) {
+      stateElement.className = "status " + (loginPending > 0 ? "warn" : "ok");
+      stateElement.textContent = loginPending > 0
+        ? "闲鱼待登录 " + loginPending + " 条"
+        : "本地记忆已就绪";
+    }
+    if (!observationsElement) return;
+    const items = Array.isArray(view.referenceObservations) ? view.referenceObservations : [];
+    if (!items.length) {
+      observationsElement.innerHTML = '<div class="empty-state">尚无市场观察。导入样本不会自动联网或触发采购。</div>';
+      return;
+    }
+    observationsElement.innerHTML = items.slice(0, 3).map((item) => {
+      const state = String(item.observation_state || "");
+      const price = Number(item.price);
+      const currency = String(item.currency || "");
+      const priceText = Number.isFinite(price) && currency
+        ? price.toLocaleString("ja-JP", { maximumFractionDigits: 0 }) + " " + currency
+        : "未记录价格";
+      return [
+        '<article class="reference-observation">',
+          '<span class="status ' + (state === "found" ? "ok" : (state === "login_required" ? "warn" : "idle")) + '">' + esc(referenceStateLabel(state)) + "</span>",
+          '<div><b>' + esc(item.observed_title || "未命名参考") + "</b>",
+          '<p>' + esc(item.market === "wameiji" ? "挖煤姬" : "闲鱼") + " · " + esc(priceText) + " · " + esc(timeLabel(item.observed_at)) + "</p></div>",
+        "</article>",
+      ].join("");
+    }).join("");
   }
 
   function safeHttpUrl(value) {
@@ -437,17 +503,22 @@
     if (view.refreshing) return;
     view.refreshing = true;
     try {
-      const [board, commandPayload] = await Promise.all([
+      const [board, commandPayload, referenceStatus, referenceObservationPayload] = await Promise.all([
         apiGet("/api/discovery/board"),
         apiGet("/api/discovery/commands"),
+        apiGet("/api/reference-memory/status").catch(() => null),
+        apiGet("/api/reference-memory/observations?limit=3").catch(() => null),
       ]);
       view.board = board || { summary: {}, pools: [], opportunities: [] };
       view.commands = (commandPayload && commandPayload.items) || [];
+      view.referenceStatus = referenceStatus;
+      view.referenceObservations = (referenceObservationPayload && referenceObservationPayload.items) || [];
       if (window.state) {
         window.state.opportunities = (view.board.opportunities || []).map(toLegacyOpportunity);
         window.state.totalOpportunities = window.state.opportunities.length;
       }
       renderKpis(view.board.summary || {});
+      renderReferenceMemory();
       renderFeed();
       renderPools();
       setCommandMessage(commandLabel(view.commands));
