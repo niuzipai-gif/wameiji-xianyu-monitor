@@ -62,6 +62,17 @@ def _assert_reference_panel_contract(html: str, script: str, styles: str) -> Non
 
     reference_memory = _function_block(script, "renderReferenceMemory")
     assert "market_observation_states" not in reference_memory
+    for forbidden_value in (
+        "item.price",
+        "item.currency",
+        "priceText",
+        "toLocaleString",
+        "暂不合算",
+    ):
+        assert forbidden_value not in reference_memory
+    reference_state_label = _function_block(script, "referenceStateLabel")
+    assert 'price_unfavorable: "信息待复核"' in reference_state_label
+    assert "暂不合算" not in reference_state_label
     null_status = _brace_block(reference_memory, reference_memory.index("if (!status) {"))
     assert 'setText("referenceXianyuLatest", "--");' in null_status
     assert 'setText("referenceWameijiLatest", "--");' in null_status

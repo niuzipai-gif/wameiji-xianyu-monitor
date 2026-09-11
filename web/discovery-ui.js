@@ -193,7 +193,7 @@
   function referenceStateLabel(state) {
     const labels = {
       found: "已找到",
-      price_unfavorable: "暂不合算",
+      price_unfavorable: "信息待复核",
       not_currently_listed: "当前未见",
       login_required: "等待登录",
       blocked: "受阻",
@@ -316,16 +316,11 @@
     }
     observationsElement.innerHTML = items.slice(0, 3).map((item) => {
       const state = String(item.observation_state || "");
-      const price = Number(item.price);
-      const currency = String(item.currency || "");
-      const priceText = Number.isFinite(price) && currency
-        ? price.toLocaleString("ja-JP", { maximumFractionDigits: 0 }) + " " + currency
-        : "未记录价格";
       return [
         '<article class="reference-observation">',
           '<span class="status ' + (state === "found" ? "ok" : (state === "login_required" ? "warn" : "idle")) + '">' + esc(referenceStateLabel(state)) + "</span>",
           '<div><b>' + esc(item.observed_title || "未命名参考") + "</b>",
-          '<p>' + esc(item.market === "wameiji" ? "挖煤姬" : "闲鱼") + " · " + esc(priceText) + " · " + esc(timeLabel(item.observed_at)) + "</p></div>",
+          '<p>' + esc(item.market === "wameiji" ? "挖煤姬" : "闲鱼") + " · " + esc(timeLabel(item.observed_at)) + "</p></div>",
         "</article>",
       ].join("");
     }).join("");
