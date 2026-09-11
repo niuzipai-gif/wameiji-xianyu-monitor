@@ -60,6 +60,35 @@ def test_generic_media_word_alone_is_not_a_reference_match() -> None:
     assert result.score == 0.0
 
 
+def test_structured_candidate_identity_ignores_storefront_boilerplate_raw_text() -> None:
+    """A full marketplace page must not add unrelated identity evidence."""
+
+    candidate = build_candidate_evidence(
+        title="Milet Walkin In My Lane",
+        raw_text="Universal Music Like City shop rules, shipping, and returns",
+    )
+
+    assert candidate.tokens == frozenset({"milet", "walkin", "in", "my", "lane"})
+
+
+def test_label_words_and_short_ocr_fragments_do_not_make_a_fallback_match() -> None:
+    product = ReferenceProductEvidence(
+        product_id=11,
+        stable_key="sample:ocr-noise",
+        barcode=None,
+        tokens=frozenset({"universal", "music", "city", "for", "ch", "mw", "yoasobi"}),
+    )
+
+    result = score_candidate_against_product(
+        build_candidate_evidence(title="Universal Music City For CH MW"), product
+    )
+
+    assert result.product_id is None
+    assert result.match_kind == "no_match"
+    assert result.score == 0.0
+    assert result.evidence == {"shared_tokens": []}
+
+
 def test_repeated_xianyu_shell_words_do_not_create_a_product_match() -> None:
     product = ReferenceProductEvidence(
         product_id=10,

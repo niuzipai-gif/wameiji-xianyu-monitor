@@ -17,22 +17,53 @@ from cd_monitor.core.identifiers import extract_jan_candidates, normalize_jan
 _TOKEN_RE: Final = re.compile(r"[A-Za-z][A-Za-z0-9]*|[\u3040-\u30ff]+|[\u3400-\u9fff]+")
 _GENERIC_MEDIA_TOKENS: Final = frozenset(
     {
+        # English function words, condition labels, and marketplace shells are
+        # frequently present in OCR and reseller pages.  They cannot establish
+        # that two listings refer to the same product.
+        "and",
+        "as",
+        "at",
+        "by",
+        "for",
+        "from",
+        "in",
+        "into",
+        "is",
+        "it",
+        "like",
+        "my",
+        "of",
+        "on",
+        "or",
+        "the",
+        "this",
+        "to",
         "album",
         "blu",
         "bluray",
         "box",
         "cd",
+        "city",
         "disc",
         "dvd",
         "edition",
         "first",
+        "label",
         "limited",
         "lp",
         "media",
+        "music",
         "new",
         "original",
+        "record",
+        "records",
+        "shop",
+        "sony",
+        "store",
+        "universal",
         "used",
         "version",
+        "warner",
         "with",
         # Repeated listing-shell and taxonomy labels from the approved Xianyu
         # screenshots.  They are useful for display, but never distinguish a
@@ -179,16 +210,26 @@ def build_candidate_evidence(
     """Build candidate identity evidence from product fields only.
 
     Callers intentionally do not pass price, sales, or availability fields.
-    ``raw_text`` is allowed for OCR/listing identity text, but standalone
-    numeric values remain excluded from token evidence.
+    ``raw_text`` is a fallback only when no structured identity field is
+    available.  A marketplace detail page commonly contains its store policy,
+    category labels, and shipping text; allowing that boilerplate to augment a
+    real title would fabricate similarity evidence.  Raw text still contributes
+    potential JAN/EAN values because an exact code is independently verifiable.
     """
 
-    text_fields = (title, artist, edition, catalog_no, jan, raw_text)
-    normalized_fields = tuple(_optional_text(value, field="candidate field") for value in text_fields)
-    barcodes = _extract_barcodes(normalized_fields)
+    identity_fields = (title, artist, edition, catalog_no, jan)
+    normalized_identity_fields = tuple(
+        _optional_text(value, field="candidate field") for value in identity_fields
+    )
+    normalized_raw_text = _optional_text(raw_text, field="candidate field")
+    all_fields = (*normalized_identity_fields, normalized_raw_text)
+    barcodes = _extract_barcodes(all_fields)
+    token_fields = normalized_identity_fields
+    if not any(value.strip() for value in token_fields):
+        token_fields = (normalized_raw_text,)
     return CandidateEvidence(
         barcodes=frozenset(barcodes),
-        tokens=normalize_reference_tokens(" ".join(normalized_fields)),
+        tokens=normalize_reference_tokens(" ".join(token_fields)),
     )
 
 
@@ -215,8 +256,8 @@ def score_candidate_against_product(
             evidence={"matched_barcode": product.barcode},
         )
 
-    product_tokens = product.tokens - _GENERIC_MEDIA_TOKENS
-    candidate_tokens = candidate.tokens - _GENERIC_MEDIA_TOKENS
+    product_tokens = _distinctive_tokens(product.tokens)
+    candidate_tokens = _distinctive_tokens(candidate.tokens)
     shared_tokens = sorted(product_tokens & candidate_tokens)
     if len(shared_tokens) < _MIN_SHARED_DISTINCTIVE_TOKENS:
         return ReferenceMatch(
@@ -236,6 +277,21 @@ def score_candidate_against_product(
             "shared_tokens": shared_tokens,
             "reference_token_coverage": round(product_coverage, 4),
         },
+    )
+
+
+def _distinctive_tokens(tokens: frozenset[str]) -> frozenset[str]:
+    """Remove generic OCR/page words and short Latin OCR fragments.
+
+    Japanese product names can be two characters, so the length rule applies
+    only to ASCII tokens.  It deliberately operates at scoring time so stored
+    source OCR remains auditable and existing reference imports need no rewrite.
+    """
+
+    return frozenset(
+        token
+        for token in tokens
+        if token not in _GENERIC_MEDIA_TOKENS and not (token.isascii() and len(token) < 3)
     )
 
 
