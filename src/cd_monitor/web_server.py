@@ -102,10 +102,12 @@ from cd_monitor.storage.sqlite import (
     get_user_settings,
     init_db,
     insert_review_decision,
+    insert_selection_preference_feedback,
     list_opportunities,
     list_candidate_rechecks,
     list_opportunity_ids,
     list_review_decisions,
+    list_selection_preference_feedback,
     list_sent_alerts,
     list_watch,
     list_watch_all,
@@ -126,6 +128,7 @@ from cd_monitor.storage.sqlite import (
     list_discovery_opportunities,
     list_discovery_pools,
     list_discovery_runs,
+    selection_preference_feedback_status,
 )
 
 
@@ -579,6 +582,48 @@ def _build_handler(
                     self._json(
                         {"error": "invalid_limit"},
                         status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                self._json({"items": items})
+                return
+            if route == "/api/selection-feedback/status":
+                try:
+                    self._json(selection_preference_feedback_status(db_path))
+                except (ValueError, sqlite3.Error):
+                    self._json(
+                        {"error": "selection_feedback_unavailable"},
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
+                return
+            if route == "/api/selection-feedback":
+                raw_query = urlparse(self.path).query
+                raw_limit = _query_param(raw_query, "limit")
+                raw_current = _query_param(raw_query, "current")
+                raw_candidate_id = _query_param(raw_query, "candidate_id")
+                if raw_limit is not None and re.fullmatch(r"[0-9]{1,3}", raw_limit) is None:
+                    self._json({"error": "invalid_selection_feedback"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                feedback_limit = int(raw_limit) if raw_limit is not None else 100
+                if raw_current not in (None, "0", "1"):
+                    self._json({"error": "invalid_selection_feedback"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                if raw_candidate_id is not None and re.fullmatch(r"[1-9][0-9]*", raw_candidate_id) is None:
+                    self._json({"error": "invalid_selection_feedback"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    items = list_selection_preference_feedback(
+                        db_path,
+                        candidate_id=int(raw_candidate_id) if raw_candidate_id is not None else None,
+                        limit=feedback_limit,
+                        current_only=raw_current == "1",
+                    )
+                except ValueError:
+                    self._json({"error": "invalid_selection_feedback"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                except sqlite3.Error:
+                    self._json(
+                        {"error": "selection_feedback_unavailable"},
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
                     )
                     return
                 self._json({"items": items})
@@ -1631,6 +1676,44 @@ def _build_handler(
                         "criteria": criteria_summary,
                     },
                 )
+                return
+            if route == "/api/selection-feedback":
+                raw_candidate_id = payload.get("candidate_id")
+                if isinstance(raw_candidate_id, int) and not isinstance(raw_candidate_id, bool):
+                    candidate_id = raw_candidate_id
+                elif isinstance(raw_candidate_id, str) and re.fullmatch(r"[1-9][0-9]*", raw_candidate_id):
+                    candidate_id = int(raw_candidate_id)
+                else:
+                    candidate_id = 0
+                outcome = str(payload.get("outcome", "")).strip()
+                note = payload.get("note")
+                if (
+                    not candidate_id
+                    or outcome not in {"keep", "source_pending", "not_fit"}
+                    or (note is not None and not isinstance(note, str))
+                ):
+                    self._json({"error": "invalid_selection_feedback"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    feedback = insert_selection_preference_feedback(
+                        db_path,
+                        candidate_id=candidate_id,
+                        outcome=outcome,
+                        note=note,
+                    )
+                except KeyError:
+                    self._json({"error": "candidate_not_found"}, status=HTTPStatus.NOT_FOUND)
+                    return
+                except ValueError:
+                    self._json({"error": "invalid_selection_feedback"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                except sqlite3.Error:
+                    self._json(
+                        {"error": "selection_feedback_unavailable"},
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
+                    return
+                self._json(feedback, status=HTTPStatus.CREATED)
                 return
             if route == "/api/review":
                 opportunity_id = _int_value(payload, "opportunity_id", 0)

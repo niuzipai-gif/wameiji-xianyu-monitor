@@ -492,6 +492,7 @@ body.kuro .mini-stat strong { font-size: 22px; }
 /* Approved local screenshots are evidence memory, never an automatic buy list. */
 body.kuro .reference-memory-panel { margin: 0 0 24px; padding: 22px; border: 1px solid var(--kuro-line); border-radius: 22px; background: linear-gradient(135deg, rgba(241, 247, 255, 0.94), rgba(255, 250, 252, 0.9)); box-shadow: 0 12px 36px rgba(80, 105, 150, 0.06); }
 body.kuro .reference-memory-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+body.kuro .reference-memory-states { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 body.kuro .reference-memory-head h3 { margin: 4px 0 6px; font-size: 20px; }
 body.kuro .reference-memory-head p { margin: 0; max-width: 740px; color: var(--kuro-muted); font-size: 13px; line-height: 1.7; }
 body.kuro .reference-memory-metrics { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin: 18px 0 14px; }
@@ -707,6 +708,11 @@ body.kuro .discovery-op-card .side-product.side-link { color: inherit; text-deco
 body.kuro .discovery-op-card .side-product.side-link:hover { filter: saturate(1.06) brightness(0.99); }
 body.kuro .discovery-op-card .product { min-width: 0; }
 body.kuro .discovery-op-card .product h4 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+body.kuro .selection-feedback-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 12px; }
+body.kuro .selection-feedback-actions span { color: var(--kuro-muted); font-size: 12px; font-weight: 700; margin-right: 2px; }
+body.kuro .selection-feedback-actions button { border: 1px solid var(--kuro-line); border-radius: 999px; background: rgba(255, 255, 255, 0.82); color: var(--kuro-ink); cursor: pointer; font: inherit; font-size: 12px; padding: 5px 9px; }
+body.kuro .selection-feedback-actions button:hover { border-color: var(--kuro-accent); color: var(--kuro-accent); }
+body.kuro .selection-feedback-actions button:disabled { cursor: wait; opacity: 0.58; }
 body.kuro .comparison-rail { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px; align-items: center; color: var(--kuro-muted); font-size: 11px; font-weight: 800; letter-spacing: .02em; margin: 0 0 12px; text-align: center; }
 body.kuro .comparison-rail span:first-child { color: #786219; text-align: left; }
 body.kuro .comparison-rail span:last-child { color: var(--kuro-rose); text-align: right; }

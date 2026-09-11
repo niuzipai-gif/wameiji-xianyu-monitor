@@ -15,6 +15,8 @@
     referenceStatus: null,
     referenceObservations: [],
     referenceProfiles: null,
+    selectionFeedbackStatus: null,
+    selectionFeedback: [],
     filter: "all",
     query: "",
     advancedFilter: null,
@@ -326,6 +328,28 @@
     }).join("");
   }
 
+  function renderSelectionFeedback() {
+    const element = document.getElementById("selectionFeedbackState");
+    if (!element) return;
+    const status = view.selectionFeedbackStatus;
+    if (!status) {
+      element.textContent = "偏好反馈暂不可用";
+      element.className = "status warn";
+      return;
+    }
+    const current = status.current_outcomes || {};
+    const labeled = Number(status.labeled_candidate_count) || 0;
+    const positive = (Number(current.keep) || 0) + (Number(current.source_pending) || 0);
+    const notFit = Number(current.not_fit) || 0;
+    if (status.state === "ready_for_evaluation") {
+      element.textContent = "偏好证据可评估 · 正向 " + positive + " · 不符合 " + notFit;
+      element.className = "status good";
+      return;
+    }
+    element.textContent = "偏好反馈收集中 · 已标注 " + labeled + " / 30";
+    element.className = "status blue";
+  }
+
   function safeHttpUrl(value) {
     const url = String(value || "").trim();
     const absoluteUrl = url.startsWith("//") ? "https:" + url : url;
@@ -377,6 +401,11 @@
     const xianyuTitle = item.xianyu_item_title || "闲鱼可售参考";
     const catalogNo = item.catalog_no || item.jan || "待人工确认";
     const detailVerified = item.detail_verified === true || Number(item.detail_verified) === 1;
+    const candidateId = Number(item.candidate_id);
+    const currentFeedback = (Array.isArray(view.selectionFeedback) ? view.selectionFeedback : []).find(
+      (feedback) => Number(feedback && feedback.candidate_id) === candidateId
+    );
+    const currentOutcome = currentFeedback && currentFeedback.outcome ? String(currentFeedback.outcome) : "";
     const xianyuSide = [
       '<div class="thumb xianyu-thumb">',
         thumbMarkup(item.xianyu_image_url, "闲鱼可售样本", "有效样本 " + sampleCount + " 条"),
@@ -404,6 +433,16 @@
     const reason = detailVerified
       ? "右侧挖煤姬价格来自已核验的商品详情页；左侧是 " + sampleCount + " 条有效闲鱼可比样本的参考价。下单前仍需人工核对版本、特典和品相。"
       : "来源详情仍待核验，当前价格不应作为进货依据。";
+    const feedbackMarkup = Number.isSafeInteger(candidateId) && candidateId > 0
+      ? [
+          '<div class="selection-feedback-actions" data-selection-feedback-candidate="' + esc(candidateId) + '">',
+            '<span>产品方向：' + esc({ keep: "保留", source_pending: "供应待找", not_fit: "不符合" }[currentOutcome] || "未标注") + '</span>',
+            '<button type="button" data-selection-feedback="keep" data-candidate-id="' + esc(candidateId) + '">保留</button>',
+            '<button type="button" data-selection-feedback="source_pending" data-candidate-id="' + esc(candidateId) + '">供应待找</button>',
+            '<button type="button" data-selection-feedback="not_fit" data-candidate-id="' + esc(candidateId) + '">不符合</button>',
+          '</div>',
+        ].join("")
+      : "";
     return [
       '<article class="op-card discovery-op-card" data-discovery-opportunity-id="' + esc(item.id || "") + '">',
         sideMarkup("xianyu", xianyuUrl, xianyuSide),
@@ -415,9 +454,10 @@
             '<div class="metric"><small>匹配度</small><strong>' + esc(percent(item.match_confidence)) + '</strong></div>',
             '<div class="metric"><small>判定</small><strong>' + decisionChip(item.decision) + '</strong></div>',
           '</div>',
-          '<p class="comparison-catalog">品番 / JAN：' + esc(catalogNo) + (item.edition ? ' · ' + esc(item.edition) : '') + '</p>',
-          '<div class="reason">' + esc(reason) + '</div>',
-        '</div>',
+           '<p class="comparison-catalog">品番 / JAN：' + esc(catalogNo) + (item.edition ? ' · ' + esc(item.edition) : '') + '</p>',
+           '<div class="reason">' + esc(reason) + '</div>',
+           feedbackMarkup,
+         '</div>',
         sideMarkup("market", sourceUrl, wameijiSide),
       '</article>',
     ].join("");
@@ -576,12 +616,14 @@
     if (view.refreshing) return;
     view.refreshing = true;
     try {
-      const [board, commandPayload, referenceStatus, referenceObservationPayload, referenceProfilePayload] = await Promise.all([
+      const [board, commandPayload, referenceStatus, referenceObservationPayload, referenceProfilePayload, selectionFeedbackStatus, selectionFeedbackPayload] = await Promise.all([
         apiGet("/api/discovery/board"),
         apiGet("/api/discovery/commands"),
         apiGet("/api/reference-memory/status").catch(() => null),
         apiGet("/api/reference-memory/observations?limit=3").catch(() => null),
         apiGet("/api/reference-memory/profiles?limit=3").catch(() => null),
+        apiGet("/api/selection-feedback/status").catch(() => null),
+        apiGet("/api/selection-feedback?current=1&limit=200").catch(() => null),
       ]);
       view.board = board || { summary: {}, pools: [], opportunities: [] };
       view.commands = (commandPayload && commandPayload.items) || [];
@@ -590,12 +632,15 @@
       view.referenceProfiles = referenceProfilePayload && Array.isArray(referenceProfilePayload.items)
         ? referenceProfilePayload.items
         : null;
+      view.selectionFeedbackStatus = selectionFeedbackStatus;
+      view.selectionFeedback = (selectionFeedbackPayload && selectionFeedbackPayload.items) || [];
       if (window.state) {
         window.state.opportunities = (view.board.opportunities || []).map(toLegacyOpportunity);
         window.state.totalOpportunities = window.state.opportunities.length;
       }
       renderKpis(view.board.summary || {});
       renderReferenceMemory();
+      renderSelectionFeedback();
       renderFeed();
       renderPools();
       setCommandMessage(commandLabel(view.commands));
@@ -710,6 +755,26 @@
     });
     document.getElementById("sideLegacyToolsBtn")?.addEventListener("click", () => {
       document.querySelector('[data-page="tasks"]')?.click();
+    });
+    document.getElementById("homeFeed")?.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-selection-feedback]");
+      if (!button) return;
+      const candidateId = Number(button.dataset.candidateId);
+      const outcome = button.dataset.selectionFeedback;
+      if (!Number.isSafeInteger(candidateId) || candidateId <= 0 || !outcome) return;
+      button.disabled = true;
+      try {
+        await apiPost("/api/selection-feedback", {
+          candidate_id: Number(button.dataset.candidateId),
+          outcome: button.dataset.selectionFeedback,
+        });
+        setCommandMessage("产品偏好已记录；它不会改变当前采购价格或市场状态。", false);
+        await refreshBoard();
+      } catch (error) {
+        setCommandMessage("记录产品偏好失败：" + error.message, true);
+      } finally {
+        button.disabled = false;
+      }
     });
     document.getElementById("discoveryPoolControls")?.addEventListener("click", (event) => {
       const button = event.target.closest("[data-discovery-action]");

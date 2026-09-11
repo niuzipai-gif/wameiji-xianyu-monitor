@@ -990,6 +990,26 @@ def _migrate_reference_market_observations(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_selection_preference_feedback(conn: sqlite3.Connection) -> None:
+    """Store user product-direction feedback apart from market and profit state."""
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS selection_preference_feedback (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          candidate_id INTEGER NOT NULL,
+          outcome TEXT NOT NULL CHECK(outcome IN ('keep', 'source_pending', 'not_fit')),
+          note TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(candidate_id) REFERENCES discovery_candidates(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_selection_preference_feedback_candidate_time
+          ON selection_preference_feedback(candidate_id, created_at DESC, id DESC);
+        """
+    )
+
+
 def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1016,6 +1036,7 @@ def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
             _migrate_title_only_xianyu_rechecks(conn)
             _migrate_reference_product_memory(conn)
             _migrate_reference_market_observations(conn)
+            _migrate_selection_preference_feedback(conn)
     finally:
         conn.close()
 
@@ -3067,6 +3088,160 @@ def list_review_decisions(
         conn.row_factory = sqlite3.Row
         rows = conn.execute(sql, tuple(params)).fetchall()
     return [dict(row) for row in rows]
+
+
+ALLOWED_SELECTION_PREFERENCE_OUTCOMES = frozenset({
+    "keep",
+    "source_pending",
+    "not_fit",
+})
+
+
+def insert_selection_preference_feedback(
+    db_path: str | Path,
+    candidate_id: int,
+    outcome: str,
+    note: str | None = None,
+) -> dict[str, object]:
+    """Append a manual product-direction label for one discovery candidate."""
+
+    if not isinstance(candidate_id, int) or isinstance(candidate_id, bool) or candidate_id <= 0:
+        raise ValueError("Selection preference candidate ID must be positive")
+    if outcome not in ALLOWED_SELECTION_PREFERENCE_OUTCOMES:
+        raise ValueError(f"Unsupported selection preference outcome: {outcome}")
+    if note is not None and not isinstance(note, str):
+        raise ValueError("Selection preference note must be text")
+    normalized_note = None if note is None else note.strip()
+    if normalized_note == "":
+        normalized_note = None
+    if normalized_note is not None and len(normalized_note) > 500:
+        raise ValueError("Selection preference note is too long")
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM discovery_candidates WHERE id = ?",
+            (candidate_id,),
+        ).fetchone()
+        if exists is None:
+            raise KeyError(f"Discovery candidate not found: {candidate_id}")
+        cur = conn.execute(
+            """
+            INSERT INTO selection_preference_feedback (candidate_id, outcome, note)
+            VALUES (?, ?, ?)
+            """,
+            (candidate_id, outcome, normalized_note),
+        )
+        feedback_id = int(cur.lastrowid)
+        row = conn.execute(
+            """
+            SELECT id, candidate_id, outcome, note, created_at
+            FROM selection_preference_feedback
+            WHERE id = ?
+            """,
+            (feedback_id,),
+        ).fetchone()
+    assert row is not None
+    return {
+        "id": int(row[0]),
+        "candidate_id": int(row[1]),
+        "outcome": str(row[2]),
+        "note": row[3],
+        "created_at": row[4],
+    }
+
+
+def list_selection_preference_feedback(
+    db_path: str | Path,
+    candidate_id: int | None = None,
+    limit: int = 50,
+    current_only: bool = False,
+) -> list[dict[str, object]]:
+    """Return append-only feedback history or one latest label per candidate."""
+
+    if not 1 <= limit <= 200:
+        raise ValueError("Selection preference feedback limit must be between 1 and 200")
+    init_db(db_path)
+    where = ""
+    params: list[object] = []
+    if candidate_id is not None:
+        where = " WHERE candidate_id = ?"
+        params.append(candidate_id)
+    if current_only:
+        sql = f"""
+            SELECT id, candidate_id, outcome, note, created_at
+            FROM (
+              SELECT id, candidate_id, outcome, note, created_at,
+                ROW_NUMBER() OVER (
+                  PARTITION BY candidate_id
+                  ORDER BY created_at DESC, id DESC
+                ) AS feedback_rank
+              FROM selection_preference_feedback
+              {where}
+            )
+            WHERE feedback_rank = 1
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+        """
+    else:
+        sql = f"""
+            SELECT id, candidate_id, outcome, note, created_at
+            FROM selection_preference_feedback
+            {where}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+        """
+    params.append(limit)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(sql, tuple(params)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def selection_preference_feedback_status(db_path: str | Path) -> dict[str, object]:
+    """Summarize current feedback labels without creating a selection model."""
+
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        event_count = int(
+            conn.execute("SELECT COUNT(*) FROM selection_preference_feedback").fetchone()[0]
+        )
+        rows = conn.execute(
+            """
+            SELECT outcome
+            FROM (
+              SELECT outcome,
+                ROW_NUMBER() OVER (
+                  PARTITION BY candidate_id
+                  ORDER BY created_at DESC, id DESC
+                ) AS feedback_rank
+              FROM selection_preference_feedback
+            )
+            WHERE feedback_rank = 1
+            """
+        ).fetchall()
+    counts = {outcome: 0 for outcome in sorted(ALLOWED_SELECTION_PREFERENCE_OUTCOMES)}
+    for row in rows:
+        outcome = str(row[0])
+        if outcome in counts:
+            counts[outcome] += 1
+    candidate_count = len(rows)
+    positive_count = counts["keep"] + counts["source_pending"]
+    ready_for_evaluation = (
+        candidate_count >= 30
+        and positive_count >= 10
+        and counts["not_fit"] >= 10
+    )
+    return {
+        "event_count": event_count,
+        "labeled_candidate_count": candidate_count,
+        "current_outcomes": counts,
+        "state": "ready_for_evaluation" if ready_for_evaluation else "collecting_feedback",
+        "candidate_count": candidate_count,
+        "outcome_counts": counts,
+        "positive_count": positive_count,
+        "status": "ready_for_evaluation" if ready_for_evaluation else "collecting_feedback",
+        "ready_for_evaluation": ready_for_evaluation,
+    }
 
 
 def list_sent_alerts(
