@@ -494,7 +494,7 @@ body.kuro .reference-memory-panel { margin: 0 0 24px; padding: 22px; border: 1px
 body.kuro .reference-memory-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 body.kuro .reference-memory-head h3 { margin: 4px 0 6px; font-size: 20px; }
 body.kuro .reference-memory-head p { margin: 0; max-width: 740px; color: var(--kuro-muted); font-size: 13px; line-height: 1.7; }
-body.kuro .reference-memory-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 18px 0 14px; }
+body.kuro .reference-memory-metrics { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin: 18px 0 14px; }
 body.kuro .reference-memory-metrics > div { padding: 13px 15px; border: 1px solid var(--kuro-line); border-radius: 15px; background: rgba(255, 255, 255, 0.72); }
 body.kuro .reference-memory-metrics small { display: block; color: var(--kuro-muted); font-size: 12px; margin-bottom: 3px; }
 body.kuro .reference-memory-metrics strong { font-size: 22px; }
@@ -502,6 +502,11 @@ body.kuro .reference-observations { display: grid; grid-template-columns: repeat
 body.kuro .reference-observation { display: flex; align-items: flex-start; gap: 9px; padding: 12px; border: 1px solid rgba(219, 230, 246, 0.8); border-radius: 14px; background: rgba(255, 255, 255, 0.56); min-width: 0; }
 body.kuro .reference-observation b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 body.kuro .reference-observation p { margin: 5px 0 0; color: var(--kuro-muted); font-size: 12px; }
+body.kuro .reference-profiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0 0; }
+body.kuro .reference-profile { padding: 12px; border: 1px solid rgba(219, 230, 246, 0.8); border-radius: 14px; background: rgba(255, 255, 255, 0.56); min-width: 0; }
+body.kuro .reference-profile b, body.kuro .reference-profile p { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.kuro .reference-profile b { font-size: 13px; }
+body.kuro .reference-profile p { margin: 5px 0 0; color: var(--kuro-muted); font-size: 12px; }
 
 body.kuro .rank-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
 body.kuro .ranking-table-wrap { overflow-x: auto; }
@@ -561,8 +566,11 @@ body.kuro .setting-line { color: var(--kuro-muted); font-size: 13px; line-height
 body.kuro .doctor-pre { background: #0e1530; color: #cfe1ff; padding: 18px; border-radius: 14px; font-size: 12px; line-height: 1.6; overflow-x: auto; max-height: 360px; }
 
 @media (max-width: 900px) {
-  body.kuro .reference-memory-metrics { grid-template-columns: repeat(2, 1fr); }
+  body.kuro .reference-memory-metrics, body.kuro .reference-profiles { grid-template-columns: repeat(2, 1fr); }
   body.kuro .reference-observations { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  body.kuro .reference-memory-metrics, body.kuro .reference-profiles { grid-template-columns: 1fr; }
 }
 
 /* Empty state */

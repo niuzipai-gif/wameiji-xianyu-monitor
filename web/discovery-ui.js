@@ -14,6 +14,7 @@
     commands: [],
     referenceStatus: null,
     referenceObservations: [],
+    referenceProfiles: [],
     filter: "all",
     query: "",
     advancedFilter: null,
@@ -200,15 +201,30 @@
     return labels[state] || "待复核";
   }
 
+  function latestMarketLabel(coverage) {
+    const safeCoverage = coverage && typeof coverage === "object" ? coverage : {};
+    const states = safeCoverage.states && typeof safeCoverage.states === "object"
+      ? safeCoverage.states
+      : {};
+    const count = (value) => Math.max(0, Number(value) || 0);
+    const covered = count(safeCoverage.covered_product_count);
+    const found = count(states.found);
+    const unobserved = count(safeCoverage.unobserved_product_count);
+    return "覆盖 " + covered + " · 已找到 " + found + " · 待核验 " + unobserved;
+  }
+
   function renderReferenceMemory() {
     const status = view.referenceStatus;
     const stateElement = document.getElementById("referenceMemoryState");
     const observationsElement = document.getElementById("referenceObservationList");
+    const profilesElement = document.getElementById("referenceProfileList");
     if (!status) {
       setText("referenceProductCount", "--");
       setText("referenceSampleCount", "--");
       setText("referenceBarcodeCount", "--");
       setText("referenceObservationCount", "--");
+      setText("referenceXianyuLatest", "--");
+      setText("referenceWameijiLatest", "--");
       if (stateElement) {
         stateElement.className = "status idle";
         stateElement.textContent = "暂未读取";
@@ -216,19 +232,70 @@
       if (observationsElement) {
         observationsElement.innerHTML = '<div class="empty-state">参考库暂不可用；不影响当前机会流。</div>';
       }
+      if (profilesElement) {
+        profilesElement.innerHTML = '<div class="empty-state">身份与待核验信息暂不可用；不影响当前机会流。</div>';
+      }
       return;
     }
     setText("referenceProductCount", String(Number(status.product_count) || 0));
     setText("referenceSampleCount", String(Number(status.sample_count) || 0));
     setText("referenceBarcodeCount", String(Number(status.barcode_sample_count) || 0));
     setText("referenceObservationCount", String(Number(status.market_observation_count) || 0));
-    const states = status.market_observation_states || {};
-    const loginPending = Number(states.login_required) || 0;
+    const latestMarketCoverage = status.latest_market_coverage && typeof status.latest_market_coverage === "object"
+      ? status.latest_market_coverage
+      : {};
+    const xianyuCoverage = latestMarketCoverage.xianyu && typeof latestMarketCoverage.xianyu === "object"
+      ? latestMarketCoverage.xianyu
+      : {};
+    const wameijiCoverage = latestMarketCoverage.wameiji && typeof latestMarketCoverage.wameiji === "object"
+      ? latestMarketCoverage.wameiji
+      : {};
+    const xianyuStates = xianyuCoverage.states && typeof xianyuCoverage.states === "object"
+      ? xianyuCoverage.states
+      : {};
+    setText("referenceXianyuLatest", latestMarketLabel(xianyuCoverage));
+    setText("referenceWameijiLatest", latestMarketLabel(wameijiCoverage));
+    const loginPending = Number(xianyuStates.login_required) || 0;
     if (stateElement) {
       stateElement.className = "status " + (loginPending > 0 ? "warn" : "ok");
       stateElement.textContent = loginPending > 0
         ? "闲鱼待登录 " + loginPending + " 条"
         : "本地记忆已就绪";
+    }
+    if (profilesElement) {
+      const profiles = Array.isArray(view.referenceProfiles) ? view.referenceProfiles : [];
+      if (!profiles.length) {
+        profilesElement.innerHTML = '<div class="empty-state">尚无参考身份档案；导入样本不会自动联网或触发采购。</div>';
+      } else {
+        profilesElement.innerHTML = profiles.slice(0, 3).map((item) => {
+          const profile = item && typeof item === "object" ? item : {};
+          const identity = profile.stable_key || profile.barcode || "未记录身份";
+          const sampleCount = Math.max(0, Number(profile.sample_count) || 0);
+          const catalogNumbers = Array.isArray(profile.catalog_numbers) ? profile.catalog_numbers : [];
+          const catalogText = catalogNumbers.length
+            ? " · 品番：" + catalogNumbers.map((value) => String(value)).join("、")
+            : "";
+          const markets = profile.markets && typeof profile.markets === "object" ? profile.markets : {};
+          const xianyuState = markets.xianyu && typeof markets.xianyu === "object"
+            ? markets.xianyu.observation_state
+            : "";
+          const wameijiState = markets.wameiji && typeof markets.wameiji === "object"
+            ? markets.wameiji.observation_state
+            : "";
+          const missingEvidence = Array.isArray(profile.missing_evidence) ? profile.missing_evidence : [];
+          const missingText = missingEvidence.length
+            ? missingEvidence.map((value) => String(value)).join("、")
+            : "无";
+          return [
+            '<article class="reference-profile">',
+              '<b>身份：' + esc(identity) + "</b>",
+              '<p>样本：' + esc(sampleCount) + esc(catalogText) + "</p>",
+              '<p>当前市场：闲鱼 ' + esc(referenceStateLabel(xianyuState)) + " · 挖煤姬 " + esc(referenceStateLabel(wameijiState)) + "</p>",
+              '<p>仍待确认：' + esc(missingText) + "</p>",
+            "</article>",
+          ].join("");
+        }).join("");
+      }
     }
     if (!observationsElement) return;
     const items = Array.isArray(view.referenceObservations) ? view.referenceObservations : [];
@@ -503,16 +570,20 @@
     if (view.refreshing) return;
     view.refreshing = true;
     try {
-      const [board, commandPayload, referenceStatus, referenceObservationPayload] = await Promise.all([
+      const [board, commandPayload, referenceStatus, referenceObservationPayload, referenceProfilePayload] = await Promise.all([
         apiGet("/api/discovery/board"),
         apiGet("/api/discovery/commands"),
         apiGet("/api/reference-memory/status").catch(() => null),
         apiGet("/api/reference-memory/observations?limit=3").catch(() => null),
+        apiGet("/api/reference-memory/profiles?limit=3").catch(() => null),
       ]);
       view.board = board || { summary: {}, pools: [], opportunities: [] };
       view.commands = (commandPayload && commandPayload.items) || [];
       view.referenceStatus = referenceStatus;
       view.referenceObservations = (referenceObservationPayload && referenceObservationPayload.items) || [];
+      view.referenceProfiles = referenceProfilePayload && Array.isArray(referenceProfilePayload.items)
+        ? referenceProfilePayload.items
+        : [];
       if (window.state) {
         window.state.opportunities = (view.board.opportunities || []).map(toLegacyOpportunity);
         window.state.totalOpportunities = window.state.opportunities.length;
