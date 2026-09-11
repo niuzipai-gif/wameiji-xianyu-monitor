@@ -41,6 +41,12 @@ def _compact(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _profile_article_template(profile_renderer: str) -> str:
+    start = profile_renderer.index("return [")
+    end = profile_renderer.index('].join("");', start) + len('].join("");')
+    return profile_renderer[start:end]
+
+
 def _assert_reference_panel_contract(html: str, script: str, styles: str) -> None:
     assert 'id="referenceXianyuLatest"' in html
     assert 'id="referenceWameijiLatest"' in html
@@ -55,6 +61,7 @@ def _assert_reference_panel_contract(html: str, script: str, styles: str) -> Non
     ) in _compact(refresh_board)
 
     reference_memory = _function_block(script, "renderReferenceMemory")
+    assert "market_observation_states" not in reference_memory
     null_status = _brace_block(reference_memory, reference_memory.index("if (!status) {"))
     assert 'setText("referenceXianyuLatest", "--");' in null_status
     assert 'setText("referenceWameijiLatest", "--");' in null_status
@@ -68,7 +75,6 @@ def _assert_reference_panel_contract(html: str, script: str, styles: str) -> Non
     assert "latestMarketCoverage.xianyu" in latest_coverage
     assert "latestMarketCoverage.wameiji" in latest_coverage
     assert "const loginPending = Number(xianyuStates.login_required) || 0;" in latest_coverage
-    assert "market_observation_states" not in latest_coverage
 
     profiles_start = reference_memory.index("if (profilesElement) {")
     profiles_end = reference_memory.index("if (!observationsElement) return;", profiles_start)
@@ -86,6 +92,21 @@ def _assert_reference_panel_contract(html: str, script: str, styles: str) -> Non
         "profile.missing_evidence",
     ):
         assert profile_field in profile_renderer
+    profile_article = _profile_article_template(profile_renderer)
+    expected_profile_article = _compact(
+        '''
+        return [
+          '<article class="reference-profile">',
+          '<b>身份：' + esc(identity) + "</b>",
+          '<p>样本：' + esc(sampleCount) + esc(catalogText) + "</p>",
+          '<p>当前市场：闲鱼 ' + esc(referenceStateLabel(xianyuState)) + " · 挖煤姬 " + esc(referenceStateLabel(wameijiState)) + "</p>",
+          '<p>仍待确认：' + esc(missingText) + "</p>",
+          "</article>",
+        ].join("");
+        '''
+    )
+    assert _compact(profile_article) == expected_profile_article
+    assert "profile." not in profile_article
     for escaped_value in (
         "esc(identity)",
         "esc(sampleCount)",
@@ -95,17 +116,23 @@ def _assert_reference_panel_contract(html: str, script: str, styles: str) -> Non
         "esc(missingText)",
     ):
         assert escaped_value in profile_renderer
-    assert not re.search(r"<a(?:\s|>)", profile_renderer)
+    assert not re.search(r"<a(?:\s|>)", profile_article)
     for forbidden_value in (
-        "item.price",
+        "profile.price",
+        "<button",
+        "data-action",
+        "onclick",
+        "href",
         "source_url",
         "safeHttpUrl",
         ".href",
         "window.open",
+        "location.",
         "买入",
         "购买",
         "拒绝",
         "淘汰",
+        "推荐购买",
     ):
         assert forbidden_value not in profile_renderer
 
