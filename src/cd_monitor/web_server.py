@@ -542,7 +542,7 @@ def _build_handler(
                 raw_limit = _query_param(urlparse(self.path).query, "limit")
                 if raw_limit is None:
                     reference_limit = 100
-                elif re.fullmatch(r"[0-9]+", raw_limit) is None:
+                elif re.fullmatch(r"[0-9]{1,3}", raw_limit) is None:
                     self._json({"error": "invalid_limit"}, status=HTTPStatus.BAD_REQUEST)
                     return
                 else:

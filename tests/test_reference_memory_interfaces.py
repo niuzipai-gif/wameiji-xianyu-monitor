@@ -177,7 +177,7 @@ def test_reference_memory_profiles_api_exposes_evidence_and_latest_market_state(
 
 @pytest.mark.parametrize(
     "raw_limit",
-    ["", "abc", "1.5", "+1", "-1", "1_0", "0", "201"],
+    ["", "abc", "1.5", "+1", "-1", "1_0", "0", "201", "9" * 5000],
 )
 def test_reference_memory_profiles_api_rejects_invalid_limit_spellings(
     tmp_path: Path, raw_limit: str
