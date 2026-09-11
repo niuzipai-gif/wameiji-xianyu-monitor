@@ -171,7 +171,7 @@ def fetch_xianyu_index(db_path: str) -> dict:
         rows = conn.execute(
             "SELECT id, catalog_no, title, price, url, image_url, raw_text, "
             "cover_text, image_phash, jan, fetched_at "
-            "FROM market_items WHERE source='xianyu' ORDER BY fetched_at DESC"
+            "FROM market_items WHERE source='xianyu' ORDER BY fetched_at DESC, id ASC"
         ).fetchall()
         for r in rows:
             index[r["catalog_no"]].append({
@@ -195,7 +195,7 @@ def fetch_xianyu_samples_for_catalog(db_path: str, catalog_no: str, limit: int =
         rows = conn.execute(
             "SELECT id, title, price, url, image_url, image_phash, image_dhash, cover_text, raw_text, fetched_at "
             "FROM market_items WHERE source='xianyu' AND catalog_no=? "
-            "ORDER BY fetched_at DESC LIMIT ?",
+            "ORDER BY fetched_at DESC, id ASC LIMIT ?",
             (catalog_no, limit),
         ).fetchall()
     samples = []
