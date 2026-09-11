@@ -76,11 +76,25 @@ def test_label_words_and_short_ocr_fragments_do_not_make_a_fallback_match() -> N
         product_id=11,
         stable_key="sample:ocr-noise",
         barcode=None,
-        tokens=frozenset({"universal", "music", "city", "for", "ch", "mw", "yoasobi"}),
+        tokens=frozenset(
+            {
+                "universal",
+                "music",
+                "city",
+                "for",
+                "ch",
+                "mw",
+                "live",
+                "ray",
+                "all",
+                "best",
+                "yoasobi",
+            }
+        ),
     )
 
     result = score_candidate_against_product(
-        build_candidate_evidence(title="Universal Music City For CH MW"), product
+        build_candidate_evidence(title="Universal Music City For CH MW Live Ray All Best"), product
     )
 
     assert result.product_id is None
