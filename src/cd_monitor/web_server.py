@@ -83,6 +83,11 @@ from cd_monitor.services.watch_action_service import WatchActionService
 
 from cd_monitor.services.live_scan import record_live_scan_status, scan_live_status
 from cd_monitor.services.notify_dispatcher import notify_opportunities
+from cd_monitor.services.reference_memory import (
+    list_reference_candidate_matches,
+    list_reference_market_observations,
+    reference_memory_status,
+)
 from cd_monitor.services.scan import scan_once_mock
 from cd_monitor.sources.wameiji_browser import WameijiBrowserAdapter
 from cd_monitor.sources.xianyu_browser import XianyuBrowserAdapter
@@ -528,6 +533,35 @@ def _build_handler(
                 return
             if route == "/api/summary":
                 self._json(_summary(db_path))
+                return
+            if route == "/api/reference-memory/status":
+                self._json(reference_memory_status(db_path))
+                return
+            if route == "/api/reference-memory/matches":
+                raw_limit = _query_param(urlparse(self.path).query, "limit")
+                try:
+                    reference_limit = int(raw_limit) if raw_limit is not None else 100
+                    items = list_reference_candidate_matches(db_path, limit=reference_limit)
+                except (TypeError, ValueError):
+                    self._json(
+                        {"error": "invalid_limit"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                self._json({"items": items})
+                return
+            if route == "/api/reference-memory/observations":
+                raw_limit = _query_param(urlparse(self.path).query, "limit")
+                try:
+                    reference_limit = int(raw_limit) if raw_limit is not None else 100
+                    items = list_reference_market_observations(db_path, limit=reference_limit)
+                except (TypeError, ValueError):
+                    self._json(
+                        {"error": "invalid_limit"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                self._json({"items": items})
                 return
             if route == "/api/discovery/board":
                 self._json(

@@ -905,6 +905,91 @@ def _migrate_unverified_discovery_queue_epoch(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_reference_product_memory(conn: sqlite3.Connection) -> None:
+    """Persist approved product references without storing a price label.
+
+    The tables are deliberately separate from market observations and discovery
+    eligibility. An unlinked or unmatched positive reference must never alter
+    a candidate's normal detail-first collection state.
+    """
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS reference_products (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          stable_key TEXT NOT NULL UNIQUE,
+          barcode TEXT UNIQUE,
+          tokens_json TEXT NOT NULL,
+          sample_count INTEGER NOT NULL DEFAULT 0 CHECK(sample_count >= 0),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS reference_product_samples (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          checksum_sha256 TEXT NOT NULL UNIQUE,
+          product_id INTEGER NOT NULL,
+          source_path TEXT NOT NULL,
+          barcode TEXT,
+          extracted_text TEXT NOT NULL DEFAULT '',
+          tokens_json TEXT NOT NULL,
+          extraction_state TEXT NOT NULL,
+          ocr_languages_json TEXT NOT NULL DEFAULT '[]',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(product_id) REFERENCES reference_products(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS reference_candidate_matches (
+          candidate_id INTEGER PRIMARY KEY,
+          reference_product_id INTEGER,
+          score REAL NOT NULL CHECK(score >= 0.0 AND score <= 1.0),
+          match_kind TEXT NOT NULL,
+          evidence_json TEXT NOT NULL,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(candidate_id) REFERENCES discovery_candidates(id),
+          FOREIGN KEY(reference_product_id) REFERENCES reference_products(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_reference_product_samples_product
+          ON reference_product_samples(product_id, id);
+        CREATE INDEX IF NOT EXISTS idx_reference_candidate_matches_product
+          ON reference_candidate_matches(reference_product_id, updated_at DESC);
+        """
+    )
+
+
+def _migrate_reference_market_observations(conn: sqlite3.Connection) -> None:
+    """Store time-bounded market observations outside product identity labels."""
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS reference_market_observations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          reference_product_id INTEGER NOT NULL,
+          market TEXT NOT NULL CHECK(market IN ('xianyu', 'wameiji')),
+          observation_state TEXT NOT NULL CHECK(observation_state IN (
+            'found', 'price_unfavorable', 'not_currently_listed',
+            'login_required', 'blocked'
+          )),
+          observed_at TEXT NOT NULL,
+          observed_title TEXT,
+          version_evidence TEXT,
+          catalog_no TEXT,
+          barcode TEXT,
+          price REAL,
+          currency TEXT,
+          source_url TEXT,
+          note TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(reference_product_id) REFERENCES reference_products(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_reference_market_observations_product_time
+          ON reference_market_observations(reference_product_id, market, observed_at DESC, id DESC);
+        """
+    )
+
+
 def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -929,6 +1014,8 @@ def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
             _migrate_duplicate_source_url_candidates(conn)
             _migrate_unverified_discovery_queue_epoch(conn)
             _migrate_title_only_xianyu_rechecks(conn)
+            _migrate_reference_product_memory(conn)
+            _migrate_reference_market_observations(conn)
     finally:
         conn.close()
 

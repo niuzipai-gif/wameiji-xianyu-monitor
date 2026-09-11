@@ -6,7 +6,8 @@ exercise the full candidate, matching and profit flow without network access.
 """
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+import sqlite3
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field, replace
 from math import isfinite
 from pathlib import Path
@@ -26,6 +27,7 @@ from cd_monitor.core.title_query import (
     source_edition_required_terms,
 )
 from cd_monitor.core.xianyu_cleaner import estimate_xianyu_price
+from cd_monitor.services.reference_memory import refresh_discovery_candidate_reference_match
 from cd_monitor.sources.wikidata_aliases import ResolvedTitleAlias
 from cd_monitor.storage.sqlite import (
     get_discovery_pool,
@@ -364,9 +366,10 @@ async def scan_discovery_keyword(
             discovered_count=discovered_count,
             candidate_count=candidate_count,
         )
-    upsert_discovery_candidates_with_previous(
+    search_persisted = upsert_discovery_candidates_with_previous(
         db_path, [candidate for _, candidate in candidate_items]
     )
+    _refresh_reference_matches(db_path, (candidate_id for _, candidate_id in search_persisted))
 
     # A search page only adds durable source links. The bounded browser work
     # always drains the existing queue, so a new page cannot leapfrog older
@@ -449,6 +452,7 @@ async def scan_discovery_keyword(
                 db_path, [ignored_candidate]
             )
             _, ignored_candidate_id = ignored_persisted[0]
+            _refresh_reference_matches(db_path, (ignored_candidate_id,))
             record_discovery_candidate_detail_attempt(
                 db_path,
                 ignored_candidate_id,
@@ -459,6 +463,7 @@ async def scan_discovery_keyword(
             continue
         detail_persisted = upsert_discovery_candidates_with_previous(db_path, [candidate])
         _, candidate_id = detail_persisted[0]
+        _refresh_reference_matches(db_path, (candidate_id,))
         record_discovery_candidate_detail_attempt(
             db_path,
             candidate_id,
@@ -1060,6 +1065,7 @@ def _candidate_from_market_item(
     catalog_no = _first_plausible_catalog_no(item.catalog_no) or _first_plausible_catalog_no(
         item.title
     )
+
     jan = _first_japanese_jan(item.jan) or _first_japanese_jan(item.title)
     return DiscoveryCandidate(
         pool_id=pool_id,
@@ -1083,6 +1089,21 @@ def _candidate_from_market_item(
         raw_text=item.raw_text,
         detail_verified=item.detail_verified,
     )
+
+
+def _refresh_reference_matches(db_path: str | Path, candidate_ids: Iterable[int]) -> None:
+    """Attach local positive-reference evidence without changing discovery flow.
+
+    A malformed optional reference record must not block the separate source
+    detail queue. The caller can still inspect the candidate and retry the
+    local reference refresh after that record is repaired.
+    """
+
+    for candidate_id in candidate_ids:
+        try:
+            refresh_discovery_candidate_reference_match(db_path, candidate_id)
+        except (sqlite3.Error, TypeError, ValueError):
+            continue
 
 
 def _market_item_from_candidate(candidate: DiscoveryCandidate) -> MarketItem:

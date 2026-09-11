@@ -31,6 +31,13 @@ from cd_monitor.services.doctor import run_doctor
 from cd_monitor.services.live_capture_scan import capture_and_evaluate_live_html
 from cd_monitor.services.live_browser_capture import capture_search_html
 from cd_monitor.services.live_scan import record_live_scan_status, scan_live_status
+from cd_monitor.services.reference_memory import (
+    LocalReferenceSampleExtractor,
+    import_reference_samples,
+    list_reference_research_queue,
+    record_reference_market_observation,
+    reference_memory_status,
+)
 from cd_monitor.services.scan import scan_once_mock
 from cd_monitor.services.discovery_worker import (
     DiscoveryWorker,
@@ -112,6 +119,53 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     init = sub.add_parser("init-db")
     init.add_argument("--db", dest="command_db", default=None)
+    reference_import = sub.add_parser(
+        "reference-import",
+        help="Import approved local product-reference screenshots without network access",
+    )
+    reference_import.add_argument("--db", dest="command_db", required=True)
+    reference_import.add_argument("--folder", required=True)
+    reference_import.add_argument("--output", default=None)
+    reference_import.add_argument("--tessdata-dir", default=None)
+    reference_import.add_argument("--refresh-existing", action="store_true")
+    reference_status = sub.add_parser(
+        "reference-status",
+        help="Show local reference-memory coverage without opening a browser",
+    )
+    reference_status.add_argument("--db", dest="command_db", required=True)
+    reference_queue = sub.add_parser(
+        "reference-research-queue",
+        help="List local identity clues for a separately authorized research pass",
+    )
+    reference_queue.add_argument("--db", dest="command_db", required=True)
+    reference_queue.add_argument("--limit", type=int, default=200)
+    reference_market_record = sub.add_parser(
+        "reference-market-record",
+        help="Record one timestamped Xianyu or Wameiji market observation",
+    )
+    reference_market_record.add_argument("--db", dest="command_db", required=True)
+    reference_market_record.add_argument("--product-id", type=int, required=True)
+    reference_market_record.add_argument("--market", choices=["xianyu", "wameiji"], required=True)
+    reference_market_record.add_argument(
+        "--state",
+        choices=[
+            "found",
+            "price_unfavorable",
+            "not_currently_listed",
+            "login_required",
+            "blocked",
+        ],
+        required=True,
+    )
+    reference_market_record.add_argument("--observed-title", default=None)
+    reference_market_record.add_argument("--version-evidence", default=None)
+    reference_market_record.add_argument("--catalog-no", default=None)
+    reference_market_record.add_argument("--barcode", default=None)
+    reference_market_record.add_argument("--price", type=float, default=None)
+    reference_market_record.add_argument("--currency", default=None)
+    reference_market_record.add_argument("--source-url", default=None)
+    reference_market_record.add_argument("--note", default=None)
+    reference_market_record.add_argument("--observed-at", default=None)
     add = sub.add_parser("add-watch")
     add.add_argument("--db", dest="command_db", default=None)
     add.add_argument("--catalog-no", required=True)
@@ -331,6 +385,51 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "init-db":
         init_db(db_path)
         print(f"initialized {db_path}")
+        return 0
+    if args.command == "reference-import":
+        tessdata_dir = Path(args.tessdata_dir) if args.tessdata_dir else None
+        report = import_reference_samples(
+            db_path,
+            args.folder,
+            extractor=LocalReferenceSampleExtractor(tessdata_dir=tessdata_dir),
+            refresh_existing=args.refresh_existing,
+        )
+        payload = report.to_dict()
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "reference-status":
+        print(json.dumps(reference_memory_status(db_path), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "reference-research-queue":
+        print(
+            json.dumps(
+                {"items": list_reference_research_queue(db_path, limit=args.limit)},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.command == "reference-market-record":
+        observation = record_reference_market_observation(
+            db_path,
+            product_id=args.product_id,
+            market=args.market,
+            observation_state=args.state,
+            observed_title=args.observed_title,
+            version_evidence=args.version_evidence,
+            catalog_no=args.catalog_no,
+            barcode=args.barcode,
+            price=args.price,
+            currency=args.currency,
+            source_url=args.source_url,
+            note=args.note,
+            observed_at=args.observed_at,
+        )
+        print(json.dumps(observation, ensure_ascii=False, indent=2))
         return 0
     if args.command == "add-watch":
         watch_id = add_watch(
