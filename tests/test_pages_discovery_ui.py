@@ -48,6 +48,7 @@ def test_selectable_candidate_pool_uses_compact_cards_not_opportunity_columns() 
 
 def test_live_kpis_do_not_show_an_empty_snapshot_when_the_live_board_has_results() -> None:
     script = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    stylesheet = Path("web/styles/kuro.css").read_text(encoding="utf-8")
     start = script.index("function renderKpis")
     end = script.index("function referenceStateLabel", start)
     renderer = script[start:end]
@@ -56,6 +57,7 @@ def test_live_kpis_do_not_show_an_empty_snapshot_when_the_live_board_has_results
     assert "if (dualSummary && hasEvaluatedDualSummary)" in renderer
     assert 'profitFunnel.hidden = false;' in renderer
     assert 'profitFunnel.hidden = true;' in renderer
+    assert "body.kuro .profit-funnel[hidden] { display: none; }" in stylesheet
 
 
 def test_home_feed_promotes_verified_positive_candidates_when_live_comparisons_are_empty() -> None:

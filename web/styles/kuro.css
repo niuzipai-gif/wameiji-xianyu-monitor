@@ -873,6 +873,7 @@ body.kuro .profit-funnel {
   background: rgba(255, 255, 255, .68);
   box-shadow: 0 12px 28px rgba(79, 104, 164, .08);
 }
+body.kuro .profit-funnel[hidden] { display: none; }
 body.kuro .profit-funnel > div {
   display: flex;
   align-items: center;
