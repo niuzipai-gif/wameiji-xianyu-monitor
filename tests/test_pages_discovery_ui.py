@@ -10,16 +10,17 @@ from pathlib import Path
 from PIL import Image
 
 
-def test_strict_dual_market_feed_keeps_the_nonprice_research_queue() -> None:
+def test_strict_dual_market_feed_keeps_the_nonprice_selectable_pool() -> None:
     script = Path("web/discovery-ui.js").read_text(encoding="utf-8")
-    research_start = script.index("function appendResearchCandidateQueue")
-    research_end = script.index("function opportunityCard", research_start)
-    research_renderer = script[research_start:research_end]
+    pool_start = script.index("function appendSelectableCandidatePool")
+    pool_end = script.index("function opportunityCard", pool_start)
+    pool_renderer = script[pool_start:pool_end]
 
-    assert "function appendResearchCandidateQueue" in script
-    assert "appendResearchCandidateQueue(target)" in script
-    assert "source_price" not in research_renderer
-    assert "expected_profit" not in research_renderer
+    assert "function appendSelectableCandidatePool" in script
+    assert "appendSelectableCandidatePool(target)" in script
+    assert "暂缺价格不降级" in pool_renderer
+    assert "candidate.source_price" not in pool_renderer
+    assert "candidate.expected_profit" not in pool_renderer
 
 
 def test_pages_build_includes_the_automatic_selection_board(tmp_path: Path) -> None:
@@ -55,10 +56,11 @@ def test_pages_build_includes_the_automatic_selection_board(tmp_path: Path) -> N
     assert 'sideMarkup("market"' in script
     assert "comparison-rail" in script
     assert "capture_state" in script
-    assert "research_candidates" in script
-    assert "待深研候选 · 不含报价" in script
-    assert "researchCandidateCard" in script
-    assert "researchStageLabel" in script
+    assert "selectable_candidates" in script
+    assert "可选品池 · 等待利润核验" in script
+    assert "selectableCandidateCard" in script
+    assert "profitReadinessLabel" in script
+    assert "暂缺价格不降级" in script
     assert "candidate.source_price" not in script
     assert "candidate.source_currency" not in script
     assert "candidate.expected_profit" not in script

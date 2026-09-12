@@ -63,7 +63,7 @@
           <div class="hero-copy">
             <div class="eyebrow">Selection board · evidence-first</div>
             <h2>选品广场 · CD 与 GalGame 实体</h2>
-            <p class="lead">优先展示已核验的商品机会：左侧闲鱼以淡黄色显示搜索挂牌价样本，右侧挖煤姬以淡粉白显示详情已核验进货价；只计算“挖煤姬进货 → 闲鱼国内销售”的到手净利，净利率至少 25%。正样本、登录与采集状态在信息流之后按需展开。</p>
+            <p class="lead">优先展示已核验的商品机会：左侧闲鱼以淡黄色显示搜索挂牌价样本，右侧挖煤姬以淡粉白显示详情已核验进货价；只计算“挖煤姬进货 → 闲鱼国内销售”的到手净利，净利润为正即可进入机会流。全部候选保留在下方可选品池，暂缺价格不降级。</p>
             <div class="stats">
               <div class="stat"><small>达标机会</small><strong id="kpiToday">--</strong></div>
               <div class="stat"><small>闲鱼预计净利</small><strong id="kpiProfit">--</strong></div>
@@ -75,7 +75,7 @@
         <div class="section-head">
           <div>
             <h3>首页机会流 · 图片优先信息流</h3>
-            <p>一行两条机会；每条卡内左侧闲鱼、中间净利与成本、右侧挖煤姬，只保留净利率至少 25% 的同款机会。</p>
+            <p>一行两条机会；每条卡内左侧闲鱼、中间净利与成本、右侧挖煤姬，只保留净利润为正的同款机会。</p>
           </div>
           <div class="filters">
             <button class="pill active" data-discovery-filter="all">全部机会</button>
@@ -90,11 +90,11 @@
           <span aria-hidden="true">→</span>
           <div><small>成本待补</small><strong id="funnelCostPending">--</strong></div>
           <span aria-hidden="true">→</span>
-          <div><small>低于 25%</small><strong id="funnelBelowMargin">--</strong></div>
+          <div><small>未形成正利润</small><strong id="funnelBelowMargin">--</strong></div>
           <span aria-hidden="true">→</span>
           <div class="eligible"><small>达标机会</small><strong id="funnelEligible">--</strong></div>
         </div>
-        <div class="feed" id="homeFeed" data-empty="当前没有成本证据完整且净利率至少 25% 的同款机会；采集保持暂停。">
+        <div class="feed" id="homeFeed" data-empty="当前没有成本证据完整且净利润为正的同款机会；可选品池仍会保留全部候选。">
           <div class="empty-state">正在加载机会数据…</div>
         </div>
         <details class="secondary-evidence">

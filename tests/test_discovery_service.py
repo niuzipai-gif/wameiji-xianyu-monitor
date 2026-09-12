@@ -2321,7 +2321,7 @@ def test_security_check_cools_down_xianyu_but_still_verifies_wameiji_details(
         ).fetchone()[0] == 2
 
 
-def test_pool_profit_threshold_filters_existing_evaluations_without_a_new_source_lookup(
+def test_positive_profit_remains_visible_when_legacy_pool_threshold_is_higher(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "selection.db"
@@ -2362,6 +2362,4 @@ def test_pool_profit_threshold_filters_existing_evaluations_without_a_new_source
     )
 
     assert result.evaluated_count == 1
-    assert list_discovery_opportunities(db_path) == []
-    update_discovery_pool(db_path, pool_id, {"min_profit_cny": 0})
     assert len(list_discovery_opportunities(db_path)) == 1

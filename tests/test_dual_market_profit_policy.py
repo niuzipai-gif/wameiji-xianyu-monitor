@@ -82,5 +82,6 @@ def test_strict_policy_uses_confirmed_costs_and_uncapped_seller_fee() -> None:
     assert config.sales_fee_rate == pytest.approx(0.016)
     assert config.sales_fee_cap_cny is None
     assert config.sales_fee_uncapped is True
-    assert config.minimum_net_margin == pytest.approx(0.25)
+    assert config.minimum_net_margin == pytest.approx(0)
+    assert config.policy_version == "wameiji-xianyu-net-v2"
     assert config.policy_version == STRICT_PROFIT_POLICY_VERSION

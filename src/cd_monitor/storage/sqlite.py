@@ -2831,9 +2831,7 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
               AND NULLIF(TRIM(xs.image_url), '') IS NOT NULL
               AND datetime(c.detail_verified_at) >= datetime(CURRENT_TIMESTAMP, ?)
               AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
-              AND o.decision != 'reject'
-              AND o.expected_profit >= p.min_profit_cny
-              AND o.net_margin >= p.min_margin
+              AND o.expected_profit > 0
               AND o.match_confidence >= p.min_match_confidence
               AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
             ORDER BY o.expected_profit DESC, o.match_confidence DESC,
@@ -2854,10 +2852,15 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
     ]
 
 
-def list_discovery_research_candidates(
-    db_path: str | Path, limit: int = 12
+def list_discovery_selectable_candidates(
+    db_path: str | Path, limit: int = 500
 ) -> list[dict[str, object]]:
-    """Return active candidates needing research without price evidence."""
+    """Return every active candidate without exposing price or profit values.
+
+    Reference candidates are a user-approved selectable whitelist. Evidence
+    freshness decides only which proof to collect next; it never removes a
+    candidate from this projection or labels it as rejected.
+    """
     init_db(db_path)
     source_freshness_window = f"-{_DISCOVERY_SOURCE_DETAIL_FRESHNESS_MINUTES} minutes"
     resale_freshness_window = f"-{_DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES} minutes"
@@ -2866,40 +2869,75 @@ def list_discovery_research_candidates(
         rows = conn.execute(
             """
             SELECT candidate_id, candidate_title, media_type, catalog_no, jan,
-                   source_url, image_url, detail_verified, research_stage
+                   source_url, image_url, detail_verified, research_stage,
+                   profit_readiness
             FROM (
               SELECT
-                id AS candidate_id,
-                title AS candidate_title,
-                media_type,
-                catalog_no,
-                jan,
-                source_url,
-                source_image_url AS image_url,
-                detail_verified,
+                c.id AS candidate_id,
+                c.title AS candidate_title,
+                c.media_type,
+                c.catalog_no,
+                c.jan,
+                c.source_url,
+                c.source_image_url AS image_url,
+                c.detail_verified,
                 CASE
-                  WHEN detail_verified = 0 THEN 'source_detail_needed'
-                  WHEN detail_verified_at IS NULL
-                    OR datetime(detail_verified_at) < datetime(CURRENT_TIMESTAMP, ?)
+                  WHEN c.detail_verified = 0 OR COALESCE(c.source_price, 0) <= 0
+                    THEN 'source_detail_needed'
+                  WHEN c.detail_verified_at IS NULL
+                    OR datetime(c.detail_verified_at) < datetime(CURRENT_TIMESTAMP, ?)
                     THEN 'source_detail_refresh_needed'
-                  WHEN last_xianyu_checked_at IS NULL
-                    OR datetime(last_xianyu_checked_at) < datetime(CURRENT_TIMESTAMP, ?)
+                  WHEN c.last_xianyu_checked_at IS NULL
+                    OR datetime(c.last_xianyu_checked_at) < datetime(CURRENT_TIMESTAMP, ?)
                     THEN 'resale_evidence_needed'
                   ELSE 'comparison_follow_up'
                 END AS research_stage,
                 CASE
-                  WHEN detail_verified = 0 THEN 0
-                  WHEN detail_verified_at IS NULL
-                    OR datetime(detail_verified_at) < datetime(CURRENT_TIMESTAMP, ?) THEN 1
-                  WHEN last_xianyu_checked_at IS NULL
-                    OR datetime(last_xianyu_checked_at) < datetime(CURRENT_TIMESTAMP, ?) THEN 2
-                  ELSE 3
-                END AS research_stage_rank,
-                first_seen_at
-              FROM discovery_candidates
-              WHERE status = 'active'
+                  WHEN c.detail_verified = 0 OR COALESCE(c.source_price, 0) <= 0
+                    THEN 'source_price_needed'
+                  WHEN c.detail_verified_at IS NULL
+                    OR datetime(c.detail_verified_at) < datetime(CURRENT_TIMESTAMP, ?)
+                    OR (
+                      o.id IS NOT NULL
+                      AND (
+                        o.last_seen_at IS NULL
+                        OR datetime(o.last_seen_at) < datetime(CURRENT_TIMESTAMP, ?)
+                      )
+                    )
+                    THEN 'refresh_needed'
+                  WHEN c.last_xianyu_checked_at IS NULL
+                    OR datetime(c.last_xianyu_checked_at) < datetime(CURRENT_TIMESTAMP, ?)
+                    THEN 'resale_price_needed'
+                  WHEN o.id IS NOT NULL
+                    AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
+                    AND o.expected_profit > 0
+                    AND o.match_confidence >= p.min_match_confidence
+                    AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples
+                    THEN 'profit_ready'
+                  ELSE 'profit_pending'
+                END AS profit_readiness,
+                CASE
+                  WHEN c.detail_verified = 0 OR COALESCE(c.source_price, 0) <= 0 THEN 1
+                  WHEN c.detail_verified_at IS NULL
+                    OR datetime(c.detail_verified_at) < datetime(CURRENT_TIMESTAMP, ?) THEN 2
+                  WHEN c.last_xianyu_checked_at IS NULL
+                    OR datetime(c.last_xianyu_checked_at) < datetime(CURRENT_TIMESTAMP, ?) THEN 3
+                  WHEN o.id IS NOT NULL
+                    AND datetime(o.last_seen_at) >= datetime(CURRENT_TIMESTAMP, ?)
+                    AND o.expected_profit > 0
+                    AND o.match_confidence >= p.min_match_confidence
+                    AND o.valid_xianyu_sample_count >= p.min_valid_xianyu_samples THEN 0
+                  ELSE 4
+                END AS readiness_rank,
+                c.first_seen_at
+              FROM discovery_candidates c
+              JOIN discovery_pools p ON p.id = c.pool_id
+              LEFT JOIN opportunities o
+                ON o.discovery_candidate_id = c.id
+                AND COALESCE(o.status, 'active') = 'active'
+              WHERE c.status = 'active'
             )
-            ORDER BY research_stage_rank ASC, datetime(first_seen_at) ASC, candidate_id ASC
+            ORDER BY readiness_rank ASC, datetime(first_seen_at) ASC, candidate_id ASC
             LIMIT ?
             """,
             (
@@ -2907,10 +2945,22 @@ def list_discovery_research_candidates(
                 resale_freshness_window,
                 source_freshness_window,
                 resale_freshness_window,
-                max(1, min(int(limit), 100)),
+                resale_freshness_window,
+                resale_freshness_window,
+                source_freshness_window,
+                resale_freshness_window,
+                resale_freshness_window,
+                max(1, min(int(limit), 10_000)),
             ),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def list_discovery_research_candidates(
+    db_path: str | Path, limit: int = 12
+) -> list[dict[str, object]]:
+    """Compatibility alias for callers that have not moved to the whitelist name."""
+    return list_discovery_selectable_candidates(db_path, limit=limit)
 
 
 def discovery_summary(db_path: str | Path) -> dict[str, object]:
@@ -2918,6 +2968,7 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
     freshness_window = f"-{_DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES} minutes"
     source_freshness_window = f"-{_DISCOVERY_SOURCE_DETAIL_FRESHNESS_MINUTES} minutes"
     visible_opportunities = list_discovery_opportunities(db_path, limit=10_000)
+    selectable_candidate_views = list_discovery_selectable_candidates(db_path, limit=10_000)
     active_opportunities = len(visible_opportunities)
     highest_profit = max(
         (float(opportunity["expected_profit"] or 0) for opportunity in visible_opportunities),
@@ -2931,6 +2982,12 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
             """
             SELECT COUNT(*) FROM discovery_candidates
             WHERE status = 'active' AND detail_verified = 1
+            """
+        ).fetchone()[0]
+        selectable_candidates = conn.execute(
+            """
+            SELECT COUNT(*) FROM discovery_candidates
+            WHERE status = 'active'
             """
         ).fetchone()[0]
         detail_pipeline = conn.execute(
@@ -2979,6 +3036,12 @@ def discovery_summary(db_path: str | Path) -> dict[str, object]:
             xianyu_login_checked_at = login_state_row[1]
     return {
         "active_candidates": int(active_candidates or 0),
+        "selectable_candidates": int(selectable_candidates or 0),
+        "profit_ready_candidates": sum(
+            1
+            for candidate in selectable_candidate_views
+            if candidate["profit_readiness"] == "profit_ready"
+        ),
         "fresh_source_details": int(detail_pipeline[0] or 0),
         "stale_source_details": int(detail_pipeline[1] or 0),
         "resale_ready_candidates": int(detail_pipeline[2] or 0),

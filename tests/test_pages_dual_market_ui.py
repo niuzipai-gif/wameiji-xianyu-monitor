@@ -191,7 +191,7 @@ def test_eligible_card_exposes_costs_match_evidence_and_recheck_warning() -> Non
     assert 'id="funnelCostPending"' in homepage
     assert 'id="funnelBelowMargin"' in homepage
     assert 'id="funnelEligible"' in homepage
-    assert "净利率至少 25%" in homepage
+    assert "净利润为正" in homepage
 
 
 def test_static_snapshot_status_is_explicit_about_freshness() -> None:

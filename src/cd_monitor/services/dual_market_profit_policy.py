@@ -10,7 +10,7 @@ from pathlib import Path
 from cd_monitor.core.dual_market import DualMarketCostConfig
 
 
-STRICT_PROFIT_POLICY_VERSION = "wameiji-xianyu-net-v1"
+STRICT_PROFIT_POLICY_VERSION = "wameiji-xianyu-net-v2"
 
 _IGNORED_TAGS = frozenset({"script", "style", "noscript", "svg", "template"})
 _ROW_LABELS = (
@@ -124,7 +124,7 @@ def strict_profit_cost_config(evidence: WameijiCostEvidence) -> DualMarketCostCo
         sales_fee_rate=0.016,
         sales_fee_cap_cny=None,
         sales_fee_uncapped=True,
-        minimum_net_margin=0.25,
+        minimum_net_margin=0.0,
         policy_version=STRICT_PROFIT_POLICY_VERSION,
     )
 

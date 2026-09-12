@@ -12,14 +12,19 @@ SNAPSHOT_URL = (
 )
 
 
-def valid_board(*, generated_at: str = "2099-09-09T00:30:00+08:00") -> dict[str, object]:
+def valid_board(
+    *,
+    generated_at: str = "2099-09-09T00:30:00+08:00",
+    policy_version: str = "wameiji-xianyu-net-v2",
+    minimum_net_margin: float = 0.0,
+) -> dict[str, object]:
     return {
         "schema_version": 2,
         "generated_at": generated_at,
         "strategy": {
-            "policy_version": "wameiji-xianyu-net-v1",
+            "policy_version": policy_version,
             "trade_direction": "wameiji_jpy_to_xianyu_cny",
-            "minimum_net_margin": 0.25,
+            "minimum_net_margin": minimum_net_margin,
         },
         "summary": {
             "evaluated_count": 1,
@@ -159,6 +164,29 @@ def test_loader_marks_an_old_snapshot_as_stale() -> None:
         """
 if (result.mode !== "verified_static_snapshot" || !result.stale) {
   throw new Error(JSON.stringify(result));
+}
+""",
+    )
+
+
+def test_loader_accepts_a_legacy_v1_snapshot_only_at_its_declared_threshold() -> None:
+    run_loader(
+        {
+            SNAPSHOT_URL: {
+                "ok": True,
+                "status": 200,
+                "body": valid_board(
+                    policy_version="wameiji-xianyu-net-v1",
+                    minimum_net_margin=0.25,
+                ),
+            },
+        },
+        """
+if (result.mode !== "verified_static_snapshot" || result.unavailable) {
+  throw new Error(JSON.stringify(result));
+}
+if (result.strategy.policy_version !== "wameiji-xianyu-net-v1") {
+  throw new Error(JSON.stringify(result.strategy));
 }
 """,
     )

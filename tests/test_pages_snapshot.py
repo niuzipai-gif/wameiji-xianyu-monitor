@@ -32,9 +32,9 @@ def verified_board() -> dict[str, object]:
         "generated_at": "2026-09-09T00:20:00+08:00",
         "display_exchange_rate_cny_per_jpy": 0.0455,
         "strategy": {
-            "policy_version": "wameiji-xianyu-net-v1",
+            "policy_version": "wameiji-xianyu-net-v2",
             "trade_direction": "wameiji_jpy_to_xianyu_cny",
-            "minimum_net_margin": 0.25,
+            "minimum_net_margin": 0.0,
             "margin_denominator": "xianyu_sale_price_cny",
         },
         "summary": {
@@ -83,8 +83,8 @@ def verified_board() -> dict[str, object]:
                     "net_margin": 0.40545454545454546,
                     "created_at": "2026-09-09T00:21:00+08:00",
                     "cost_breakdown": {
-                        "policy_version": "wameiji-xianyu-net-v1",
-                        "minimum_net_margin": 0.25,
+                        "policy_version": "wameiji-xianyu-net-v2",
+                        "minimum_net_margin": 0.0,
                         "missing_fields": [],
                         "xianyu_sale_cny": 121,
                         "xianyu_seller_fee_cny": 1.936,
@@ -156,7 +156,7 @@ def test_export_rewrites_both_images_and_writes_hash_manifest(tmp_path: Path) ->
     assert payload["mode"] == "verified_static_snapshot"
     assert payload["schema_version"] == 2
     assert payload["display_exchange_rate_cny_per_jpy"] == 0.0455
-    assert payload["strategy"]["policy_version"] == "wameiji-xianyu-net-v1"
+    assert payload["strategy"]["policy_version"] == "wameiji-xianyu-net-v2"
     assert payload["summary"] == verified_board()["summary"]
     assert payload["below_margin"] == []
     assert payload["cost_pending"] == []
@@ -274,9 +274,11 @@ def test_zero_eligible_board_publishes_an_honest_zero_state_without_assets(
     assert result.asset_paths == ()
 
 
-def test_export_rejects_a_card_below_the_declared_margin_threshold(tmp_path: Path) -> None:
+def test_export_rejects_a_card_without_positive_profit_even_when_v2_margin_is_zero(
+    tmp_path: Path,
+) -> None:
     board = verified_board()
-    board["eligible"][0]["calculation"]["net_margin"] = 0.249999
+    board["eligible"][0]["calculation"]["expected_profit_cny"] = 0
 
     with pytest.raises(SnapshotExportError, match="no publishable eligible comparisons"):
         export_pages_snapshot(

@@ -176,9 +176,9 @@ def test_dual_market_board_projects_only_eligible_cards_and_auditable_funnel(
     assert code == 200
     assert payload["display_exchange_rate_cny_per_jpy"] == 0.047
     assert payload["strategy"] == {
-        "policy_version": "wameiji-xianyu-net-v1",
+        "policy_version": "wameiji-xianyu-net-v2",
         "trade_direction": "wameiji_jpy_to_xianyu_cny",
-        "minimum_net_margin": 0.25,
+        "minimum_net_margin": 0.0,
         "margin_denominator": "xianyu_sale_price_cny",
     }
     assert payload["summary"] == {

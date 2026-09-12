@@ -515,25 +515,26 @@
     if (!Number.isSafeInteger(candidateId) || candidateId <= 0) return "";
     return [
       '<div class="selection-feedback-actions" data-selection-feedback-candidate="' + esc(candidateId) + '">',
-        '<span>产品方向：' + esc({ keep: "保留", source_pending: "供应待找", not_fit: "不符合" }[currentOutcome] || "未标注") + '</span>',
+        '<span>产品方向：' + esc({ keep: "保留", source_pending: "供应待找", not_fit: "手动排除" }[currentOutcome] || "未标注") + '</span>',
         '<button type="button" data-selection-feedback="keep" data-candidate-id="' + esc(candidateId) + '">保留</button>',
         '<button type="button" data-selection-feedback="source_pending" data-candidate-id="' + esc(candidateId) + '">供应待找</button>',
-        '<button type="button" data-selection-feedback="not_fit" data-candidate-id="' + esc(candidateId) + '">不符合</button>',
+        '<button type="button" data-selection-feedback="not_fit" data-candidate-id="' + esc(candidateId) + '">手动排除</button>',
       '</div>',
     ].join("");
   }
 
-  function researchStageLabel(stage) {
+  function profitReadinessLabel(readiness) {
     const labels = {
-      source_detail_needed: "待核验进货侧详情",
-      source_detail_refresh_needed: "进货侧详情待复核",
-      resale_evidence_needed: "待核验闲鱼销侧",
-      comparison_follow_up: "比价保持观察",
+      source_price_needed: "等待进货价",
+      resale_price_needed: "等待闲鱼价",
+      refresh_needed: "价格需复核",
+      profit_pending: "等待利润核算",
+      profit_ready: "已核实正利润",
     };
-    return labels[String(stage || "")] || "待补充研究证据";
+    return labels[String(readiness || "")] || "等待利润证据";
   }
 
-  function researchCandidateCard(candidate) {
+  function selectableCandidateCard(candidate) {
     const candidateId = Number(candidate.candidate_id);
     const title = candidate.candidate_title || "未命名候选";
     const identity = candidate.catalog_no || candidate.jan || "待补品番 / JAN";
@@ -541,22 +542,22 @@
     const directionMarkup = candidateDirectionMarkup(candidateId);
     const feedbackMarkup = selectionFeedbackMarkup(candidateId, currentFeedbackOutcome(candidateId));
     return [
-      '<article class="op-card research-candidate-card" data-research-candidate-id="' + esc(candidateId || "") + '">',
+      '<article class="op-card research-candidate-card" data-selectable-candidate-id="' + esc(candidateId || "") + '">',
         '<div class="research-candidate-product">',
           '<div class="thumb research-thumb">',
-            thumbMarkup(candidate.image_url, "待深研候选", typeLabel(candidate.media_type)),
+            thumbMarkup(candidate.image_url, "可选品", typeLabel(candidate.media_type)),
           '</div>',
           '<div class="product">',
-            '<span class="tag research-tag">待深研</span>',
+            '<span class="tag research-tag">可选品</span>',
             '<span class="tag source-tag">' + esc(typeLabel(candidate.media_type)) + '</span>',
             '<h4>' + esc(title) + '</h4>',
             '<div class="desc">品番 / JAN：' + esc(identity) + '</div>',
           '</div>',
         '</div>',
         '<div class="analysis research-analysis">',
-          '<div class="metric"><small>当前阶段</small><strong>' + esc(researchStageLabel(candidate.research_stage)) + '</strong></div>',
+          '<div class="metric"><small>利润状态</small><strong>' + esc(profitReadinessLabel(candidate.profit_readiness)) + '</strong></div>',
           directionMarkup,
-          '<div class="reason">需要补齐来源详情或市场证据；不含报价，也不代表淘汰。</div>',
+          '<div class="reason">暂缺价格不降级：无货、没有低价或证据过期都只会进入复核，仍保留在可选品池。</div>',
           feedbackMarkup,
         '</div>',
         sourceUrl
@@ -566,16 +567,20 @@
     ].join("");
   }
 
-  function appendResearchCandidateQueue(target) {
+  function selectableCandidates() {
+    const board = view.board || {};
+    if (Array.isArray(board.selectable_candidates)) return board.selectable_candidates;
+    return Array.isArray(board.research_candidates) ? board.research_candidates : [];
+  }
+
+  function appendSelectableCandidatePool(target) {
     if (view.filter !== "all") return;
-    const researchCandidates = Array.isArray(view.board && view.board.research_candidates)
-      ? view.board.research_candidates
-      : [];
-    if (!researchCandidates.length) return;
+    const candidates = selectableCandidates();
+    if (!candidates.length) return;
     target.insertAdjacentHTML(
       "beforeend",
-      '<section class="research-queue"><div class="research-queue-head"><h3>待深研候选 · 不含报价</h3><p>它们需要补齐详情或市场证据，不代表淘汰。</p></div>'
-        + researchCandidates.map(researchCandidateCard).join("") + "</section>",
+      '<section class="research-queue"><div class="research-queue-head"><h3>可选品池 · 等待利润核验</h3><p>暂缺价格不降级：这批候选都会保留，只有同款新鲜价格与成本齐全后才进入正利润机会流。</p></div>'
+        + candidates.map(selectableCandidateCard).join("") + "</section>",
     );
   }
 
@@ -620,7 +625,17 @@
     const reason = detailVerified
       ? "右侧挖煤姬价格来自已核验的商品详情页；左侧是 " + sampleCount + " 条有效闲鱼可比样本的参考价。下单前仍需人工核对版本、特典和品相。"
       : "来源详情仍待核验，当前价格不应作为进货依据。";
-    const feedbackMarkup = selectionFeedbackMarkup(candidateId, currentFeedbackOutcome(candidateId));
+    const currentOutcome = currentFeedbackOutcome(candidateId);
+    const feedbackMarkup = Number.isSafeInteger(candidateId) && candidateId > 0
+      ? [
+        '<div class="selection-feedback-actions" data-selection-feedback-candidate="' + esc(candidateId) + '">',
+          '<span>产品方向：' + esc({ keep: "保留", source_pending: "供应待找", not_fit: "手动排除" }[currentOutcome] || "未标注") + '</span>',
+          '<button type="button" data-selection-feedback="keep" data-candidate-id="' + esc(candidateId) + '">保留</button>',
+          '<button type="button" data-selection-feedback="source_pending" data-candidate-id="' + esc(candidateId) + '">供应待找</button>',
+          '<button type="button" data-selection-feedback="not_fit" data-candidate-id="' + esc(candidateId) + '">手动排除</button>',
+        '</div>',
+      ].join("")
+      : "";
     return [
       '<article class="op-card discovery-op-card" data-discovery-opportunity-id="' + esc(item.id || "") + '">',
         sideMarkup("xianyu", xianyuUrl, xianyuSide),
@@ -630,7 +645,7 @@
             '<div class="metric"><small>闲鱼预计净利（CNY）</small><strong>' + esc(cny(expectedProfit)) + '</strong></div>',
             '<div class="metric"><small>闲鱼销售利润率</small><strong>' + esc(percent(item.net_margin)) + '</strong></div>',
             '<div class="metric"><small>匹配度</small><strong>' + esc(percent(item.match_confidence)) + '</strong></div>',
-            '<div class="metric"><small>判定</small><strong>' + decisionChip(item.decision) + '</strong></div>',
+            '<div class="metric"><small>利润状态</small><strong><span class="status ok">净利润为正</span></strong></div>',
           '</div>',
            '<p class="comparison-catalog">品番 / JAN：' + esc(catalogNo) + (item.edition ? ' · ' + esc(item.edition) : '') + '</p>',
            directionMarkup,
@@ -719,7 +734,7 @@
         xianyuSide,
         '<div class="analysis">',
           '<div class="comparison-rail"><span>挖煤姬进货（JPY） → 闲鱼国内销售（CNY）</span></div>',
-          '<span class="status ok qualified-chip">净利率达标 ≥ 25%</span>',
+          '<span class="status ok qualified-chip">净利润为正</span>',
           '<div class="grid2">',
             '<div class="metric"><small>闲鱼销售价（CNY）</small><strong>' + esc(cny(calculation.sale_price_cny)) + '</strong></div>',
             '<div class="metric"><small>挖煤姬落地成本（CNY）</small><strong>' + esc(cny(calculation.landed_cost_cny)) + '</strong></div>',
@@ -748,7 +763,7 @@
     const board = view.dualMarketBoard || {};
     if (board.unavailable) {
       target.innerHTML = '<div class="empty-state">双边证据流暂不可用；为避免把旧的全局样本误当成同款，本页不展示旧机会卡。</div>';
-      appendResearchCandidateQueue(target);
+      appendSelectableCandidatePool(target);
       return;
     }
     const query = String(view.query || view.advancedFilter && view.advancedFilter.q || "").trim().toLowerCase();
@@ -760,7 +775,7 @@
     ));
     if (eligible.length) {
       target.innerHTML = eligible.map(eligibleComparisonCard).join("");
-      appendResearchCandidateQueue(target);
+      appendSelectableCandidatePool(target);
       return;
     }
     const summary = board.summary || {};
@@ -768,9 +783,9 @@
     const pending = Number(summary.cost_pending_count) || 0;
     const below = Number(summary.below_margin_count) || 0;
     target.innerHTML = '<div class="empty-state">已评估 ' + esc(evaluated)
-      + ' 条：成本待补 ' + esc(pending) + ' 条，净利率低于 25% ' + esc(below)
-      + ' 条；当前没有净利率至少 25% 且成本证据完整的机会。采集保持暂停，页面不会用旧样本补卡。</div>';
-    appendResearchCandidateQueue(target);
+      + ' 条：成本待补 ' + esc(pending) + ' 条，当前未形成正利润 ' + esc(below)
+      + ' 条；当前没有净利润为正且成本证据完整的机会。页面不会用旧样本补卡。</div>';
+    appendSelectableCandidatePool(target);
   }
 
   function itemSearchText(item) {
@@ -846,19 +861,19 @@
       (Number(right.expected_profit) || 0) - (Number(left.expected_profit) || 0)
       || (Number(right.match_confidence) || 0) - (Number(left.match_confidence) || 0)
     ));
-    const researchCandidates = view.filter === "all"
-      ? (Array.isArray(view.board.research_candidates) ? view.board.research_candidates : [])
+    const poolCandidates = view.filter === "all"
+      ? selectableCandidates()
       : [];
-    if (!items.length && !researchCandidates.length) {
+    if (!items.length && !poolCandidates.length) {
       const summary = view.board.summary || {};
       target.innerHTML = '<div class="empty-state">' + esc(emptyFeedMessage(summary, allItems.length)) + '</div>';
       return;
     }
     target.innerHTML = [
       items.map(opportunityCard).join(""),
-      researchCandidates.length
-        ? '<section class="research-queue"><div class="research-queue-head"><h3>待深研候选 · 不含报价</h3><p>它们需要补齐详情或市场证据，不代表淘汰。</p></div>'
-          + researchCandidates.map(researchCandidateCard).join("") + '</section>'
+      poolCandidates.length
+        ? '<section class="research-queue"><div class="research-queue-head"><h3>可选品池 · 等待利润核验</h3><p>暂缺价格不降级：这批候选都会保留，只有同款新鲜价格与成本齐全后才进入正利润机会流。</p></div>'
+          + poolCandidates.map(selectableCandidateCard).join("") + '</section>'
         : "",
     ].join("");
   }
@@ -939,7 +954,7 @@
     if (view.refreshing) return;
     view.refreshing = true;
     try {
-      const emptyBoard = { summary: {}, pools: [], opportunities: [], research_candidates: [] };
+      const emptyBoard = { summary: {}, pools: [], opportunities: [], selectable_candidates: [], research_candidates: [] };
       const [board, commandPayload, dualMarketBoard, referenceStatus, referenceObservationPayload, referenceProfilePayload, referenceDirectionPayload, candidateDirectionPayload, selectionFeedbackStatus, selectionFeedbackPayload] = await Promise.all([
         apiGet("/api/discovery/board").catch(() => emptyBoard),
         apiGet("/api/discovery/commands").catch(() => ({ items: [] })),
@@ -952,7 +967,7 @@
         apiGet("/api/selection-feedback/status").catch(() => null),
         apiGet("/api/selection-feedback?current=1&limit=200").catch(() => null),
       ]);
-      view.board = board || { summary: {}, pools: [], opportunities: [], research_candidates: [] };
+      view.board = board || { summary: {}, pools: [], opportunities: [], selectable_candidates: [], research_candidates: [] };
       view.dualMarketBoard = dualMarketBoard;
       view.commands = (commandPayload && commandPayload.items) || [];
       view.referenceStatus = referenceStatus;

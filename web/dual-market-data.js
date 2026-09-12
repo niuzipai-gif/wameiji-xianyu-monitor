@@ -3,9 +3,10 @@
 
   const MAX_LIVE_AGE_MS = 180 * 60 * 1000;
   const SNAPSHOT_PATH = "data/dual-market-snapshot.json";
-  const POLICY_VERSION = "wameiji-xianyu-net-v1";
+  const POLICY_VERSION = "wameiji-xianyu-net-v2";
+  const LEGACY_POLICY_VERSION = "wameiji-xianyu-net-v1";
   const TRADE_DIRECTION = "wameiji_jpy_to_xianyu_cny";
-  const MINIMUM_NET_MARGIN = 0.25;
+  const MINIMUM_NET_MARGIN = 0;
   const SUMMARY_COUNT_KEYS = [
     "evaluated_count",
     "eligible_count",
@@ -30,15 +31,16 @@
     if (!strategy || typeof strategy !== "object" || Array.isArray(strategy)) {
       throw new Error("strategy is required");
     }
-    if (strategy.policy_version !== POLICY_VERSION) {
+    if (strategy.policy_version !== POLICY_VERSION && strategy.policy_version !== LEGACY_POLICY_VERSION) {
       throw new Error("unsupported policy_version");
     }
     if (strategy.trade_direction !== TRADE_DIRECTION) {
       throw new Error("unsupported trade_direction");
     }
-    if (!Number.isFinite(Number(strategy.minimum_net_margin))
-      || Number(strategy.minimum_net_margin) < MINIMUM_NET_MARGIN) {
-      throw new Error("minimum_net_margin must be at least 0.25");
+    const minimumNetMargin = Number(strategy.minimum_net_margin);
+    const requiredMinimum = strategy.policy_version === LEGACY_POLICY_VERSION ? 0.25 : MINIMUM_NET_MARGIN;
+    if (!Number.isFinite(minimumNetMargin) || minimumNetMargin < requiredMinimum) {
+      throw new Error("minimum_net_margin does not match policy_version");
     }
     const summary = payload.summary;
     if (!summary || typeof summary !== "object" || Array.isArray(summary)) {

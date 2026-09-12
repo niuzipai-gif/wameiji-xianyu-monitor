@@ -351,6 +351,48 @@ def test_margin_threshold_uses_unrounded_values(
     assert outcome.status == expected_status
 
 
+def test_zero_margin_policy_accepts_an_exact_comparison_with_tiny_positive_profit(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "monitor.db"
+    insert_listing_observation(db_path, make_observation(price=99.99))
+    insert_listing_observation(
+        db_path,
+        make_observation(
+            source="xianyu",
+            source_listing_id="x-tiny-positive",
+            price=100,
+            currency="CNY",
+            url="https://www.goofish.com/item?id=x-tiny-positive",
+            image_url="https://images.example/xianyu/x-tiny-positive.jpg",
+            evidence_level="search_card",
+        ),
+    )
+    config = DualMarketCostConfig(
+        exchange_rate_cny_per_jpy=1,
+        japan_domestic_shipping_jpy=0,
+        proxy_fee_jpy=0,
+        international_shipping_per_item_cny=0,
+        china_reship_cny=0,
+        packaging_cny=0,
+        after_sale_reserve_cny=0,
+        risk_reserve_cny=0,
+        tax_cny=0,
+        sales_fee_rate=0,
+        sales_fee_cap_cny=None,
+        sales_fee_uncapped=True,
+        minimum_net_margin=0,
+        policy_version="wameiji-xianyu-net-v2",
+    )
+
+    outcome = rebuild_current_comparison(db_path, "catalog:srcl3520", config)
+
+    assert outcome.status == "eligible"
+    assert outcome.comparison is not None
+    assert outcome.comparison.expected_profit_cny == pytest.approx(0.01)
+    assert outcome.comparison.net_margin == pytest.approx(0.0001)
+
+
 def test_uncapped_seller_fee_is_not_silently_limited_to_sixty_cny(tmp_path: Path) -> None:
     db_path = tmp_path / "monitor.db"
     insert_listing_observation(db_path, make_observation(price=100))

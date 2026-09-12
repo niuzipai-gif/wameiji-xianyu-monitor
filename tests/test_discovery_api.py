@@ -118,7 +118,7 @@ def test_selection_board_prepares_an_absolute_wameiji_product_link(
     assert views[0]["source_url"] == views[0]["url"]
 
 
-def test_selection_board_exposes_active_research_candidates_without_price_fields(
+def test_selection_board_preserves_every_active_candidate_without_price_fields(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("WEB_ACCESS_TOKEN", "viewer-secret")
@@ -150,9 +150,13 @@ def test_selection_board_exposes_active_research_candidates_without_price_fields
     try:
         code, board = _request(f"{base_url}/api/discovery/board?access_token=viewer-secret")
         assert code == 200
-        candidate = board["research_candidates"][0]
+        assert board["summary"]["selectable_candidates"] == 1
+        assert board["summary"]["profit_ready_candidates"] == 0
+        assert board["research_candidates"] == board["selectable_candidates"]
+        candidate = board["selectable_candidates"][0]
         assert candidate["candidate_title"] == "研究队列样本 CD 初回限定盤"
         assert candidate["research_stage"] == "source_detail_needed"
+        assert candidate["profit_readiness"] == "source_price_needed"
         assert candidate["source_url"] == "https://meruki.cn/mall/market/detail/research-card"
         assert not {
             "source_price",

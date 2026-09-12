@@ -35,6 +35,10 @@ MIN_IMAGE_EDGE = 80
 MAX_IMAGE_EDGE = 10_000
 DEFAULT_DISPLAY_EXCHANGE_RATE_CNY_PER_JPY = 0.046
 PUBLIC_CATEGORY = "eligible"
+_POLICY_MINIMUM_MARGINS = {
+    "wameiji-xianyu-net-v1": 0.25,
+    "wameiji-xianyu-net-v2": 0.0,
+}
 SOURCE_FIELDS = (
     "listing_id",
     "source",
@@ -329,8 +333,9 @@ def export_pages_snapshot(
     if not policy_version or not _finite_number(minimum_net_margin):
         raise SnapshotExportError("board profit policy is incomplete")
     minimum_net_margin = float(minimum_net_margin)
-    if minimum_net_margin < 0.25:
-        raise SnapshotExportError("board margin threshold is below 25 percent")
+    required_minimum_margin = _POLICY_MINIMUM_MARGINS.get(policy_version)
+    if required_minimum_margin is None or minimum_net_margin < required_minimum_margin:
+        raise SnapshotExportError("board profit policy is unsupported")
     raw_summary = board.get("summary")
     if not isinstance(raw_summary, dict):
         raise SnapshotExportError("board summary is missing")
