@@ -778,6 +778,22 @@
       appendSelectableCandidatePool(target);
       return;
     }
+    let verifiedPositiveCandidates = Array.isArray(view.board && view.board.opportunities)
+      ? view.board.opportunities.slice()
+      : [];
+    if (query) {
+      verifiedPositiveCandidates = verifiedPositiveCandidates.filter(
+        (item) => itemSearchText(item).includes(query),
+      );
+    }
+    verifiedPositiveCandidates.sort((left, right) => (
+      (Number(right.expected_profit) || 0) - (Number(left.expected_profit) || 0)
+    ));
+    if (verifiedPositiveCandidates.length) {
+      target.innerHTML = verifiedPositiveCandidates.map(opportunityCard).join("");
+      appendSelectableCandidatePool(target);
+      return;
+    }
     const summary = board.summary || {};
     const evaluated = Number(summary.evaluated_count) || 0;
     const pending = Number(summary.cost_pending_count) || 0;

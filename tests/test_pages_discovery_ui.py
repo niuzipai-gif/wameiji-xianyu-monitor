@@ -23,6 +23,17 @@ def test_strict_dual_market_feed_keeps_the_nonprice_selectable_pool() -> None:
     assert "candidate.expected_profit" not in pool_renderer
 
 
+def test_home_feed_promotes_verified_positive_candidates_when_live_comparisons_are_empty() -> None:
+    script = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    renderer_start = script.index("function renderDualMarketFeed")
+    renderer_end = script.index("function itemSearchText", renderer_start)
+    renderer = script[renderer_start:renderer_end]
+
+    assert "let verifiedPositiveCandidates" in renderer
+    assert "verifiedPositiveCandidates.map(opportunityCard).join(\"\")" in renderer
+    assert "appendSelectableCandidatePool(target)" in renderer
+
+
 def test_pages_build_includes_the_automatic_selection_board(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     destination = tmp_path / "site"
