@@ -157,13 +157,13 @@ def test_homepage_loads_snapshot_loader_before_the_board_renderer() -> None:
     assert homepage.index("dual-market-data.js") < homepage.index("discovery-ui.js")
 
 
-def test_homepage_busts_cached_renderer_after_currency_and_resale_fix() -> None:
+def test_homepage_busts_cached_renderer_and_styles_after_selection_grid_fix() -> None:
     homepage = Path("web/index.html").read_text(encoding="utf-8")
 
     assert "app.js?v=20260909-strict-net-v1" in homepage
     assert "dual-market-data.js?v=20260909-strict-net-v1" in homepage
-    assert "discovery-ui.js?v=20260909-strict-net-v1" in homepage
-    assert "styles/kuro.css?v=20260909-strict-net-v1" in homepage
+    assert "discovery-ui.js?v=20260913-selection-grid-v2" in homepage
+    assert "styles/kuro.css?v=20260913-selection-grid-v2" in homepage
 
 
 def test_board_refresh_decouples_legacy_api_failures_from_dual_market_data() -> None:
