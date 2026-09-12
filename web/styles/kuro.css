@@ -361,6 +361,19 @@ body.kuro .stat { background: rgba(255, 255, 255, 0.72); border: 1px solid var(-
 body.kuro .stat small { color: var(--kuro-muted); display: block; margin-bottom: 6px; font-size: 12px; }
 body.kuro .stat strong { font-size: 26px; color: var(--kuro-ink); font-weight: 800; }
 
+/* Home leads with the selection stream; supporting evidence follows below it. */
+body.kuro .selection-stream-overview {
+  grid-template-columns: 1fr;
+  min-height: 0;
+  margin-bottom: 20px;
+}
+body.kuro .selection-stream-overview .hero-copy { padding: 26px 30px; }
+body.kuro .selection-stream-overview h2 { margin: 8px 0; font-size: 32px; }
+body.kuro .selection-stream-overview .lead { max-width: none; font-size: 14px; line-height: 1.65; }
+body.kuro .selection-stream-overview .stats { margin-top: 18px; }
+body.kuro .selection-stream-overview .stat { padding: 13px 15px; border-radius: 16px; }
+body.kuro .selection-stream-overview .stat strong { font-size: 22px; }
+
 body.kuro .mascot-stage {
   position: relative; z-index: 2; min-height: 560px;
   display: flex; flex-direction: column;
@@ -490,6 +503,25 @@ body.kuro .mini-stat small { color: var(--kuro-muted); display: block; font-size
 body.kuro .mini-stat strong { font-size: 22px; }
 
 /* Approved local screenshots are evidence memory, never an automatic buy list. */
+body.kuro .secondary-evidence { display: block; margin-top: 26px; }
+body.kuro .secondary-evidence > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border: 1px solid var(--kuro-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--kuro-ink);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  list-style: none;
+}
+body.kuro .secondary-evidence > summary::-webkit-details-marker { display: none; }
+body.kuro .secondary-evidence > summary span:last-child { color: var(--kuro-muted); font-size: 12px; font-weight: 600; }
+body.kuro .secondary-evidence[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+body.kuro .secondary-evidence .reference-memory-panel { margin: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
 body.kuro .reference-memory-panel { margin: 0 0 24px; padding: 22px; border: 1px solid var(--kuro-line); border-radius: 22px; background: linear-gradient(135deg, rgba(241, 247, 255, 0.94), rgba(255, 250, 252, 0.9)); box-shadow: 0 12px 36px rgba(80, 105, 150, 0.06); }
 body.kuro .reference-memory-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 body.kuro .reference-memory-states { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }

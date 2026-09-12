@@ -32,14 +32,6 @@
         <button data-page="settings">策略设置</button>
       </nav>
       <div class="side-card">
-        <b>Design Direction</b>
-        <p>白蓝玻璃质感后台，闲鱼侧使用淡黄色识别，黑红双马尾看板娘只做品牌记忆点。</p>
-      </div>
-      <div class="side-card">
-        <b>Mascot</b>
-        <p>原创黑红哥特洛丽塔情报助手，手持 CD 与价格分析面板。</p>
-      </div>
-      <div class="side-card">
         <b>操作</b>
         <p style="display:flex;flex-direction:column;gap:6px;">
           <button id="sideNewTaskBtn" style="border:0;background:var(--kuro-blue);color:white;padding:8px;border-radius:10px;cursor:pointer;font-weight:700;">＋ 新建监控任务</button>
@@ -66,11 +58,11 @@
       </div>
 
       <section id="home" class="page active" data-page="home">
-        <div class="hero">
+        <div class="hero selection-stream-overview">
           <div class="hero-copy">
-            <div class="eyebrow">Kuro Atelier · Premium Dashboard</div>
-            <h2>智能发现高价值交易机会<br/>用更有设计感的方式做日系 CD 价差监控</h2>
-            <p class="lead">图片优先信息流：左侧闲鱼可售样本使用淡黄色识别，右侧挖煤姬详情页使用淡粉白；中间集中展示成本、净利、版本和匹配证据。只有详情已核验的来源才会进入机会流。</p>
+            <div class="eyebrow">Selection board · evidence-first</div>
+            <h2>选品广场</h2>
+            <p class="lead">优先展示已核验的商品机会；正样本、登录与采集状态在信息流之后按需展开。</p>
             <div class="stats">
               <div class="stat"><small>今日机会</small><strong id="kpiToday">--</strong></div>
               <div class="stat"><small>预计利润</small><strong id="kpiProfit">--</strong></div>
@@ -78,44 +70,7 @@
               <div class="stat"><small>命中率</small><strong id="kpiHitRate">--</strong></div>
             </div>
           </div>
-          <div class="mascot-stage">
-            <div class="mascot-bubble">
-              <b>Kuro says</b>
-              <p>先看首图，再看版本、特典、腰封和品番。利润很好，但同款置信度低于 80% 的不要急着冲。</p>
-            </div>
-            <img src="assets/mascot/kuro_mascot.png" alt="黑红哥特洛丽塔成年看板娘主视觉" />
-          </div>
         </div>
-        <section class="reference-memory-panel" aria-labelledby="referenceMemoryTitle">
-          <div class="reference-memory-head">
-            <div>
-              <div class="eyebrow">Approved reference memory · local only</div>
-              <h3 id="referenceMemoryTitle">参考正样本库</h3>
-              <p>已批准的历史好品只用于身份匹配与研究优先级；价格和当前是否有货仅作时间点观察，不会把好品降级。</p>
-            </div>
-            <div class="reference-memory-states">
-              <span class="status blue" id="referenceMemoryState">读取中…</span>
-              <span class="status blue" id="selectionFeedbackState">偏好反馈读取中…</span>
-            </div>
-          </div>
-          <div class="reference-memory-metrics">
-            <div><small>已导入产品</small><strong id="referenceProductCount">--</strong></div>
-            <div><small>参考截图</small><strong id="referenceSampleCount">--</strong></div>
-            <div><small>条码锚点</small><strong id="referenceBarcodeCount">--</strong></div>
-            <div><small>市场观察</small><strong id="referenceObservationCount">--</strong></div>
-            <div><small>闲鱼最新</small><strong id="referenceXianyuLatest">--</strong></div>
-            <div><small>挖煤姬最新</small><strong id="referenceWameijiLatest">--</strong></div>
-          </div>
-          <div class="reference-profiles" id="referenceDirectionList" aria-live="polite">
-            <div class="empty-state">正在读取正样本方向证据…</div>
-          </div>
-          <div class="reference-observations" id="referenceObservationList" aria-live="polite">
-            <div class="empty-state">正在读取最近核验记录…</div>
-          </div>
-          <div class="reference-profiles" id="referenceProfileList" aria-live="polite">
-            <div class="empty-state">正在读取身份与待核验信息…</div>
-          </div>
-        </section>
         <div class="section-head">
           <div>
             <h3>首页机会流 · 图片优先信息流</h3>
@@ -132,6 +87,39 @@
         <div class="feed" id="homeFeed" data-empty="暂时没有通过门槛的机会。点击左侧「立即全量扫描」即可开始自动发现。">
           <div class="empty-state">正在加载机会数据…</div>
         </div>
+        <details class="secondary-evidence">
+          <summary><span>研究依据与运行状态</span><span>正样本、登录与采集状态</span></summary>
+          <section class="reference-memory-panel" aria-labelledby="referenceMemoryTitle">
+            <div class="reference-memory-head">
+              <div>
+                <div class="eyebrow">Approved reference memory · local only</div>
+                <h3 id="referenceMemoryTitle">参考正样本库</h3>
+                <p>已批准的历史好品只用于身份匹配与研究优先级；价格和当前是否有货仅作时间点观察，不会把好品降级。</p>
+              </div>
+              <div class="reference-memory-states">
+                <span class="status blue" id="referenceMemoryState">读取中…</span>
+                <span class="status blue" id="selectionFeedbackState">偏好反馈读取中…</span>
+              </div>
+            </div>
+            <div class="reference-memory-metrics">
+              <div><small>已导入产品</small><strong id="referenceProductCount">--</strong></div>
+              <div><small>参考截图</small><strong id="referenceSampleCount">--</strong></div>
+              <div><small>条码锚点</small><strong id="referenceBarcodeCount">--</strong></div>
+              <div><small>市场观察</small><strong id="referenceObservationCount">--</strong></div>
+              <div><small>闲鱼最新</small><strong id="referenceXianyuLatest">--</strong></div>
+              <div><small>挖煤姬最新</small><strong id="referenceWameijiLatest">--</strong></div>
+            </div>
+            <div class="reference-profiles" id="referenceDirectionList" aria-live="polite">
+              <div class="empty-state">正在读取正样本方向证据…</div>
+            </div>
+            <div class="reference-observations" id="referenceObservationList" aria-live="polite">
+              <div class="empty-state">正在读取最近核验记录…</div>
+            </div>
+            <div class="reference-profiles" id="referenceProfileList" aria-live="polite">
+              <div class="empty-state">正在读取身份与待核验信息…</div>
+            </div>
+          </section>
+        </details>
       </section>
 
       <section id="ranking" class="page" data-page="ranking">

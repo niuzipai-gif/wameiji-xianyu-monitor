@@ -209,3 +209,13 @@ def test_reference_panel_renders_non_decisive_direction_evidence() -> None:
     assert "正样本方向证据，仍需详情核验" in direction_markup
     for forbidden_value in ("item.price", "item.availability", "买入", "购买", "拒绝", "淘汰"):
         assert forbidden_value not in direction_markup
+
+
+def test_home_prioritizes_opportunity_feed_over_secondary_evidence() -> None:
+    html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+
+    assert '<details class="secondary-evidence">' in html
+    assert html.index('id="homeFeed"') < html.index('id="referenceMemoryTitle"')
+    assert 'class="mascot-stage"' not in html
+    assert "Design Direction" not in html
+    assert "<b>Mascot</b>" not in html
