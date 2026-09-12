@@ -542,7 +542,7 @@
     const directionMarkup = candidateDirectionMarkup(candidateId);
     const feedbackMarkup = selectionFeedbackMarkup(candidateId, currentFeedbackOutcome(candidateId));
     return [
-      '<article class="op-card research-candidate-card" data-selectable-candidate-id="' + esc(candidateId || "") + '">',
+      '<article class="research-candidate-card" data-selectable-candidate-id="' + esc(candidateId || "") + '">',
         '<div class="research-candidate-product">',
           '<div class="thumb research-thumb">',
             thumbMarkup(candidate.image_url, "可选品", typeLabel(candidate.media_type)),
@@ -557,12 +557,13 @@
         '<div class="analysis research-analysis">',
           '<div class="metric"><small>利润状态</small><strong>' + esc(profitReadinessLabel(candidate.profit_readiness)) + '</strong></div>',
           directionMarkup,
-          '<div class="reason">暂缺价格不降级：无货、没有低价或证据过期都只会进入复核，仍保留在可选品池。</div>',
           feedbackMarkup,
         '</div>',
-        sourceUrl
-          ? '<a class="research-source-link" href="' + esc(sourceUrl) + '" target="_blank" rel="noopener">查看来源详情</a>'
-          : '<span class="research-source-pending">来源详情入口待补</span>',
+        '<div class="research-card-footer">',
+          sourceUrl
+            ? '<a class="research-source-link" href="' + esc(sourceUrl) + '" target="_blank" rel="noopener">查看来源详情</a>'
+            : '<span class="research-source-pending">来源详情入口待补</span>',
+        '</div>',
       '</article>',
     ].join("");
   }
@@ -577,11 +578,13 @@
     if (view.filter !== "all") return;
     const candidates = selectableCandidates();
     if (!candidates.length) return;
-    target.insertAdjacentHTML(
-      "beforeend",
-      '<section class="research-queue"><div class="research-queue-head"><h3>可选品池 · 等待利润核验</h3><p>暂缺价格不降级：这批候选都会保留，只有同款新鲜价格与成本齐全后才进入正利润机会流。</p></div>'
-        + candidates.map(selectableCandidateCard).join("") + "</section>",
-    );
+    target.insertAdjacentHTML("beforeend", selectableCandidatePoolMarkup(candidates));
+  }
+
+  function selectableCandidatePoolMarkup(candidates) {
+    if (!Array.isArray(candidates) || !candidates.length) return "";
+    return '<section class="research-queue"><div class="research-queue-head"><h3>可选品池 · 等待利润核验 <span class="research-queue-count">' + candidates.length + ' 个</span></h3><p>暂缺价格不降级：无货、没有低价或证据过期都会进入复核，仍保留在可选品池。</p></div><div class="research-candidate-grid">'
+      + candidates.map(selectableCandidateCard).join("") + "</div></section>";
   }
 
   function opportunityCard(item) {
@@ -887,10 +890,7 @@
     }
     target.innerHTML = [
       items.map(opportunityCard).join(""),
-      poolCandidates.length
-        ? '<section class="research-queue"><div class="research-queue-head"><h3>可选品池 · 等待利润核验</h3><p>暂缺价格不降级：这批候选都会保留，只有同款新鲜价格与成本齐全后才进入正利润机会流。</p></div>'
-          + poolCandidates.map(selectableCandidateCard).join("") + '</section>'
-        : "",
+      selectableCandidatePoolMarkup(poolCandidates),
     ].join("");
   }
 

@@ -417,6 +417,8 @@ body.kuro .research-queue { display: grid; gap: 14px; margin-top: 26px; }
 body.kuro .research-queue-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
 body.kuro .research-queue-head h3 { margin: 0; font-size: 18px; }
 body.kuro .research-queue-head p { margin: 0; color: var(--kuro-muted); font-size: 13px; }
+body.kuro .research-queue-count { color: var(--kuro-blue); font-size: 13px; font-weight: 800; white-space: nowrap; }
+body.kuro .research-candidate-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
 body.kuro .op-card {
   display: grid; grid-template-columns: 1.05fr 0.95fr 1.05fr; gap: 18px;
   border: 1px solid var(--kuro-line); border-radius: 26px;
@@ -426,10 +428,24 @@ body.kuro .op-card {
   text-decoration: none; color: inherit; cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
-body.kuro .research-candidate-card { grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr) auto; align-items: center; cursor: default; }
+body.kuro .research-candidate-card {
+  display: flex; flex-direction: column; gap: 12px; min-width: 0;
+  border: 1px solid var(--kuro-line); border-radius: 20px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 14px 34px rgba(80, 105, 150, 0.07);
+  padding: 16px; color: inherit; cursor: default;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+body.kuro .research-candidate-card:hover { transform: translateY(-2px); border-color: var(--kuro-rose, #d36a8a); box-shadow: 0 20px 44px rgba(80, 105, 150, 0.13); }
 body.kuro .research-candidate-product { display: flex; align-items: center; gap: 14px; min-width: 0; }
+body.kuro .research-thumb { width: 92px; height: 92px; border-radius: 14px; }
 body.kuro .research-tag { background: rgba(94, 157, 255, 0.16); color: #2d5fa8; }
-body.kuro .research-analysis .metric { width: fit-content; min-width: 180px; }
+body.kuro .research-candidate-card .product h4 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+body.kuro .research-analysis { display: grid; gap: 9px; padding: 13px; }
+body.kuro .research-analysis .metric { width: 100%; min-width: 0; }
+body.kuro .research-analysis .reason { margin-top: 0; padding: 9px 10px; font-size: 12px; }
+body.kuro .research-analysis .selection-feedback-actions { margin-top: 0; }
+body.kuro .research-card-footer { margin-top: auto; display: flex; align-items: center; min-height: 20px; }
 body.kuro .research-source-link, body.kuro .research-source-pending { font-size: 13px; font-weight: 700; }
 body.kuro .research-source-link { color: var(--kuro-blue); text-decoration: none; }
 body.kuro .research-source-link:hover { text-decoration: underline; }

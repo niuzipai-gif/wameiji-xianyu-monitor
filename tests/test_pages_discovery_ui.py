@@ -23,6 +23,24 @@ def test_strict_dual_market_feed_keeps_the_nonprice_selectable_pool() -> None:
     assert "candidate.expected_profit" not in pool_renderer
 
 
+def test_selectable_candidate_pool_uses_compact_cards_not_opportunity_columns() -> None:
+    script = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    stylesheet = Path("web/styles/kuro.css").read_text(encoding="utf-8")
+    card_start = script.index("function selectableCandidateCard")
+    card_end = script.index("function selectableCandidates", card_start)
+    card_renderer = script[card_start:card_end]
+
+    assert 'class="research-candidate-card"' in card_renderer
+    assert 'class="op-card research-candidate-card"' not in card_renderer
+    assert "research-candidate-grid" in script
+    assert "暂缺价格不降级" not in card_renderer
+    assert "body.kuro .research-candidate-grid {" in stylesheet
+    assert "grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));" in stylesheet
+    assert "body.kuro .research-candidate-card {" in stylesheet
+    assert "display: flex;" in stylesheet
+    assert "grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr) auto;" not in stylesheet
+
+
 def test_home_feed_promotes_verified_positive_candidates_when_live_comparisons_are_empty() -> None:
     script = Path("web/discovery-ui.js").read_text(encoding="utf-8")
     renderer_start = script.index("function renderDualMarketFeed")
