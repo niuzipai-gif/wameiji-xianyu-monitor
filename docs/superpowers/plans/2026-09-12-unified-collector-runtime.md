@@ -31,7 +31,7 @@
 - Modify: `scripts/start-all.ps1`
 - Modify: `scripts/install-collector-autostart.ps1`
 
-- [ ] **Step 1: Write the failing static-contract test.**
+- [x] **Step 1: Write the failing static-contract test.**
 
 ```python
 from pathlib import Path
@@ -54,13 +54,13 @@ def test_primary_and_autostart_launchers_pass_one_database_to_every_service() ->
     assert autostart.count(f'"-Database", "{DATABASE}"') == 3
 ```
 
-- [ ] **Step 2: Run test to verify it fails.**
+- [x] **Step 2: Run test to verify it fails.**
 
 Run: `.venv\\Scripts\\python.exe -m pytest tests/test_collector_runtime_scripts.py -q`
 
 Expected: FAIL because the existing defaults still name `takeover.db` and neither aggregate launcher forwards `-Database`.
 
-- [ ] **Step 3: Apply the minimal launcher changes.**
+- [x] **Step 3: Apply the minimal launcher changes.**
 
 Use `data/local/dual-market.db` as each individual service default. Add this parameter to `start-all.ps1`:
 
@@ -84,13 +84,13 @@ Set each scheduled task `ExtraArgs` to include:
 
 Do not change the user-edited login preflight body in `start-discovery.ps1`.
 
-- [ ] **Step 4: Run test to verify it passes.**
+- [x] **Step 4: Run test to verify it passes.**
 
 Run: `.venv\\Scripts\\python.exe -m pytest tests/test_collector_runtime_scripts.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```powershell
 git add scripts/start-local.ps1 scripts/start-replica.ps1 scripts/start-discovery.ps1 scripts/start-all.ps1 scripts/install-collector-autostart.ps1 tests/test_collector_runtime_scripts.py
@@ -103,7 +103,7 @@ git commit -m "fix: unify collector runtime database"
 - Modify: `tests/test_discovery_worker.py`
 - Modify: `src/cd_monitor/services/discovery_worker.py`
 
-- [ ] **Step 1: Write the failing local-command regression test.**
+- [x] **Step 1: Write the failing local-command regression test.**
 
 Add `create_collector_command` to the SQLite imports, then add this test:
 
@@ -135,25 +135,25 @@ def test_worker_completes_local_scan_command_without_a_remote_client(tmp_path: P
     assert list_collector_commands(db_path)[0]["status"] == "completed"
 ```
 
-- [ ] **Step 2: Run test to verify it fails.**
+- [x] **Step 2: Run test to verify it fails.**
 
 Run: `.venv\\Scripts\\python.exe -m pytest tests/test_discovery_worker.py::test_worker_completes_local_scan_command_without_a_remote_client -q`
 
 Expected: FAIL because `_fetch_commands` returns no commands without a remote client, leaving the local command `pending`.
 
-- [ ] **Step 3: Implement local/remote command ownership.**
+- [x] **Step 3: Implement local/remote command ownership.**
 
 Import `list_collector_commands`. In `_fetch_commands`, first read local rows with statuses `pending`, `accepted`, and `running`; exclude records whose `dedupe_key` starts with `remote:`; tag each retained dictionary with `_local_command_id` and `_command_origin = "local"`. Then append fetched Render rows after mirroring them, tagged `_command_origin = "remote"`.
 
 In `_complete_commands`, always complete a local row with `complete_collector_command`. Only when `_command_origin == "remote"` call `self.command_client.complete(...)` first; if that acknowledgement fails, leave that remote mirror unfinished for retry. A local command must never call the Render client.
 
-- [ ] **Step 4: Run local and remote worker tests.**
+- [x] **Step 4: Run local and remote worker tests.**
 
 Run: `.venv\\Scripts\\python.exe -m pytest tests/test_discovery_worker.py::test_worker_completes_local_scan_command_without_a_remote_client tests/test_discovery_worker.py::test_worker_executes_remote_scan_once_command_and_acknowledges -q`
 
 Expected: PASS. The local test proves direct local UI commands are consumed, and the existing remote test proves Render acknowledgement and remote identity mirroring remain intact.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```powershell
 git add src/cd_monitor/services/discovery_worker.py tests/test_discovery_worker.py
