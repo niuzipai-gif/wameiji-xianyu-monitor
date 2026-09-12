@@ -26,6 +26,7 @@ from cd_monitor.sources.wameiji_browser import WameijiBrowserAdapter
 from cd_monitor.sources.xianyu_browser import XianyuBrowserAdapter
 from cd_monitor.storage.sqlite import (
     complete_collector_command,
+    list_collector_commands,
     list_discovery_keywords,
     list_discovery_pools,
     list_due_discovery_keywords,
@@ -143,20 +144,33 @@ class DiscoveryWorker:
         )
 
     def _fetch_commands(self) -> list[dict[str, Any]]:
+        commands: list[dict[str, Any]] = []
+        for local_command in list_collector_commands(
+            self.db_path,
+            statuses=("pending", "accepted", "running", "relay_pending"),
+            limit=100,
+        ):
+            dedupe_key = str(local_command.get("dedupe_key") or "")
+            if dedupe_key.startswith("remote:"):
+                continue
+            command = dict(local_command)
+            command["_local_command_id"] = int(local_command["id"])
+            command["_command_origin"] = "local"
+            commands.append(command)
         if self.command_client is None:
-            return []
+            return commands
         try:
             remote_commands = self.command_client.fetch_pending()
         except Exception as exc:  # noqa: BLE001 - remote availability must not stop local scanning
             # The local schedule remains useful while Render is unavailable.
             LOGGER.warning("Could not fetch remote collector commands: %s", exc)
-            return []
-        commands: list[dict[str, Any]] = []
+            return commands
         for remote_command in remote_commands:
             try:
                 mirrored = upsert_remote_collector_command(self.db_path, remote_command)
                 command = dict(remote_command)
                 command["_local_command_id"] = int(mirrored["id"])
+                command["_command_origin"] = "remote"
                 commands.append(command)
             except (KeyError, TypeError, ValueError):
                 continue
@@ -199,8 +213,6 @@ class DiscoveryWorker:
         return forced_pool_ids, force_all
 
     def _complete_commands(self, commands: list[dict[str, Any]], scan_results: list[Any]) -> None:
-        if self.command_client is None:
-            return
         runs = len(scan_results)
         has_human_required = any(result.status == "human_required" for result in scan_results)
         default_status = "human_required" if has_human_required else "completed"
@@ -212,19 +224,23 @@ class DiscoveryWorker:
             error = command.get("_worker_error")
             status = "failed" if isinstance(error, str) else default_status
             result = {"error": error} if isinstance(error, str) else default_result
-            try:
-                self.command_client.complete(command_id, status=status, result=result)
-            except Exception as exc:  # noqa: BLE001 - leave local command pending for the next retry
-                LOGGER.warning("Could not complete remote collector command %s: %s", command_id, exc)
-            else:
-                local_command_id = command.get("_local_command_id")
-                if isinstance(local_command_id, int):
-                    try:
-                        complete_collector_command(
-                            self.db_path, local_command_id, status=status, result=result
-                        )
-                    except KeyError:
-                        LOGGER.warning("Mirrored collector command %s disappeared", local_command_id)
+            origin = command.get("_command_origin")
+            if origin == "remote":
+                if self.command_client is None:
+                    continue
+                try:
+                    self.command_client.complete(command_id, status=status, result=result)
+                except Exception as exc:  # noqa: BLE001 - leave local command pending for the next retry
+                    LOGGER.warning("Could not complete remote collector command %s: %s", command_id, exc)
+                    continue
+            local_command_id = command.get("_local_command_id")
+            if isinstance(local_command_id, int):
+                try:
+                    complete_collector_command(
+                        self.db_path, local_command_id, status=status, result=result
+                    )
+                except KeyError:
+                    LOGGER.warning("Collector command %s disappeared", local_command_id)
 
 
 class RenderCollectorCommandClient:

@@ -8,6 +8,7 @@ from cd_monitor.core.models import MarketItem, XianyuPriceSample
 from cd_monitor.services.discovery_worker import DiscoveryWorker
 from cd_monitor.storage.sqlite import (
     complete_collector_command,
+    create_collector_command,
     init_db,
     list_collector_commands,
     list_discovery_pools,
@@ -31,6 +32,34 @@ class _FakeCommandClient:
 
 async def _verified_detail(item: MarketItem) -> MarketItem:
     return replace(item, detail_verified=True)
+
+
+def test_worker_completes_local_scan_command_without_a_remote_client(tmp_path: Path) -> None:
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    update_discovery_pool(db_path, pool_id, {"keyword_budget": 1})
+    command = create_collector_command(db_path, "scan_now", {"pool_id": pool_id})
+
+    async def fetch_wameiji(_keyword: str) -> list[MarketItem]:
+        return []
+
+    async def fetch_xianyu(_query: str) -> list[XianyuPriceSample]:
+        raise AssertionError("an empty source scan must not query Xianyu")
+
+    worker = DiscoveryWorker(
+        db_path=db_path,
+        fetch_wameiji=fetch_wameiji,
+        fetch_wameiji_detail=_verified_detail,
+        fetch_xianyu=fetch_xianyu,
+    )
+    result = asyncio.run(worker.run_once())
+
+    assert result.command_count == 1
+    commands = list_collector_commands(db_path)
+    assert commands[0]["id"] == command["id"]
+    assert commands[0]["status"] == "completed"
 
 
 def test_worker_executes_remote_scan_once_command_and_acknowledges(tmp_path: Path) -> None:
