@@ -2586,6 +2586,65 @@ def list_discovery_opportunities(db_path: str | Path, limit: int = 50) -> list[d
     ]
 
 
+def list_discovery_research_candidates(
+    db_path: str | Path, limit: int = 12
+) -> list[dict[str, object]]:
+    """Return active candidates needing research without price evidence."""
+    init_db(db_path)
+    source_freshness_window = f"-{_DISCOVERY_SOURCE_DETAIL_FRESHNESS_MINUTES} minutes"
+    resale_freshness_window = f"-{_DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES} minutes"
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT candidate_id, candidate_title, media_type, catalog_no, jan,
+                   source_url, image_url, detail_verified, research_stage
+            FROM (
+              SELECT
+                id AS candidate_id,
+                title AS candidate_title,
+                media_type,
+                catalog_no,
+                jan,
+                source_url,
+                source_image_url AS image_url,
+                detail_verified,
+                CASE
+                  WHEN detail_verified = 0 THEN 'source_detail_needed'
+                  WHEN detail_verified_at IS NULL
+                    OR datetime(detail_verified_at) < datetime(CURRENT_TIMESTAMP, ?)
+                    THEN 'source_detail_refresh_needed'
+                  WHEN last_xianyu_checked_at IS NULL
+                    OR datetime(last_xianyu_checked_at) < datetime(CURRENT_TIMESTAMP, ?)
+                    THEN 'resale_evidence_needed'
+                  ELSE 'comparison_follow_up'
+                END AS research_stage,
+                CASE
+                  WHEN detail_verified = 0 THEN 0
+                  WHEN detail_verified_at IS NULL
+                    OR datetime(detail_verified_at) < datetime(CURRENT_TIMESTAMP, ?) THEN 1
+                  WHEN last_xianyu_checked_at IS NULL
+                    OR datetime(last_xianyu_checked_at) < datetime(CURRENT_TIMESTAMP, ?) THEN 2
+                  ELSE 3
+                END AS research_stage_rank,
+                first_seen_at
+              FROM discovery_candidates
+              WHERE status = 'active'
+            )
+            ORDER BY research_stage_rank ASC, datetime(first_seen_at) ASC, candidate_id ASC
+            LIMIT ?
+            """,
+            (
+                source_freshness_window,
+                resale_freshness_window,
+                source_freshness_window,
+                resale_freshness_window,
+                max(1, min(int(limit), 100)),
+            ),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def discovery_summary(db_path: str | Path) -> dict[str, object]:
     init_db(db_path)
     freshness_window = f"-{_DISCOVERY_OPPORTUNITY_FRESHNESS_MINUTES} minutes"

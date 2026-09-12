@@ -129,6 +129,7 @@ from cd_monitor.storage.sqlite import (
     list_discovery_keywords,
     list_discovery_opportunities,
     list_discovery_pools,
+    list_discovery_research_candidates,
     list_discovery_runs,
     selection_preference_feedback_status,
 )
@@ -669,6 +670,7 @@ def _build_handler(
                         "summary": discovery_summary(db_path),
                         "pools": _discovery_pool_views(db_path),
                         "opportunities": _discovery_opportunity_views(db_path),
+                        "research_candidates": _discovery_research_candidate_views(db_path),
                         "runs": list_discovery_runs(db_path, limit=30),
                     }
                 )
@@ -2765,6 +2767,16 @@ def _discovery_opportunity_views(db_path: str | Path) -> list[dict[str, object]]
         canonical_url = _canonical_wameiji_url("wameiji", raw_url)
         if canonical_url:
             view["url"] = canonical_url
+            view["source_url"] = canonical_url
+    return views
+
+
+def _discovery_research_candidate_views(db_path: str | Path) -> list[dict[str, object]]:
+    """Make source links usable without adding price data to research cards."""
+    views = list_discovery_research_candidates(db_path, limit=12)
+    for view in views:
+        canonical_url = _canonical_wameiji_url("wameiji", str(view.get("source_url") or ""))
+        if canonical_url:
             view["source_url"] = canonical_url
     return views
 

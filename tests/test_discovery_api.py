@@ -6,7 +6,12 @@ import urllib.error
 import urllib.request
 
 import cd_monitor.web_server as web_server
-from cd_monitor.storage.sqlite import init_db, list_discovery_pools
+from cd_monitor.core.discovery import DiscoveryCandidate
+from cd_monitor.storage.sqlite import (
+    init_db,
+    list_discovery_pools,
+    upsert_discovery_candidates_with_previous,
+)
 from cd_monitor.web_server import create_server
 
 
@@ -110,3 +115,51 @@ def test_selection_board_prepares_an_absolute_wameiji_product_link(
 
     assert views[0]["url"] == "https://meruki.cn/mall/market/detail/232665692319133696"
     assert views[0]["source_url"] == views[0]["url"]
+
+
+def test_selection_board_exposes_active_research_candidates_without_price_fields(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("WEB_ACCESS_TOKEN", "viewer-secret")
+    db_path = tmp_path / "selection.db"
+    init_db(db_path)
+    pool_id = list_discovery_pools(db_path)[0].id
+    assert pool_id is not None
+    upsert_discovery_candidates_with_previous(
+        db_path,
+        [
+            DiscoveryCandidate(
+                pool_id=pool_id,
+                media_type="cd",
+                identity_key="source:research-card",
+                title="研究队列样本 CD 初回限定盤",
+                source_url="/mall/market/detail/research-card",
+                source_image_url="https://images.example.invalid/research-card.webp",
+                source_price=1200,
+                source_currency="JPY",
+                availability="available",
+                status="active",
+            )
+        ],
+    )
+    server = create_server("127.0.0.1", 0, db_path, static_dir="web")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+    try:
+        code, board = _request(f"{base_url}/api/discovery/board?access_token=viewer-secret")
+        assert code == 200
+        candidate = board["research_candidates"][0]
+        assert candidate["candidate_title"] == "研究队列样本 CD 初回限定盤"
+        assert candidate["research_stage"] == "source_detail_needed"
+        assert candidate["source_url"] == "https://meruki.cn/mall/market/detail/research-card"
+        assert not {
+            "source_price",
+            "source_currency",
+            "expected_profit",
+            "net_margin",
+            "availability",
+        } & set(candidate)
+    finally:
+        server.shutdown()
+        server.server_close()
