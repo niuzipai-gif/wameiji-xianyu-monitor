@@ -1180,12 +1180,9 @@
     // listener. Queue one tick so this module always uses the same Page token.
     setTimeout(async () => {
       const api = window.CD_MONITOR_API;
-      const separateCollector = Boolean(
-        api && typeof api.isSeparateCollectorApi === "function" && api.isSeparateCollectorApi(),
-      );
-      const explicitLive = new URLSearchParams(window.location.search).get("live") === "1";
-      view.liveMode = !separateCollector || explicitLive;
-      if (separateCollector && !explicitLive) {
+      const staticSnapshotOnly = new URLSearchParams(window.location.search).get("snapshot") === "1";
+      view.liveMode = !staticSnapshotOnly;
+      if (staticSnapshotOnly) {
         view.liveApiBlocked = true;
       } else if (api && typeof api.ensureViewerAccessToken === "function") {
         const accessReady = await api.ensureViewerAccessToken();

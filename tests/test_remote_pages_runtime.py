@@ -217,17 +217,16 @@ def test_live_feed_uses_bridged_refresh_helper() -> None:
     )
 
 
-def test_remote_pages_loads_public_snapshot_without_token_prompt() -> None:
-    """The fixed Pages URL must render without asking visitors for a secret."""
+def test_remote_pages_prompts_and_loads_live_board_by_default() -> None:
+    """The normal Pages URL must open the current selection board, not a stale snapshot."""
 
     _run_browserless_app_harness(
-        'if (promptCount !== 0) throw new Error("unexpected prompt count=" + promptCount); '
-        'if (requests.some((url) => url.startsWith("https://collector.example"))) '
-        'throw new Error("unexpected collector request: " + requests.join(", ")); '
-        'if (!requests.some((url) => url.includes("/data/dual-market-snapshot.json"))) '
-        'throw new Error("snapshot was not requested: " + requests.join(", ")); '
-        'if (liveFeedIndicator.style.display !== "none") '
-        'throw new Error("static viewer still shows the live indicator");',
+        'if (promptCount !== 1) throw new Error("expected one token prompt, got=" + promptCount); '
+        'const remote = requests.filter((url) => url.startsWith("https://collector.example")); '
+        'if (!remote.some((url) => url.includes("/api/dual-market/board"))) '
+        'throw new Error("live board was not requested: " + requests.join(", ")); '
+        'if (remote.some((url) => !url.includes("access_token=viewer-token"))) '
+        'throw new Error("unauthenticated request: " + remote.join(", "));',
         api_base="https://collector.example",
         page_origin="https://viewer.example",
         include_discovery=True,
@@ -237,30 +236,31 @@ def test_remote_pages_loads_public_snapshot_without_token_prompt() -> None:
     )
 
 
-def test_remote_pages_ignores_stored_live_credentials_without_live_query() -> None:
-    """A stale browser token must not silently replace the public snapshot."""
+def test_remote_pages_uses_stored_credential_without_reprompting() -> None:
+    """A returning operator should enter the current board without another prompt."""
 
     _run_browserless_app_harness(
         'if (promptCount !== 0) throw new Error("unexpected prompt count=" + promptCount); '
         'const remote = requests.filter((url) => url.startsWith("https://collector.example")); '
-        'if (remote.length) throw new Error("unexpected collector request: " + remote.join(", ")); '
-        'if (!requests.some((url) => url.includes("/data/dual-market-snapshot.json"))) '
-        'throw new Error("snapshot was not requested: " + requests.join(", "));',
+        'if (!remote.some((url) => url.includes("/api/dual-market/board"))) '
+        'throw new Error("live board was not requested: " + requests.join(", ")); '
+        'if (remote.some((url) => !url.includes("access_token=viewer-token"))) '
+        'throw new Error("stored credential was not used: " + remote.join(", "));',
         api_base="https://collector.example",
         page_origin="https://viewer.example/",
-        access_token="viewer-token",
+        access_token="",
         include_discovery=True,
         run_initial_timeouts=True,
         require_access_token=True,
         storage_values={
             "cd_monitor_api_base": "https://collector.example",
-            "cd_monitor_access_token": "stale-token",
+            "cd_monitor_access_token": "viewer-token",
         },
     )
 
 
-def test_remote_pages_fetches_live_board_only_with_explicit_live_query() -> None:
-    """The query flag is the sole opt-in to live collector data on Pages."""
+def test_remote_pages_fetches_live_board_without_a_query_flag() -> None:
+    """Live data is the default once the viewer has an access token."""
 
     _run_browserless_app_harness(
         'if (promptCount !== 0) throw new Error("unexpected prompt count=" + promptCount); '
@@ -275,12 +275,11 @@ def test_remote_pages_fetches_live_board_only_with_explicit_live_query() -> None
         include_discovery=True,
         run_initial_timeouts=True,
         require_access_token=True,
-        page_search="?live=1",
     )
 
 
-def test_remote_pages_never_calls_an_unsupported_prompt_for_public_snapshot() -> None:
-    """A browser without prompt support must still render the public snapshot."""
+def test_remote_pages_snapshot_mode_never_calls_an_unsupported_prompt() -> None:
+    """The explicit read-only snapshot mode remains available without a token."""
 
     _run_browserless_app_harness(
         'if (promptCount !== 0) throw new Error("unexpected prompt count=" + promptCount); '
@@ -294,4 +293,5 @@ def test_remote_pages_never_calls_an_unsupported_prompt_for_public_snapshot() ->
         run_initial_timeouts=True,
         prompt_throws=True,
         require_access_token=True,
+        page_search="?snapshot=1",
     )
