@@ -413,6 +413,10 @@ body.kuro .pill.active { background: linear-gradient(135deg, var(--kuro-blue), #
 
 /* Opportunity feed (home) */
 body.kuro .feed { display: flex; flex-direction: column; gap: 18px; }
+body.kuro .research-queue { display: grid; gap: 14px; margin-top: 26px; }
+body.kuro .research-queue-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+body.kuro .research-queue-head h3 { margin: 0; font-size: 18px; }
+body.kuro .research-queue-head p { margin: 0; color: var(--kuro-muted); font-size: 13px; }
 body.kuro .op-card {
   display: grid; grid-template-columns: 1.05fr 0.95fr 1.05fr; gap: 18px;
   border: 1px solid var(--kuro-line); border-radius: 26px;
@@ -422,6 +426,14 @@ body.kuro .op-card {
   text-decoration: none; color: inherit; cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
+body.kuro .research-candidate-card { grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr) auto; align-items: center; }
+body.kuro .research-candidate-product { display: flex; align-items: center; gap: 14px; min-width: 0; }
+body.kuro .research-tag { background: rgba(94, 157, 255, 0.16); color: #2d5fa8; }
+body.kuro .research-analysis .metric { width: fit-content; min-width: 180px; }
+body.kuro .research-source-link, body.kuro .research-source-pending { font-size: 13px; font-weight: 700; }
+body.kuro .research-source-link { color: var(--kuro-blue); text-decoration: none; }
+body.kuro .research-source-link:hover { text-decoration: underline; }
+body.kuro .research-source-pending { color: var(--kuro-muted); }
 .op-card:hover {
   transform: translateY(-2px);
   border-color: var(--kuro-rose, #d36a8a);

@@ -38,6 +38,13 @@ def test_pages_build_includes_the_automatic_selection_board(tmp_path: Path) -> N
     assert 'sideMarkup("market"' in script
     assert "comparison-rail" in script
     assert "capture_state" in script
+    assert "research_candidates" in script
+    assert "待深研候选 · 不含报价" in script
+    assert "researchCandidateCard" in script
+    assert "researchStageLabel" in script
+    assert "candidate.source_price" not in script
+    assert "candidate.source_currency" not in script
+    assert "candidate.expected_profit" not in script
     assert "已自动暂停" in script
     assert "fresh_source_details" in script
     assert "resale_ready_candidates" in script

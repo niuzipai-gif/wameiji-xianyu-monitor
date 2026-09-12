@@ -432,6 +432,68 @@
     return '<div class="reason reference-direction-evidence">正样本方向证据，仍需详情核验：' + esc(labels.join("、")) + '</div>';
   }
 
+  function currentFeedbackOutcome(candidateId) {
+    const feedback = (Array.isArray(view.selectionFeedback) ? view.selectionFeedback : []).find(
+      (item) => Number(item && item.candidate_id) === candidateId
+    );
+    return feedback && feedback.outcome ? String(feedback.outcome) : "";
+  }
+
+  function selectionFeedbackMarkup(candidateId, currentOutcome) {
+    if (!Number.isSafeInteger(candidateId) || candidateId <= 0) return "";
+    return [
+      '<div class="selection-feedback-actions" data-selection-feedback-candidate="' + esc(candidateId) + '">',
+        '<span>产品方向：' + esc({ keep: "保留", source_pending: "供应待找", not_fit: "不符合" }[currentOutcome] || "未标注") + '</span>',
+        '<button type="button" data-selection-feedback="keep" data-candidate-id="' + esc(candidateId) + '">保留</button>',
+        '<button type="button" data-selection-feedback="source_pending" data-candidate-id="' + esc(candidateId) + '">供应待找</button>',
+        '<button type="button" data-selection-feedback="not_fit" data-candidate-id="' + esc(candidateId) + '">不符合</button>',
+      '</div>',
+    ].join("");
+  }
+
+  function researchStageLabel(stage) {
+    const labels = {
+      source_detail_needed: "待核验进货侧详情",
+      source_detail_refresh_needed: "进货侧详情待复核",
+      resale_evidence_needed: "待核验闲鱼销侧",
+      comparison_follow_up: "比价保持观察",
+    };
+    return labels[String(stage || "")] || "待补充研究证据";
+  }
+
+  function researchCandidateCard(candidate) {
+    const candidateId = Number(candidate.candidate_id);
+    const title = candidate.candidate_title || "未命名候选";
+    const identity = candidate.catalog_no || candidate.jan || "待补品番 / JAN";
+    const sourceUrl = safeHttpUrl(candidate.source_url);
+    const directionMarkup = candidateDirectionMarkup(candidateId);
+    const feedbackMarkup = selectionFeedbackMarkup(candidateId, currentFeedbackOutcome(candidateId));
+    return [
+      '<article class="op-card research-candidate-card" data-research-candidate-id="' + esc(candidateId || "") + '">',
+        '<div class="research-candidate-product">',
+          '<div class="thumb research-thumb">',
+            thumbMarkup(candidate.image_url, "待深研候选", typeLabel(candidate.media_type)),
+          '</div>',
+          '<div class="product">',
+            '<span class="tag research-tag">待深研</span>',
+            '<span class="tag source-tag">' + esc(typeLabel(candidate.media_type)) + '</span>',
+            '<h4>' + esc(title) + '</h4>',
+            '<div class="desc">品番 / JAN：' + esc(identity) + '</div>',
+          '</div>',
+        '</div>',
+        '<div class="analysis research-analysis">',
+          '<div class="metric"><small>当前阶段</small><strong>' + esc(researchStageLabel(candidate.research_stage)) + '</strong></div>',
+          directionMarkup,
+          '<div class="reason">需要补齐来源详情或市场证据；不含报价，也不代表淘汰。</div>',
+          feedbackMarkup,
+        '</div>',
+        sourceUrl
+          ? '<a class="research-source-link" href="' + esc(sourceUrl) + '" target="_blank" rel="noopener">查看来源详情</a>'
+          : '<span class="research-source-pending">来源详情入口待补</span>',
+      '</article>',
+    ].join("");
+  }
+
   function opportunityCard(item) {
     const sourceUrl = safeHttpUrl(item.url || item.source_url);
     const xianyuUrl = safeHttpUrl(item.xianyu_url);
@@ -445,10 +507,6 @@
     const catalogNo = item.catalog_no || item.jan || "待人工确认";
     const detailVerified = item.detail_verified === true || Number(item.detail_verified) === 1;
     const candidateId = Number(item.candidate_id);
-    const currentFeedback = (Array.isArray(view.selectionFeedback) ? view.selectionFeedback : []).find(
-      (feedback) => Number(feedback && feedback.candidate_id) === candidateId
-    );
-    const currentOutcome = currentFeedback && currentFeedback.outcome ? String(currentFeedback.outcome) : "";
     const directionMarkup = candidateDirectionMarkup(candidateId);
     const xianyuSide = [
       '<div class="thumb xianyu-thumb">',
@@ -477,16 +535,7 @@
     const reason = detailVerified
       ? "右侧挖煤姬价格来自已核验的商品详情页；左侧是 " + sampleCount + " 条有效闲鱼可比样本的参考价。下单前仍需人工核对版本、特典和品相。"
       : "来源详情仍待核验，当前价格不应作为进货依据。";
-    const feedbackMarkup = Number.isSafeInteger(candidateId) && candidateId > 0
-      ? [
-          '<div class="selection-feedback-actions" data-selection-feedback-candidate="' + esc(candidateId) + '">',
-            '<span>产品方向：' + esc({ keep: "保留", source_pending: "供应待找", not_fit: "不符合" }[currentOutcome] || "未标注") + '</span>',
-            '<button type="button" data-selection-feedback="keep" data-candidate-id="' + esc(candidateId) + '">保留</button>',
-            '<button type="button" data-selection-feedback="source_pending" data-candidate-id="' + esc(candidateId) + '">供应待找</button>',
-            '<button type="button" data-selection-feedback="not_fit" data-candidate-id="' + esc(candidateId) + '">不符合</button>',
-          '</div>',
-        ].join("")
-      : "";
+    const feedbackMarkup = selectionFeedbackMarkup(candidateId, currentFeedbackOutcome(candidateId));
     return [
       '<article class="op-card discovery-op-card" data-discovery-opportunity-id="' + esc(item.id || "") + '">',
         sideMarkup("xianyu", xianyuUrl, xianyuSide),
@@ -577,12 +626,21 @@
       (Number(right.expected_profit) || 0) - (Number(left.expected_profit) || 0)
       || (Number(right.match_confidence) || 0) - (Number(left.match_confidence) || 0)
     ));
-    if (!items.length) {
+    const researchCandidates = view.filter === "all"
+      ? (Array.isArray(view.board.research_candidates) ? view.board.research_candidates : [])
+      : [];
+    if (!items.length && !researchCandidates.length) {
       const summary = view.board.summary || {};
       target.innerHTML = '<div class="empty-state">' + esc(emptyFeedMessage(summary, allItems.length)) + '</div>';
       return;
     }
-    target.innerHTML = items.map(opportunityCard).join("");
+    target.innerHTML = [
+      items.map(opportunityCard).join(""),
+      researchCandidates.length
+        ? '<section class="research-queue"><div class="research-queue-head"><h3>待深研候选 · 不含报价</h3><p>它们需要补齐详情或市场证据，不代表淘汰。</p></div>'
+          + researchCandidates.map(researchCandidateCard).join("") + '</section>'
+        : "",
+    ].join("");
   }
 
   function setSelectionBoardQuery(query) {
@@ -672,7 +730,7 @@
         apiGet("/api/selection-feedback/status").catch(() => null),
         apiGet("/api/selection-feedback?current=1&limit=200").catch(() => null),
       ]);
-      view.board = board || { summary: {}, pools: [], opportunities: [] };
+      view.board = board || { summary: {}, pools: [], opportunities: [], research_candidates: [] };
       view.commands = (commandPayload && commandPayload.items) || [];
       view.referenceStatus = referenceStatus;
       view.referenceObservations = (referenceObservationPayload && referenceObservationPayload.items) || [];
