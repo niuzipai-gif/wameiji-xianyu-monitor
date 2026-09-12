@@ -1,7 +1,7 @@
 param(
     [ValidateRange(15, 3600)]
     [int]$PollSeconds = 60,
-    [string]$Database = "data/local/takeover.db"
+    [string]$Database = "data/local/dual-market.db"
 )
 
 $ErrorActionPreference = "Stop"

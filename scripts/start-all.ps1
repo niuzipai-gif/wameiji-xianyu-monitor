@@ -1,6 +1,7 @@
 param(
     [ValidateRange(1, 65535)]
-    [int]$Port = 9890
+    [int]$Port = 9890,
+    [string]$Database = "data/local/dual-market.db"
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,7 +24,7 @@ if (-not (Test-Path -LiteralPath $DiscoveryScript -PathType Leaf)) {
 $localListening = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if (-not $localListening) {
     Start-Process -FilePath "powershell.exe" -WorkingDirectory $ProjectRoot -WindowStyle Hidden -ArgumentList @(
-        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $LocalScript, "-Port", $Port
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $LocalScript, "-Port", $Port, "-Database", $Database
     )
 }
 
@@ -33,7 +34,7 @@ $replicaRunning = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -E
     Where-Object { $_.CommandLine -match "publish-replica\.py" }
 if (-not $replicaRunning) {
     Start-Process -FilePath "powershell.exe" -WorkingDirectory $ProjectRoot -WindowStyle Hidden -ArgumentList @(
-        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ReplicaScript
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ReplicaScript, "-Database", $Database
     )
 }
 
@@ -43,7 +44,7 @@ $discoveryRunning = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" 
     Where-Object { $_.CommandLine -match "cd_monitor\.cli discovery-worker" }
 if (-not $discoveryRunning) {
     Start-Process -FilePath "powershell.exe" -WorkingDirectory $ProjectRoot -WindowStyle Hidden -ArgumentList @(
-        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $DiscoveryScript
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $DiscoveryScript, "-Database", $Database
     )
 }
 

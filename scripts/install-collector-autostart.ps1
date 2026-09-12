@@ -10,9 +10,9 @@ $Identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $PowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 
 $Services = @(
-    @{ Name = "Wameiji-Xianyu Local API"; Script = "scripts\start-local.ps1"; ExtraArgs = @("-Port", "9890") },
-    @{ Name = "Wameiji-Xianyu Replica Publisher"; Script = "scripts\start-replica.ps1"; ExtraArgs = @() },
-    @{ Name = "Wameiji-Xianyu Discovery Worker"; Script = "scripts\start-discovery.ps1"; ExtraArgs = @() }
+    @{ Name = "Wameiji-Xianyu Local API"; Script = "scripts\start-local.ps1"; ExtraArgs = @("-Port", "9890", "-Database", "data/local/dual-market.db") },
+    @{ Name = "Wameiji-Xianyu Replica Publisher"; Script = "scripts\start-replica.ps1"; ExtraArgs = @("-Database", "data/local/dual-market.db") },
+    @{ Name = "Wameiji-Xianyu Discovery Worker"; Script = "scripts\start-discovery.ps1"; ExtraArgs = @("-Database", "data/local/dual-market.db") }
 )
 
 if ($Remove) {
