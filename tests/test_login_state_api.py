@@ -237,7 +237,7 @@ class TestInspectAfterPost:
         wf = tmp_path / "wameiji_state.json"
         server, thread, base = _start_server(tmp_path, xf, wf)
         try:
-            content = json.dumps({"cookies": [{"name": "tracknick", "value": "y", "domain": ".goofish.com"}], "origins": []})
+            content = json.dumps({"cookies": [{"name": "cookie17", "value": "y", "domain": ".goofish.com"}], "origins": []})
             _post_json(f"{base}/api/login-state/xianyu", {"content": content})
             body = _get(f"{base}/api/login-state/xianyu")
             assert body["status"] == "ready"

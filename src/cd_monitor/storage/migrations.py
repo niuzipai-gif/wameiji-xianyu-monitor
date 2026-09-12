@@ -72,6 +72,48 @@ CREATE TABLE IF NOT EXISTS xianyu_price_samples (
   fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS listing_observations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source TEXT NOT NULL CHECK(source IN ('wameiji', 'xianyu')),
+  source_listing_id TEXT NOT NULL,
+  canonical_product_key TEXT,
+  title TEXT NOT NULL,
+  price REAL NOT NULL,
+  currency TEXT NOT NULL,
+  url TEXT NOT NULL,
+  image_url TEXT NOT NULL,
+  availability TEXT NOT NULL,
+  condition_group TEXT NOT NULL,
+  completeness TEXT NOT NULL,
+  evidence_level TEXT NOT NULL CHECK(evidence_level IN ('search_card', 'detail_verified')),
+  raw_snapshot_path TEXT,
+  screenshot_path TEXT,
+  source_detail_fee REAL,
+  captured_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source, source_listing_id, captured_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_listing_observations_product
+ON listing_observations(canonical_product_key, source, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS price_comparisons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  canonical_product_key TEXT NOT NULL,
+  wameiji_observation_id INTEGER NOT NULL REFERENCES listing_observations(id),
+  xianyu_observation_id INTEGER NOT NULL REFERENCES listing_observations(id),
+  cost_config_json TEXT NOT NULL,
+  landed_cost_cny REAL,
+  sale_price_cny REAL NOT NULL,
+  expected_profit_cny REAL,
+  net_margin REAL,
+  status TEXT NOT NULL CHECK(status IN ('eligible', 'below_margin', 'cost_pending')),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_comparisons_product_time
+ON price_comparisons(canonical_product_key, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS opportunities (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   catalog_no TEXT NOT NULL,

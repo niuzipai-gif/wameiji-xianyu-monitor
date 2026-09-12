@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from uuid import uuid4
 
 from cd_monitor.core.discovery import DiscoveryCandidate, DiscoveryKeyword, DiscoveryPool
+from cd_monitor.core.dual_market import ListingObservation, MarketSource, PriceComparison
 from cd_monitor.core.identifiers import normalize_catalog_no_compact
 from cd_monitor.core.models import MarketItem, Opportunity, WatchItem, XianyuPriceSample
 from cd_monitor.core.product_images import is_usable_product_image
 from cd_monitor.storage.migrations import SCHEMA_SQL
-
 
 _TITLE_QUERY_EVIDENCE_VERSION_KEY = "discovery_title_query_evidence_version"
 _TITLE_QUERY_EVIDENCE_VERSION = "strict-title-sample-v3"
@@ -1028,6 +1029,7 @@ def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
             _migrate_watchlist_filter_columns(conn)
             _migrate_market_items_cover_columns(conn)
             _migrate_market_item_detail_fee_columns(conn)
+            _migrate_price_comparison_statuses(conn)
             _migrate_discovery_selection_board(conn)
             _migrate_detail_first_discovery(conn)
             _migrate_duplicate_source_candidates(conn)
@@ -1039,6 +1041,63 @@ def init_db(db_path: str | Path = "data/cd_monitor.db") -> None:
             _migrate_selection_preference_feedback(conn)
     finally:
         conn.close()
+
+
+def _migrate_price_comparison_statuses(conn: sqlite3.Connection) -> None:
+    """Replace the legacy profit-sign states with strict margin states."""
+
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='price_comparisons'"
+    ).fetchone()
+    table_sql = str(row[0] or "") if row else ""
+    if "'eligible'" in table_sql and "'below_margin'" in table_sql:
+        return
+
+    conn.execute("ALTER TABLE price_comparisons RENAME TO price_comparisons_legacy_status")
+    conn.execute(
+        """
+        CREATE TABLE price_comparisons (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          canonical_product_key TEXT NOT NULL,
+          wameiji_observation_id INTEGER NOT NULL REFERENCES listing_observations(id),
+          xianyu_observation_id INTEGER NOT NULL REFERENCES listing_observations(id),
+          cost_config_json TEXT NOT NULL,
+          landed_cost_cny REAL,
+          sale_price_cny REAL NOT NULL,
+          expected_profit_cny REAL,
+          net_margin REAL,
+          status TEXT NOT NULL CHECK(status IN ('eligible', 'below_margin', 'cost_pending')),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO price_comparisons (
+          id, canonical_product_key, wameiji_observation_id, xianyu_observation_id,
+          cost_config_json, landed_cost_cny, sale_price_cny, expected_profit_cny,
+          net_margin, status, created_at
+        )
+        SELECT
+          id, canonical_product_key, wameiji_observation_id, xianyu_observation_id,
+          cost_config_json, landed_cost_cny, sale_price_cny, expected_profit_cny,
+          net_margin,
+          CASE status
+            WHEN 'ready' THEN 'eligible'
+            WHEN 'negative_profit' THEN 'below_margin'
+            ELSE status
+          END,
+          created_at
+        FROM price_comparisons_legacy_status
+        """
+    )
+    conn.execute("DROP TABLE price_comparisons_legacy_status")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_price_comparisons_product_time
+        ON price_comparisons(canonical_product_key, created_at DESC)
+        """
+    )
 
 
 def _migrate_candidate_rechecks_pending_unique(conn: sqlite3.Connection) -> None:
@@ -1526,6 +1585,215 @@ def insert_xianyu_samples(db_path: str | Path, samples: Iterable[XianyuPriceSamp
             )
             ids.append(int(cur.lastrowid))
     return ids
+
+
+def insert_listing_observation(
+    db_path: str | Path, observation: ListingObservation
+) -> int:
+    """Persist one immutable capture and return its stable database id.
+
+    Replaying the same evidence manifest is idempotent, while a later capture
+    of the same source listing remains a new historical row because its
+    ``captured_at`` differs.
+    """
+
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO listing_observations (
+              source, source_listing_id, canonical_product_key, title, price, currency,
+              url, image_url, availability, condition_group, completeness, evidence_level,
+              raw_snapshot_path, screenshot_path, source_detail_fee, captured_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source, source_listing_id, captured_at) DO NOTHING
+            """,
+            (
+                observation.source,
+                observation.source_listing_id,
+                observation.canonical_product_key,
+                observation.title,
+                observation.price,
+                observation.currency,
+                observation.url,
+                observation.image_url,
+                observation.availability,
+                observation.condition_group,
+                observation.completeness,
+                observation.evidence_level,
+                observation.raw_snapshot_path,
+                observation.screenshot_path,
+                observation.source_detail_fee,
+                observation.captured_at,
+            ),
+        )
+        row = conn.execute(
+            """
+            SELECT id FROM listing_observations
+            WHERE source = ? AND source_listing_id = ? AND captured_at = ?
+            """,
+            (
+                observation.source,
+                observation.source_listing_id,
+                observation.captured_at,
+            ),
+        ).fetchone()
+    if row is None:  # pragma: no cover - SQLite invariant guard
+        raise RuntimeError("listing observation was not persisted")
+    return int(row[0])
+
+
+def get_listing_observation(
+    db_path: str | Path, observation_id: int
+) -> ListingObservation | None:
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM listing_observations WHERE id = ?", (observation_id,)
+        ).fetchone()
+    return _listing_observation_from_row(row) if row is not None else None
+
+
+def list_current_observations(
+    db_path: str | Path,
+    *,
+    canonical_product_key: str | None = None,
+    source: MarketSource | None = None,
+    captured_since: str | None = None,
+) -> list[ListingObservation]:
+    """Return the newest capture per source-local listing without deleting history."""
+
+    init_db(db_path)
+    conditions: list[str] = []
+    parameters: list[object] = []
+    if canonical_product_key is not None:
+        conditions.append("canonical_product_key = ?")
+        parameters.append(canonical_product_key)
+    if source is not None:
+        conditions.append("source = ?")
+        parameters.append(source)
+    if captured_since is not None:
+        conditions.append("datetime(captured_at) >= datetime(?)")
+        parameters.append(captured_since)
+    where_sql = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    sql = f"""
+        WITH current_per_listing AS (
+          SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY source, source_listing_id
+            ORDER BY captured_at DESC, id DESC
+          ) AS current_rank
+          FROM listing_observations
+          {where_sql}
+        )
+        SELECT * FROM current_per_listing
+        WHERE current_rank = 1
+        ORDER BY captured_at DESC, id DESC
+    """
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(sql, tuple(parameters)).fetchall()
+    return [_listing_observation_from_row(row) for row in rows]
+
+
+def _listing_observation_from_row(row: sqlite3.Row) -> ListingObservation:
+    return ListingObservation(
+        source=row["source"],
+        source_listing_id=row["source_listing_id"],
+        canonical_product_key=row["canonical_product_key"],
+        title=row["title"],
+        price=float(row["price"]),
+        currency=row["currency"],
+        url=row["url"],
+        image_url=row["image_url"],
+        availability=row["availability"],
+        condition_group=row["condition_group"],
+        completeness=row["completeness"],
+        evidence_level=row["evidence_level"],
+        captured_at=row["captured_at"],
+        raw_snapshot_path=row["raw_snapshot_path"],
+        screenshot_path=row["screenshot_path"],
+        source_detail_fee=row["source_detail_fee"],
+        id=int(row["id"]),
+    )
+
+
+def insert_price_comparison(db_path: str | Path, comparison: PriceComparison) -> int:
+    """Append a comparison snapshot; never overwrite an older calculation."""
+
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO price_comparisons (
+              canonical_product_key, wameiji_observation_id, xianyu_observation_id,
+              cost_config_json, landed_cost_cny, sale_price_cny, expected_profit_cny,
+              net_margin, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                comparison.canonical_product_key,
+                comparison.wameiji_observation_id,
+                comparison.xianyu_observation_id,
+                comparison.cost_config_json,
+                comparison.landed_cost_cny,
+                comparison.sale_price_cny,
+                comparison.expected_profit_cny,
+                comparison.net_margin,
+                comparison.status,
+            ),
+        )
+    return int(cur.lastrowid)
+
+
+def list_price_comparisons(
+    db_path: str | Path,
+    *,
+    canonical_product_key: str | None = None,
+    limit: int = 100,
+) -> list[PriceComparison]:
+    """List persisted comparison snapshots newest first for board/API readers."""
+
+    init_db(db_path)
+    where_sql = ""
+    parameters: tuple[object, ...] = (max(1, int(limit)),)
+    if canonical_product_key is not None:
+        where_sql = "WHERE canonical_product_key = ?"
+        parameters = (canonical_product_key, max(1, int(limit)))
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT * FROM price_comparisons
+            {where_sql}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            parameters,
+        ).fetchall()
+    return [_price_comparison_from_row(row) for row in rows]
+
+
+def _price_comparison_from_row(row: sqlite3.Row) -> PriceComparison:
+    return PriceComparison(
+        id=int(row["id"]),
+        canonical_product_key=row["canonical_product_key"],
+        wameiji_observation_id=int(row["wameiji_observation_id"]),
+        xianyu_observation_id=int(row["xianyu_observation_id"]),
+        cost_config_json=row["cost_config_json"],
+        landed_cost_cny=(
+            float(row["landed_cost_cny"]) if row["landed_cost_cny"] is not None else None
+        ),
+        sale_price_cny=float(row["sale_price_cny"]),
+        expected_profit_cny=(
+            float(row["expected_profit_cny"])
+            if row["expected_profit_cny"] is not None
+            else None
+        ),
+        net_margin=float(row["net_margin"]) if row["net_margin"] is not None else None,
+        status=row["status"],
+        created_at=row["created_at"],
+    )
 
 
 def insert_opportunity(db_path: str | Path, opportunity: Opportunity, wameiji_item_id: int | None = None) -> int:

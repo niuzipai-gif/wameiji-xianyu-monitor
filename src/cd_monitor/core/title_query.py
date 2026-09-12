@@ -10,9 +10,11 @@ from dataclasses import dataclass
 # Xianyu result list. Remove them before using a marketplace title as a query
 # or accepting a title-only match.
 _TITLE_NOISE_PATTERNS = (
+    re.compile(r"【全品[^】]*】"),
     re.compile(r"完全(?:生産|生产)限定版", re.IGNORECASE),
     re.compile(
-        r"初回(?:限定)?盤[Ａ-ＤA-D]?|初回限定版[Ａ-ＤA-D]?|初回限定|通常盤|限定盤|限定版",
+        r"初回(?:(?:生産|生产)(?:限定)?|限定)?(?:盤|盘|版)?[Ａ-ＤA-D]?|"
+        r"通常(?:盤|盘|版)|限定(?:盤|盘|版)",
         re.IGNORECASE,
     ),
     re.compile(
@@ -34,6 +36,7 @@ _TITLE_NOISE_PATTERNS = (
     ),
     re.compile(r"ブルーレイ|ディスク|アルバム|シングル"),
     re.compile(r"国内正規品|廃盤|マキシ(?:シングル)?"),
+    re.compile(r"全品\d*倍?|男性|女性"),
     re.compile(r"ゲームソフト|ソフト|ニンテンドー|プレイステーション"),
     re.compile(r"\b(?:nintendo|playstation|game)\b", re.IGNORECASE),
     # Eight-digit values in a rendered listing are usually source/listing IDs,
@@ -48,6 +51,11 @@ _LATIN_TOKEN_RE = re.compile(r"[a-z]{3,}", re.IGNORECASE)
 _QUERY_LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 _HAN_ANCHOR_RE = re.compile(r"[\u3400-\u9fff]{2,}")
 _KANA_ANCHOR_RE = re.compile(r"[\u3040-\u30ff]{8,}")
+_SHORT_KANA_ANCHOR_RE = re.compile(r"[\u3040-\u30ff]{3,}")
+_TRACKLIST_START_RE = re.compile(
+    r"(?:收录|收錄|収録|歌曲目录|歌曲目錄|曲目(?:包括|包含)?|track\s*list)",
+    re.IGNORECASE,
+)
 _GENERIC_LATIN_TOKENS = {
     "collector",
     "collectors",
@@ -98,7 +106,21 @@ _PLATFORM_ALIASES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?<![A-Za-z0-9])(?:ps\s*4|playstation\s*4)(?:版)?(?![A-Za-z0-9])", re.IGNORECASE), "PS4"),
     (re.compile(r"(?<![A-Za-z0-9])(?:ps\s*5|playstation\s*5)(?:版)?(?![A-Za-z0-9])", re.IGNORECASE), "PS5"),
 )
-_PLATFORM_WORDS = {"switch", "psvita", "psp", "3ds", "ds", "gba", "ps3", "ps4", "ps5"}
+_PLATFORM_WORDS = {
+    "switch",
+    "nintendo",
+    "ns",
+    "playstation",
+    "psvita",
+    "vita",
+    "psp",
+    "3ds",
+    "ds",
+    "gba",
+    "ps3",
+    "ps4",
+    "ps5",
+}
 _PLATFORM_MARKERS = {
     "switch": "switch",
     "psvita": "ps vita",
@@ -148,11 +170,22 @@ def source_edition_required_terms(value: str | None) -> tuple[str, ...]:
     if re.search(r"完全(?:生産|生产)?限定(?:版|盤)?", source, re.IGNORECASE):
         return ("完全生产", "完全生産", "完全限定")
     if re.search(r"初回(?:限定)?(?:版|盤)?", source, re.IGNORECASE):
-        # Chinese resale titles often shorten 初回限定版 to just 限定版.
-        # Requiring any one of these terms still excludes a normal edition.
-        return ("初回", "首发", "限定", "限量")
+        # Chinese resale titles often shorten 初回限定版 to 限定版. Require a
+        # real edition suffix rather than bare ``限定`` so date-limited shop
+        # promotions (for example ``9/5限定``) still cannot masquerade as a
+        # product edition.
+        return (
+            "初回",
+            "首发",
+            "首發",
+            "first press",
+            "限定版",
+            "限定盘",
+            "限定盤",
+            "限量版",
+        )
     if re.search(r"(?:限定|limited)(?:版|盤|edition)?", source, re.IGNORECASE):
-        return ("限定", "限量", "limited")
+        return ("限定版", "限定盘", "限定盤", "限量版", "limited edition")
     if re.search(r"(?:通常|普通|standard)(?:版|盤|edition)?", source, re.IGNORECASE):
         return ("通常", "普通", "标准", "標準", "standard")
     return ()
@@ -266,9 +299,17 @@ def matches_title_search_query(
     latin_tokens = _distinctive_latin_token_sequence(query_cleaned)
     latin_token_set = set(latin_tokens)
     han_anchors = _han_anchors(query_cleaned)
-    han_anchor_required = len(latin_tokens) >= 2 and bool(han_anchors)
-    han_anchor_present = any(anchor in compact_text for anchor in han_anchors)
+    # A platform-only Latin token (for example ``Vita``) is not a product
+    # fingerprint.  When the query is otherwise made from Han title chunks,
+    # every chunk is part of the identity: sharing only the series name must
+    # not let a different subtitle through.  Queries with one genuine Latin
+    # product title retain the looser translated-title path used by Riviera.
+    han_anchor_required = bool(han_anchors) and (
+        not latin_tokens or len(latin_tokens) >= 2
+    )
+    han_anchor_present = all(anchor in compact_text for anchor in han_anchors)
     kana_anchors = _distinctive_kana_anchors(query_cleaned)
+    short_kana_anchors = _distinctive_short_kana_anchors(query_cleaned)
     # A short English series name such as ``MONSTER HUNTER`` can be shared by
     # many unrelated soundtrack listings. When the source also gives a long,
     # non-generic Japanese variant name, require that variant instead of
@@ -276,14 +317,30 @@ def matches_title_search_query(
     # English title words remain specific enough to support translation-only
     # listings such as ``THE LAST STORY``.
     kana_anchor_required = len(latin_tokens) < 3 and bool(kana_anchors)
+    # One or two Latin words are often an artist rather than a release title.
+    # When accompanied by a short Japanese title cue (RYTHEM + ホウキ雲, or
+    # ORANGE RANGE + アスタリスク), retain that cue so another release by the
+    # same artist cannot pass on the artist tokens alone.
+    short_kana_anchor_required = (
+        1 <= len(latin_tokens) <= 2
+        and not query_platforms
+        and bool(short_kana_anchors)
+    )
     kana_anchor_present = any(anchor in compact_text for anchor in kana_anchors)
+    short_kana_anchor_present = any(
+        anchor in compact_text for anchor in short_kana_anchors
+    )
     # Multiple English product words must stay consecutive.  Treating them as
     # an unordered bag lets unrelated listing descriptions combine “Last” and
     # “Story” from separate phrases into a false ``THE LAST STORY`` match.
     latin_phrase = "".join(latin_tokens)
     if len(latin_tokens) >= 2 and latin_phrase not in compact_text:
         return False
-    shared_latin_tokens = {token for token in latin_token_set if token in compact_text}
+    text_latin_token_set = set(_distinctive_latin_token_sequence(text_cleaned))
+    # Latin anchors must be complete words. Compact substring membership made
+    # the short album name ``fade`` match the unrelated title ``fadeouts``.
+    # Punctuation and case variants are already normalized by tokenization.
+    shared_latin_tokens = latin_token_set & text_latin_token_set
     if shared_latin_tokens and len(shared_latin_tokens) >= min(2, len(latin_token_set)):
         # A short recall query such as ``X JAPAN Longing 切望`` needs the
         # Han anchor as well: otherwise an unrelated collection merely
@@ -291,6 +348,7 @@ def matches_title_search_query(
         if not (
             (han_anchor_required and not han_anchor_present)
             or (kana_anchor_required and not kana_anchor_present)
+            or (short_kana_anchor_required and not short_kana_anchor_present)
         ):
             return _has_required_any_term(text, required_any_terms)
 
@@ -299,6 +357,8 @@ def matches_title_search_query(
     # (for example, another X JAPAN Longing release) becomes false evidence.
     if (han_anchor_required and not han_anchor_present) or (
         kana_anchor_required and not kana_anchor_present
+    ) or (
+        short_kana_anchor_required and not short_kana_anchor_present
     ):
         return False
 
@@ -314,6 +374,10 @@ def matches_title_search_query(
 
 def _without_title_noise(value: str | None) -> str:
     normalized = unicodedata.normalize("NFKC", str(value or ""))
+    # Search-card titles often append a full track list. Those song names are
+    # evidence about the advertised album, not alternate product titles.
+    normalized = _TRACKLIST_START_RE.split(normalized, maxsplit=1)[0]
+    normalized = normalized.translate(str.maketrans({"Ø": "0", "ø": "0", "Φ": "0", "φ": "0"}))
     normalized = _fold_latin_diacritics(normalized)
     normalized = _normalize_platform_aliases(normalized)
     normalized = _STORE_CODE_RE.sub(" ", normalized)
@@ -389,6 +453,14 @@ def _distinctive_kana_anchors(value: str) -> list[str]:
     return [
         anchor
         for anchor in _KANA_ANCHOR_RE.findall(value)
+        if anchor not in _GENERIC_KANA_ANCHORS
+    ]
+
+
+def _distinctive_short_kana_anchors(value: str) -> list[str]:
+    return [
+        anchor
+        for anchor in _SHORT_KANA_ANCHOR_RE.findall(value)
         if anchor not in _GENERIC_KANA_ANCHORS
     ]
 

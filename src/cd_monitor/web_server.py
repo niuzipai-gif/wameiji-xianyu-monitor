@@ -3,6 +3,7 @@ from __future__ import annotations
 
 
 import json
+import math
 import mimetypes
 import os
 import datetime
@@ -44,8 +45,16 @@ from typing import Any
 from urllib.parse import urlparse
 
 from cd_monitor.config import load_config
+from cd_monitor.core.dual_market import (
+    DualMarketCostConfig,
+    ListingObservation,
+    PriceComparison,
+    select_lowest_eligible,
+)
 from cd_monitor.services.failure_guard import FailureGuard
 from cd_monitor.services.price_history_service import PriceHistoryService
+from cd_monitor.services.dual_market_profit_policy import STRICT_PROFIT_POLICY_VERSION
+from cd_monitor.services.dual_market_service import comparison_cost_breakdown
 from cd_monitor.services.result_blacklist_service import ResultBlacklistService
 from cd_monitor.services.scheduler_service import SchedulerService
 from cd_monitor.web_p51 import P51Router
@@ -132,6 +141,8 @@ from cd_monitor.storage.sqlite import (
     list_discovery_research_candidates,
     list_discovery_runs,
     selection_preference_feedback_status,
+    list_current_observations,
+    list_price_comparisons,
 )
 
 
@@ -283,6 +294,22 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "web"
 DEFAULT_WAMEIJI = PROJECT_ROOT / "data/mock/wameiji_items.sample.json"
 DEFAULT_XIANYU = PROJECT_ROOT / "data/mock/xianyu_samples.sample.json"
+# A manual collection session can span a full workday. Keep all evidence from
+# that bounded session visible while still dropping yesterday-old listings.
+DUAL_MARKET_OBSERVATION_FRESHNESS_MINUTES = 24 * 60
+
+
+def _dual_market_collection_paused() -> bool:
+    value = os.getenv("DUAL_MARKET_COLLECTION_PAUSED", "1").strip().casefold()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _dual_market_display_exchange_rate() -> float:
+    try:
+        value = float(os.getenv("CD_JPY_TO_CNY", "0.046"))
+    except (TypeError, ValueError):
+        return 0.046
+    return round(value, 6) if math.isfinite(value) and value > 0 else 0.046
 
 
 class BadJsonRequest(ValueError):
@@ -663,6 +690,9 @@ def _build_handler(
                     )
                     return
                 self._json({"items": items})
+                return
+            if route == "/api/dual-market/board":
+                self._json(_dual_market_board(db_path))
                 return
             if route == "/api/discovery/board":
                 self._json(
@@ -1243,6 +1273,8 @@ def _build_handler(
                 command_type = str(payload.get("command_type") or "").strip()
                 if command_type not in {"scan_now", "set_pool", "set_keywords"}:
                     self._json({"error": "unsupported_command_type"}, status=HTTPStatus.BAD_REQUEST)
+                    return
+                if self._reject_paused_collection():
                     return
                 command_payload = {
                     key: value
@@ -1891,6 +1923,8 @@ def _build_handler(
             if route == "/api/scan/live-html":
                 # Real browser capture + evaluation + optional notify for one catalog.
                 # Matches `cli scan-live-html --catalog-no X ... --notify ...`.
+                if self._reject_paused_collection():
+                    return
                 catalog_no = str(payload.get("catalog_no", "")).strip()
                 if not catalog_no:
                     self._json(
@@ -1948,6 +1982,8 @@ def _build_handler(
             if route == "/api/scan/live-watchlist":
                 # Real browser capture + evaluation + optional notify for every watch.
                 # Matches `cli live-watchlist ... --notify ...`.
+                if self._reject_paused_collection():
+                    return
                 config = load_config(None)
                 do_notify = bool(payload.get("notify", False))
                 channel_spec = str(payload.get("notify_channel", "feishu"))
@@ -2322,6 +2358,8 @@ def _build_handler(
             # so the API call returns immediately while the scraper fetches
             # fresh data. The frontend polls /api/scrape/status.
             if route == "/api/scrape/now":
+                if self._reject_paused_collection():
+                    return
                 import subprocess as _sp
                 import threading as _thr
                 import time as _t
@@ -2383,6 +2421,8 @@ def _build_handler(
             # 1) Spawn run_one_cycle.py (scrape only - it now skips matching).
             # 2) When done, run /api/scrape/match in-process to generate opportunities.
             if route == "/api/scrape/full":
+                if self._reject_paused_collection():
+                    return
                 import subprocess as _sp2
                 import threading as _thr3
                 import time as _t3
@@ -2657,6 +2697,12 @@ def _build_handler(
             supplied = self.headers.get("X-CD-Sync-Token", "").strip()
             return bool(token and supplied and compare_digest(supplied, token))
 
+        def _reject_paused_collection(self) -> bool:
+            if not _dual_market_collection_paused():
+                return False
+            self._json({"error": "collector_paused"}, status=HTTPStatus.CONFLICT)
+            return True
+
         def _json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
 
             data = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
@@ -2779,6 +2825,164 @@ def _discovery_research_candidate_views(db_path: str | Path) -> list[dict[str, o
         if canonical_url:
             view["source_url"] = canonical_url
     return views
+
+
+def _dual_market_board(db_path: str | Path) -> dict[str, object]:
+    """Build a read-only board from exact observation/comparison relationships.
+
+    Legacy opportunities and global Xianyu price samples intentionally never
+    enter this payload.  A comparison remains visible only while both of its
+    referenced listings are still the current lowest eligible observations.
+    """
+
+    fresh_since = (
+        datetime.datetime.now(datetime.UTC)
+        - datetime.timedelta(minutes=DUAL_MARKET_OBSERVATION_FRESHNESS_MINUTES)
+    ).isoformat()
+    observations = list_current_observations(db_path, captured_since=fresh_since)
+    grouped: dict[str, list[ListingObservation]] = {}
+    for observation in observations:
+        if observation.canonical_product_key:
+            grouped.setdefault(observation.canonical_product_key, []).append(observation)
+
+    latest_comparisons: dict[str, PriceComparison] = {}
+    for comparison in list_price_comparisons(db_path, limit=500):
+        latest_comparisons.setdefault(comparison.canonical_product_key, comparison)
+
+    eligible: list[dict[str, object]] = []
+    state_counts = {"eligible": 0, "below_margin": 0, "cost_pending": 0}
+    waiting_wameiji_count = 0
+    waiting_xianyu_count = 0
+    handled_keys: set[str] = set()
+
+    for product_key, current_group in grouped.items():
+        wameiji = select_lowest_eligible(current_group, source="wameiji")
+        xianyu = select_lowest_eligible(
+            current_group
+            if wameiji is None
+            else (
+                observation
+                for observation in current_group
+                if observation.condition_group == wameiji.condition_group
+            ),
+            source="xianyu",
+        )
+        comparison = latest_comparisons.get(product_key)
+        if (
+            comparison is not None
+            and wameiji is not None
+            and xianyu is not None
+            and comparison.wameiji_observation_id == wameiji.id
+            and comparison.xianyu_observation_id == xianyu.id
+        ):
+            state_counts[comparison.status] += 1
+            if comparison.status == "eligible":
+                eligible.append(_dual_market_comparison_view(comparison, wameiji, xianyu))
+            handled_keys.add(product_key)
+
+    for product_key, current_group in grouped.items():
+        if product_key in handled_keys:
+            continue
+        wameiji = select_lowest_eligible(current_group, source="wameiji")
+        xianyu = select_lowest_eligible(
+            current_group
+            if wameiji is None
+            else (
+                observation
+                for observation in current_group
+                if observation.condition_group == wameiji.condition_group
+            ),
+            source="xianyu",
+        )
+        if wameiji is not None and xianyu is None:
+            waiting_xianyu_count += 1
+        elif xianyu is not None and wameiji is None:
+            waiting_wameiji_count += 1
+
+    eligible.sort(
+        key=lambda entry: (
+            -float(entry["calculation"].get("net_margin") or 0),
+            -float(entry["calculation"].get("expected_profit_cny") or 0),
+            int(entry["comparison_id"] or 0),
+        )
+    )
+
+    return {
+        "schema_version": 2,
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "display_exchange_rate_cny_per_jpy": _dual_market_display_exchange_rate(),
+        "strategy": {
+            "policy_version": STRICT_PROFIT_POLICY_VERSION,
+            "trade_direction": "wameiji_jpy_to_xianyu_cny",
+            "minimum_net_margin": 0.25,
+            "margin_denominator": "xianyu_sale_price_cny",
+        },
+        "summary": {
+            "evaluated_count": sum(state_counts.values()),
+            "eligible_count": state_counts["eligible"],
+            "below_margin_count": state_counts["below_margin"],
+            "cost_pending_count": state_counts["cost_pending"],
+            "waiting_wameiji_count": waiting_wameiji_count,
+            "waiting_xianyu_count": waiting_xianyu_count,
+        },
+        "eligible": eligible,
+        "below_margin": [],
+        "cost_pending": [],
+        "waiting_wameiji": [],
+        "waiting_xianyu": [],
+        "collector": {
+            "state": "paused" if _dual_market_collection_paused() else "active"
+        },
+    }
+
+
+def _dual_market_observation_view(observation: ListingObservation) -> dict[str, object]:
+    return {
+        "listing_id": observation.id,
+        "source": observation.source,
+        "canonical_product_key": observation.canonical_product_key,
+        "title": observation.title,
+        "price": observation.price,
+        "currency": observation.currency,
+        "url": observation.url,
+        "image_url": observation.image_url,
+        "availability": observation.availability,
+        "condition_group": observation.condition_group,
+        "completeness": observation.completeness,
+        "evidence_level": observation.evidence_level,
+        "captured_at": observation.captured_at,
+    }
+
+
+def _dual_market_comparison_view(
+    comparison: PriceComparison,
+    wameiji: ListingObservation,
+    xianyu: ListingObservation,
+) -> dict[str, object]:
+    raw_config = json.loads(comparison.cost_config_json)
+    allowed_fields = DualMarketCostConfig.__dataclass_fields__
+    config = DualMarketCostConfig(
+        **{
+            name: value
+            for name, value in raw_config.items()
+            if name in allowed_fields
+        }
+    )
+    return {
+        "comparison_id": comparison.id,
+        "canonical_product_key": comparison.canonical_product_key,
+        "xianyu": _dual_market_observation_view(xianyu),
+        "wameiji": _dual_market_observation_view(wameiji),
+        "calculation": {
+            "status": comparison.status,
+            "sale_price_cny": comparison.sale_price_cny,
+            "landed_cost_cny": comparison.landed_cost_cny,
+            "expected_profit_cny": comparison.expected_profit_cny,
+            "net_margin": comparison.net_margin,
+            "created_at": comparison.created_at,
+            "cost_breakdown": comparison_cost_breakdown(wameiji, xianyu, config),
+        },
+    }
 
 
 
@@ -3866,7 +4070,7 @@ def _ws_send_ping(sock: socket.socket) -> None:
     """Best-effort ping frame; the client is expected to pong but we
     ignore the response ? we just want a keep-alive on the wire."""
     try:
-        sock.sendall(b"\x89\x80")  # FIN + ping opcode, MASK=0, length 0
+        sock.sendall(b"\x89\x00")  # FIN + ping opcode, MASK=0, length 0
     except OSError:
         pass
 

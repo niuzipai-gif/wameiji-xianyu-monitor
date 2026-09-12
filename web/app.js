@@ -101,10 +101,10 @@
     const current = configuredApiToken();
     if (current) return Promise.resolve(current);
     if (accessPromptPromise) return accessPromptPromise;
-    accessPromptPromise = Promise.resolve(window.prompt(
+    accessPromptPromise = Promise.resolve().then(() => window.prompt(
       "Render API 需要访问令牌。请从 Render 的 Environment 复制 WEB_ACCESS_TOKEN：",
       "",
-    )).then((value) => {
+    )).catch(() => "").then((value) => {
       const token = String(value || "").trim();
       if (token) {
         try { window.localStorage.setItem("cd_monitor_access_token", token); } catch (_) {}
@@ -2121,7 +2121,11 @@ function connectLiveFeed() {
 (function _kuroBootstrap() {
   const wire = () => {
     const api = window.CD_MONITOR_API;
-    if (api && typeof api.isSeparateCollectorApi === "function" && api.isSeparateCollectorApi()) return;
+    if (api && typeof api.isSeparateCollectorApi === "function" && api.isSeparateCollectorApi()) {
+      const liveIndicator = document.getElementById("liveFeedIndicator");
+      if (liveIndicator) liveIndicator.style.display = "none";
+      return;
+    }
     bindNewSettingsForms();
     renderNotificationsAndAI();
     connectLiveFeed();

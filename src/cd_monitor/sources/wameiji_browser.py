@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 from html.parser import HTMLParser
-from urllib.parse import parse_qs, quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 from cd_monitor.core.identifiers import (
     extract_catalog_candidates,
@@ -101,7 +102,11 @@ class WameijiBrowserAdapter(BrowserHarnessAdapter):
             )
         parser = _WameijiDetailParser()
         parser.feed(html)
-        item = _detail_item_from_parser(parser, search_item)
+        item = _detail_item_from_parser(
+            parser,
+            search_item,
+            json_ld_image_url=_matching_json_ld_product_image(html, search_item),
+        )
         if item is None:
             return AdapterStatus(
                 status="human_required",
@@ -443,7 +448,10 @@ class _WameijiDetailParser(HTMLParser):
 
 
 def _detail_item_from_parser(
-    parser: _WameijiDetailParser, search_item: MarketItem
+    parser: _WameijiDetailParser,
+    search_item: MarketItem,
+    *,
+    json_ld_image_url: str | None = None,
 ) -> MarketItem | None:
     title = " ".join(parser._title_parts).strip()
     price = parser.price()
@@ -467,7 +475,7 @@ def _detail_item_from_parser(
         # record: it may be stale and does not include page-specific fees.
         price_cny_display=None,
         url=search_item.url,
-        image_url=parser.product_image_url(search_item.url),
+        image_url=json_ld_image_url or parser.product_image_url(search_item.url),
         availability=parser.availability(),
         condition_text=_detect_condition_from_text(raw_text),
         fees_hint=_detect_fees_hint(raw_text),
@@ -478,6 +486,103 @@ def _detail_item_from_parser(
         ),
         proxy_fee_jpy=_extract_labeled_jpy_fee(raw_text, "代购手续费"),
     )
+
+
+_JSON_LD_SCRIPT_PATTERN = re.compile(
+    r"<script\b[^>]*\btype\s*=\s*(?:[\"'])?application/ld\+json(?:[\"'])?[^>]*>"
+    r"(?P<payload>.*?)</script\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _matching_json_ld_product_image(html: str, search_item: MarketItem) -> str | None:
+    """Return a usable JSON-LD image only for this exact detail listing."""
+
+    external_item_id = str(search_item.external_item_id or "").strip()
+    if not external_item_id:
+        return None
+    base_url = str(search_item.url or "").strip()
+    if base_url.startswith("/"):
+        base_url = "https://meruki.cn" + base_url
+    for match in _JSON_LD_SCRIPT_PATTERN.finditer(html):
+        try:
+            payload = json.loads(match.group("payload"))
+        except json.JSONDecodeError:
+            continue
+        for product in _json_ld_product_nodes(payload):
+            if not _json_ld_product_matches_item(product, external_item_id):
+                continue
+            for image in _json_ld_image_values(product.get("image")):
+                normalized = normalize_product_image_url(image, base_url=base_url or None)
+                if normalized and is_usable_product_image(normalized):
+                    return normalized
+    return None
+
+
+def _json_ld_product_nodes(payload: object) -> list[dict[str, object]]:
+    if isinstance(payload, list):
+        nodes: list[dict[str, object]] = []
+        for entry in payload:
+            nodes.extend(_json_ld_product_nodes(entry))
+        return nodes
+    if not isinstance(payload, dict):
+        return []
+    nodes = [payload] if _json_ld_has_product_type(payload.get("@type")) else []
+    graph = payload.get("@graph")
+    if isinstance(graph, list):
+        for entry in graph:
+            nodes.extend(_json_ld_product_nodes(entry))
+    return nodes
+
+
+def _json_ld_has_product_type(value: object) -> bool:
+    values = value if isinstance(value, list) else [value]
+    return any(str(entry).strip().lower() == "product" for entry in values)
+
+
+def _json_ld_product_matches_item(product: dict[str, object], external_item_id: str) -> bool:
+    item_identities = _listing_identity_candidates(external_item_id)
+    if item_identities.intersection(
+        _listing_identity_candidates(str(product.get("sku") or ""))
+    ):
+        return True
+    for key in ("@id", "url", "mainEntityOfPage"):
+        value = product.get(key)
+        if isinstance(value, dict):
+            value = value.get("@id") or value.get("url")
+        if item_identities.intersection(_listing_identity_candidates(str(value or ""))):
+            return True
+    return False
+
+
+def _listing_identity_candidates(value: str) -> set[str]:
+    """Normalize direct ids and Wameiji's URL-encoded marketplace ids."""
+
+    raw = unquote(str(value or "").strip()).strip().rstrip("/")
+    if not raw:
+        return set()
+    parsed = urlparse(raw)
+    path = parsed.path if parsed.scheme and parsed.netloc else raw
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    candidates = {raw.lower()}
+    if parts:
+        candidates.add(parts[-1].lower())
+    if len(parts) >= 2:
+        candidates.add("/".join(parts[-2:]).lower())
+    return candidates
+
+
+def _json_ld_image_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [str(value.get(key) or "") for key in ("url", "contentUrl")]
+    if isinstance(value, list):
+        values: list[str] = []
+        for entry in value:
+            values.extend(_json_ld_image_values(entry))
+        return values
+    return []
 
 
 def _first_detail_catalog_no(text: str) -> str | None:
@@ -561,6 +666,19 @@ def _detect_condition_from_text(text: str) -> str | None:
     _detect_condition_text() takes a list[str]; for the card parser we already
     have a joined string, so we split by whitespace and reuse the same keyword table.
     """
+    labeled = re.search(
+        r"(?:^|\s)(?:商品)?(?:状態|状态|狀態)\s*[:：]?\s*"
+        r"(?P<value>.{1,160}?)"
+        r"(?=\s+(?:数量|個数|价格|価格|日本国内运费|日本国内運費|"
+        r"代购手续费|代購手續費|店铺|店鋪|ショップ|加入购物车|"
+        r"加入購物車|立即购买|立即購買)(?:\s|$)|$)",
+        text,
+        re.IGNORECASE,
+    )
+    if labeled is not None:
+        value = " ".join(labeled.group("value").split()).strip()
+        if value:
+            return value
     tokens = text.split() if text else []
     return _detect_condition_text(tokens)
 
@@ -755,11 +873,18 @@ def _detect_source_site(text: str) -> str | None:
 
 def _detect_condition_text(parts: list[str]) -> str | None:
     condition_tokens = [
+        "動作未確認",
+        "動作確認未",
+        "未動作確認",
+        "箱潰れ",
+        "箱つぶれ",
         "盤傷",
         "ケース割れ",
         "破損",
         "傷",
+        "スレ",
         "汚れ",
+        "使用感",
         "ジャンク",
         "不良",
         "瑕疵",
@@ -861,6 +986,7 @@ def _first_attr_text(attr: dict[str, str | None], *keys: str) -> str:
 
 
 _HARD_SECURITY_MARKERS = (
+    "403 forbidden",
     "captcha",
     "cloudflare",
     "rgv587_error",
@@ -882,7 +1008,7 @@ _TITLE_SECURITY_MARKERS = (
     "需要登录",
     "请登录",
 )
-_HTML_TITLE_RE = re.compile(r"<title\\b[^>]*>(.*?)</title\\s*>", re.IGNORECASE | re.DOTALL)
+_HTML_TITLE_RE = re.compile(r"<title\b[^>]*>(.*?)</title\s*>", re.IGNORECASE | re.DOTALL)
 
 
 def _requires_human(html: str) -> bool:

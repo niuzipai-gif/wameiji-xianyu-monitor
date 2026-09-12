@@ -67,6 +67,35 @@ def test_xianyu_security_title_requires_human() -> None:
     assert status.error_type == "security_check"
 
 
+def test_xianyu_app_qr_gate_requires_human() -> None:
+    """The desktop App-only modal is not a usable listing detail page."""
+    status = XianyuBrowserAdapter(enabled=True).parse_search_html(
+        """
+        <title>闲鱼 - 闲不住？上闲鱼！</title>
+        <h3>闲鱼APP扫码查看</h3>
+        <p>跨境商品请前往闲鱼APP端查看</p>
+        """,
+        WatchItem("VLJM-38101"),
+    )
+
+    assert status.status == "human_required"
+    assert status.error_type == "security_check"
+
+
+def test_xianyu_illegal_access_browser_gate_requires_human() -> None:
+    status = XianyuBrowserAdapter(enabled=True).parse_search_html(
+        """
+        <title>闲鱼 - 闲不住？上闲鱼！</title>
+        <h2>非法访问</h2>
+        <p>为了保障您的体验，请使用正常浏览器访问闲鱼~</p>
+        """,
+        WatchItem("日版 CD 初回限定"),
+    )
+
+    assert status.status == "human_required"
+    assert status.error_type == "security_check"
+
+
 def test_xianyu_current_goofish_feed_cards_parse_title_price_and_image() -> None:
     html = """
     <main class="feeds-list-container--hash">
@@ -94,6 +123,70 @@ def test_xianyu_current_goofish_feed_cards_parse_title_price_and_image() -> None
     assert status.items[0].price_cny == 27
     assert status.items[0].url and "1064270240099" in status.items[0].url
     assert status.items[0].image_url == "//img.example.invalid/item.webp"
+
+
+def test_xianyu_discovery_parse_keeps_all_visible_feed_cards() -> None:
+    html = """
+    <main class="feeds-list-container--hash">
+      <a class="feeds-item-wrap--hash" href="https://www.goofish.com/item?id=cd-1">
+        <img class="feeds-image--hash" src="//img.example.invalid/cd.webp" />
+        <div class="row1-wrap-title--hash" title="UVERworld O CHOIR 日版 CD 初回限定盘"></div>
+        <div class="row3-wrap-price--hash"><span class="number--hash">19</span></div>
+      </a>
+      <a class="feeds-item-wrap--hash" href="https://www.goofish.com/item?id=game-1">
+        <img class="feeds-image--hash" src="//img.example.invalid/game.webp" />
+        <div class="row1-wrap-title--hash" title="Switch 日版 异度神剑3 限定版"></div>
+        <div class="row3-wrap-price--hash"><span class="number--hash">399</span></div>
+      </a>
+    </main>
+    """
+
+    status = XianyuBrowserAdapter(enabled=True).parse_discovery_html(
+        html,
+        query_label="日版 CD 初回限定盘",
+    )
+
+    assert status.status == "ok"
+    assert [item.title for item in status.items] == [
+        "UVERworld O CHOIR 日版 CD 初回限定盘",
+        "Switch 日版 异度神剑3 限定版",
+    ]
+    assert [item.catalog_no for item in status.items] == [
+        "日版 CD 初回限定盘",
+        "日版 CD 初回限定盘",
+    ]
+
+
+def test_xianyu_discovery_parse_still_stops_on_security_page() -> None:
+    status = XianyuBrowserAdapter(enabled=True).parse_discovery_html(
+        "<title>安全验证</title><p>请完成验证后继续</p>",
+        query_label="日版 CD 初回限定盘",
+    )
+
+    assert status.status == "human_required"
+    assert status.error_type == "security_check"
+
+
+def test_xianyu_feed_card_keeps_product_image_instead_of_later_avatar() -> None:
+    html = """
+    <main class="feeds-list-container--hash">
+      <a class="feeds-item-wrap--hash" href="https://www.goofish.com/item?id=1064270240099">
+        <img class="feeds-image--hash" src="//img.example.invalid/product.webp" />
+        <div class="row1-wrap-title--hash" title="古内东子 Hourglass SRCL 3520"></div>
+        <div class="row3-wrap-price--hash"><span class="number--hash">27</span></div>
+        <img class="avatar--hash" src="//img.example.invalid/seller-avatar.webp" />
+      </a>
+    </main>
+    """
+
+    status = XianyuBrowserAdapter(enabled=True).parse_search_html(
+        html,
+        WatchItem("SRCL-3520"),
+    )
+
+    assert status.status == "ok"
+    assert len(status.items) == 1
+    assert status.items[0].image_url == "//img.example.invalid/product.webp"
 
 
 def test_browser_harness_parses_nested_visible_cards() -> None:

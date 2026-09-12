@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from cd_monitor.core.models import MarketItem, XianyuPriceSample
 from cd_monitor.services.discovery_worker import DiscoveryWorker
 from cd_monitor.storage.sqlite import (
@@ -15,6 +17,12 @@ from cd_monitor.storage.sqlite import (
     update_discovery_pool,
     upsert_remote_collector_command,
 )
+
+
+@pytest.fixture(autouse=True)
+def enable_collection_for_mock_worker_behavior_tests(monkeypatch) -> None:
+    """Existing injected-fetcher tests model an explicitly opted-in collector."""
+    monkeypatch.setenv("DUAL_MARKET_COLLECTION_PAUSED", "0")
 
 
 class _FakeCommandClient:

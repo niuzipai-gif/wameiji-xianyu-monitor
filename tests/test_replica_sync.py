@@ -71,6 +71,7 @@ def test_pending_remote_command_survives_replica_database_upload(tmp_path, monke
     """Replication must never erase a command that the collector has not seen."""
     monkeypatch.setenv("WEB_ACCESS_TOKEN", "viewer-secret")
     monkeypatch.setenv("CD_SYNC_TOKEN", "replica-secret")
+    monkeypatch.setenv("DUAL_MARKET_COLLECTION_PAUSED", "0")
     remote = tmp_path / "remote.db"
     command_db = tmp_path / "remote-commands.db"
     source = tmp_path / "source.db"

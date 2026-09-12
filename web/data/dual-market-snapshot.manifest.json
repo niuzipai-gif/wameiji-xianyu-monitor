@@ -1,0 +1,75 @@
+{
+  "schema_version": 2,
+  "snapshot_id": "20260909T132700+0800",
+  "generated_at": "2026-09-09T13:27:00.632647+08:00",
+  "published_comparisons": 4,
+  "source_eligible_comparisons": 4,
+  "policy_version": "wameiji-xianyu-net-v1",
+  "dropped_comparison_ids": [],
+  "assets": [
+    {
+      "path": "assets/dual-market/20260909T132700+0800/107-xianyu.webp",
+      "source": "xianyu",
+      "comparison_id": 107,
+      "sha256": "cba7c9580bbf437845ff1bfde14251c103b5d7d2d54fea9f12abcf984e656cde",
+      "width": 450,
+      "height": 338
+    },
+    {
+      "path": "assets/dual-market/20260909T132700+0800/107-wameiji.jpg",
+      "source": "wameiji",
+      "comparison_id": 107,
+      "sha256": "8ece8365d4177abbcf81dc10624c88c1878af1d54814252a4ea798b8005d9900",
+      "width": 1080,
+      "height": 1080
+    },
+    {
+      "path": "assets/dual-market/20260909T132700+0800/65-xianyu.webp",
+      "source": "xianyu",
+      "comparison_id": 65,
+      "sha256": "f841419eedecb3bbd445673317dc56cccfe0d6734fb32e518588aade15b2337d",
+      "width": 450,
+      "height": 338
+    },
+    {
+      "path": "assets/dual-market/20260909T132700+0800/65-wameiji.jpg",
+      "source": "wameiji",
+      "comparison_id": 65,
+      "sha256": "3add4c42660d430ecaf7122bed07f1381843528d3d3147832f0c0e53c972cb76",
+      "width": 190,
+      "height": 300
+    },
+    {
+      "path": "assets/dual-market/20260909T132700+0800/98-xianyu.webp",
+      "source": "xianyu",
+      "comparison_id": 98,
+      "sha256": "5bf6be82b17fa915bc188361650d33c0efe04548b33373ea0d756e8efea5cebe",
+      "width": 450,
+      "height": 338
+    },
+    {
+      "path": "assets/dual-market/20260909T132700+0800/98-wameiji.jpg",
+      "source": "wameiji",
+      "comparison_id": 98,
+      "sha256": "6b124fab2f8fd07afb87904749cfa770baed4ab1b6e9d201be2a5bdd9a2546a1",
+      "width": 300,
+      "height": 300
+    },
+    {
+      "path": "assets/dual-market/20260909T132700+0800/99-xianyu.webp",
+      "source": "xianyu",
+      "comparison_id": 99,
+      "sha256": "14881476decba780812261370c5ef6bb6c5ceb1feced7a38ca96cf30ef861d2c",
+      "width": 450,
+      "height": 600
+    },
+    {
+      "path": "assets/dual-market/20260909T132700+0800/99-wameiji.jpg",
+      "source": "wameiji",
+      "comparison_id": 99,
+      "sha256": "7f95c2a7ea5ea60005821b67162fab03bbe69c94b3ef8fae193d25ba42f72641",
+      "width": 300,
+      "height": 300
+    }
+  ]
+}

@@ -42,6 +42,33 @@ def test_capture_search_html_writes_xianyu_html_and_parses_samples(tmp_path) -> 
     assert "goofish.com/search" in result["search_entry_url"]
     assert fake_playwright.chromium.browser.context_kwargs["storage_state"] == "data/xianyu_state.json"
     assert fake_playwright.chromium.browser.closed is True
+    assert any(
+        "scrollIntoView" in script
+        for script in fake_playwright.chromium.browser.context.page.evaluate_calls
+    )
+
+
+def test_capture_search_html_can_boundedly_expand_xianyu_results(tmp_path) -> None:
+    output = tmp_path / "xianyu-expanded.html"
+    fake_playwright = _FakePlaywright(
+        "<main><article><a href='https://www.goofish.com/item?id=1'>SRCL-3520 260元</a></article></main>"
+    )
+
+    result = asyncio.run(
+        capture_search_html(
+            "xianyu",
+            "日版 CD 品番",
+            output,
+            timeout_seconds=1,
+            xianyu_result_scroll_rounds=3,
+            playwright_factory=lambda: fake_playwright,
+        )
+    )
+
+    assert result["status"] == "ok"
+    scripts = fake_playwright.chromium.browser.context.page.evaluate_calls
+    assert any("const maxRounds = 3" in script for script in scripts)
+    assert any("document.body.scrollHeight" in script for script in scripts)
 
 
 def test_capture_search_html_reports_human_required_on_security_text(tmp_path) -> None:
@@ -92,6 +119,34 @@ def test_capture_search_html_can_use_persistent_profile(tmp_path) -> None:
     assert fake_playwright.chromium.profile_kwargs["headless"] is False
     assert fake_playwright.chromium.browser.context_kwargs == {}
     assert fake_playwright.chromium.persistent_context.closed is True
+
+
+def test_capture_search_html_falls_back_to_system_chrome_when_managed_browser_missing(
+    tmp_path,
+) -> None:
+    output = tmp_path / "xianyu.html"
+    html = """
+    <div data-xianyu-card>
+      <a href="https://www.goofish.com/item?id=1">Artist SRCL-3520 初回限定</a>
+      <span data-price>￥260</span>
+      <img src="https://img.alicdn.com/product.webp" />
+    </div>
+    """
+    fake_playwright = _MissingManagedPlaywright(html)
+
+    result = asyncio.run(
+        capture_search_html(
+            "xianyu",
+            "SRCL-3520",
+            output,
+            profile_dir=tmp_path / "profile",
+            timeout_seconds=1,
+            playwright_factory=lambda: fake_playwright,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert fake_playwright.chromium.launch_channels == [None, "chrome"]
 
 
 def test_xianyu_state_file_wins_over_generic_wameiji_profile(tmp_path) -> None:
@@ -189,6 +244,27 @@ class _FakeChromium:
         return self.persistent_context
 
 
+class _MissingManagedPlaywright:
+    def __init__(self, html: str) -> None:
+        self.chromium = _MissingManagedChromium(html)
+
+
+class _MissingManagedChromium(_FakeChromium):
+    def __init__(self, html: str) -> None:
+        super().__init__(html)
+        self.launch_channels: list[str | None] = []
+
+    async def launch_persistent_context(self, user_data_dir, **kwargs):
+        channel = kwargs.get("channel")
+        self.launch_channels.append(channel)
+        if channel is None:
+            raise RuntimeError(
+                "BrowserType.launch_persistent_context: Executable doesn't exist; "
+                "please run playwright install"
+            )
+        return await super().launch_persistent_context(user_data_dir, **kwargs)
+
+
 class _FakeBrowser:
     def __init__(self, html: str) -> None:
         self.context_kwargs = {}
@@ -221,6 +297,7 @@ class _FakePage:
         self.handlers = {}
         self.goto_urls = []
         self.url = None
+        self.evaluate_calls = []
 
     def on(self, event: str, handler) -> None:
         self.handlers[event] = handler
@@ -233,6 +310,10 @@ class _FakePage:
         return None
 
     async def wait_for_timeout(self, _milliseconds: int) -> None:
+        return None
+
+    async def evaluate(self, script: str):
+        self.evaluate_calls.append(script)
         return None
 
     async def content(self):

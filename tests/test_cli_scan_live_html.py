@@ -4,6 +4,8 @@ from cd_monitor import cli
 
 
 def test_cli_scan_live_html_prints_capture_and_opportunity_summary(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("DUAL_MARKET_COLLECTION_PAUSED", "0")
+
     async def fake_scan(catalog_no, db_path, snapshot_dir, _cost_config, _evaluation_config, **kwargs):
         return {
             "catalog_no": catalog_no,

@@ -56,7 +56,7 @@ def publish_once(db_path: Path, api_url: str, token: str, timeout: int = 60) -> 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Publish local CD Monitor SQLite to a Render API")
-    parser.add_argument("--db", default="data/local/takeover.db", help="local SQLite database")
+    parser.add_argument("--db", default="data/local/dual-market.db", help="local SQLite database")
     parser.add_argument("--url", default=os.getenv("CD_REPLICA_URL", ""), help="Render API origin")
     parser.add_argument("--token", default=os.getenv("CD_SYNC_TOKEN", ""), help="sync token")
     parser.add_argument("--interval-seconds", type=int, default=60, help="repeat interval; 0 means once")

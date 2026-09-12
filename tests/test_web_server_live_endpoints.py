@@ -18,6 +18,12 @@ from cd_monitor.storage.sqlite import add_watch, init_db
 from cd_monitor.web_server import create_server
 
 
+@pytest.fixture(autouse=True)
+def enable_live_collection_for_active_path_tests(monkeypatch):
+    """These tests exercise the live-path behavior after an explicit opt-in."""
+    monkeypatch.setenv("DUAL_MARKET_COLLECTION_PAUSED", "0")
+
+
 def _post_json(url: str, payload: dict) -> dict:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(

@@ -172,6 +172,115 @@ def test_parse_detail_html_uses_scoped_product_image_not_search_card_logo() -> N
     assert status.items[0].image_url == "https://images.example.invalid/detail/album-3520.webp"
 
 
+def test_parse_detail_html_skips_rakuten_size_guide_image() -> None:
+    """Rakuten's ``meyasu.gif`` is a size guide, never a product photo."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card title",
+        price=110,
+        currency="JPY",
+        external_item_id="16611865",
+        url="/mall/rakuten/detail/16611865",
+        availability="unknown_but_visible",
+    )
+    detail_html = """
+    <main class="goods-detail">
+      <img class="goods-image" src="https://image02.doorzo.net/imgrakutencojp/hmvjapan/cabinet/meyasu.gif">
+      <img class="goods-image" src="https://image02.doorzo.net/tshopr10sjp/hmvjapan/cabinet/a66/12000/16611865.jpg?fitin=600:600">
+      <h1 class="goods-name">【中古】 X JAPAN / Longing・切望の夜・ 【CDS】</h1>
+      <p class="price-com">110 日元</p>
+      <p>二手 在库</p>
+    </main>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert status.items[0].image_url == (
+        "https://thumbnail.image.rakuten.co.jp/@0_mall/hmvjapan/cabinet/"
+        "a66/12000/16611865.jpg?_ex=600x600"
+    )
+
+
+def test_parse_detail_html_matches_rakuten_json_ld_for_encoded_listing_url() -> None:
+    """Wameiji stores Rakuten's encoded URL as the listing id."""
+    encoded_id = (
+        "https%3A%2F%2Fitem.rakuten.co.jp%2Frenet3%2F0011000791%2F"
+    )
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card title",
+        price=275,
+        currency="JPY",
+        external_item_id=encoded_id,
+        url="/mall/rakuten/detail/" + encoded_id,
+        availability="unknown_but_visible",
+    )
+    detail_html = """
+    <main class="goods-detail">
+      <img class="goods-image" src="https://imgoss.mokaki.cn/ossimg/65cca9650d72043406a3b17c5e36a619.png!compress">
+      <h1 class="goods-name">【中古】はつ恋 完全生産限定盤 / 福山雅治</h1>
+      <p class="price-com">275 日元</p>
+      <p>二手 在库</p>
+    </main>
+    <script type="application/ld+json">
+      {
+        "@type": "Product",
+        "sku": "renet3/0011000791",
+        "image": ["https://image02.doorzo.net/tshopr10sjp/renet3/cabinet/ccc67/0011000791.jpg?fitin=600:600"]
+      }
+    </script>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert status.items[0].image_url == (
+        "https://thumbnail.image.rakuten.co.jp/@0_mall/renet3/cabinet/"
+        "ccc67/0011000791.jpg?_ex=600x600"
+    )
+
+
+def test_parse_detail_html_prefers_matching_json_ld_product_image_over_placeholder() -> None:
+    """A real detail image in JSON-LD must beat the Wameiji placeholder."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card title",
+        price=1500,
+        currency="JPY",
+        external_item_id="z618880764",
+        url="/mall/paypay/detail/z618880764",
+        availability="unknown_but_visible",
+    )
+    detail_html = """
+    <main class="goods-detail">
+      <img class="goods-image" src="https://imgoss.mokaki.cn/ossdoorzo/web/img_bg_wmj.png">
+      <h1 class="goods-name">PSVITA Collar X Malice -Unlimited- VLJM-38101</h1>
+      <p class="price-com">1,500 日元</p>
+      <p>二手 在库</p>
+    </main>
+    <script type="application/ld+json">
+      [
+        {
+          "@type": "Product",
+          "sku": "unrelated-listing",
+          "image": "https://images.example.invalid/detail/unrelated.webp"
+        },
+        {
+          "@type": "Product",
+          "sku": "z618880764",
+          "image": ["https://images.example.invalid/detail/vljm-38101.jpg"]
+        }
+      ]
+    </script>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert status.items[0].image_url == "https://images.example.invalid/detail/vljm-38101.jpg"
+
+
 def test_parse_detail_html_does_not_promote_page_metadata_as_a_product_title() -> None:
     """A generic site title plus a number is not sufficient purchase evidence."""
     search_item = MarketItem(
@@ -378,6 +487,35 @@ def test_parse_detail_html_recognizes_street_detail_primary_container() -> None:
     assert status.items[0].proxy_fee_jpy == 50
 
 
+def test_parse_detail_html_prefers_labeled_used_condition_over_recommendation_text() -> None:
+    search_item = MarketItem(
+        source="wameiji",
+        title="ロックの逆襲 初回限定盤A",
+        price=274,
+        currency="JPY",
+        external_item_id="used-condition",
+        url="/mall/rakuten/detail/used-condition",
+    )
+    detail_html = """
+    <main class="goods-detail">
+      <h1 class="name">【中古】ロックの逆襲 初回限定盤A CD+DVD</h1>
+      <p class="price-com">274 日元</p>
+      <div>状態 中古品-非常に良い 中古品-良い 中古品-可 数量 1</div>
+      <button>加入购物车</button>
+      <div class="recommendation">新品 CD unrelated recommendation</div>
+    </main>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(
+        detail_html, search_item
+    )
+
+    assert status.status == "ok"
+    assert status.items[0].condition_text is not None
+    assert "中古品" in status.items[0].condition_text
+    assert "新品" not in status.items[0].condition_text
+
+
 def test_parse_detail_html_keeps_seller_borne_domestic_shipping_at_zero() -> None:
     """A later proxy-fee amount must not be mistaken for domestic shipping."""
     search_item = MarketItem(
@@ -502,6 +640,17 @@ def test_parse_search_html_security_check_returns_human_required() -> None:
         "<html>captcha challenge</html>",
         _watch(),
     )
+    assert status.status == "human_required"
+    assert status.error_type == "security_check"
+
+
+def test_parse_search_html_forbidden_page_returns_human_required() -> None:
+    adapter = WameijiBrowserAdapter(enabled=True)
+    status = adapter.parse_search_html(
+        "<html><head><title>403 Forbidden</title></head><body><h1>403 Forbidden</h1></body></html>",
+        _watch(),
+    )
+
     assert status.status == "human_required"
     assert status.error_type == "security_check"
 

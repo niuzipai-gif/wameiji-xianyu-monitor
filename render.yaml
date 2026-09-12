@@ -15,6 +15,10 @@ services:
         value: "0"
       - key: BROWSER_ENABLED
         value: "false"
+      # Render stores the command queue only. Browser collection remains on
+      # the user's local, signed-in worker, which pulls and acknowledges it.
+      - key: DUAL_MARKET_COLLECTION_PAUSED
+        value: "false"
       - key: CD_DATA_DIR
         value: /tmp/cd_monitor_data
       # This queue is intentionally separate from CD_DB_PATH: the collector

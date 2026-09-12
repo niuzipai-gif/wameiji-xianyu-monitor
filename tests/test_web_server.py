@@ -56,8 +56,8 @@ def test_web_server_serves_dashboard_api_and_static_app(tmp_path) -> None:
         assert "号池管理" in html
         assert "运行日志" in html
         assert "策略设置" in html
-        assert "左侧是闲鱼可售参考" in html
-        assert "右侧是已核验的挖煤姬商品详情" in html
+        assert "左侧闲鱼以淡黄色显示搜索挂牌价样本" in html
+        assert "右侧挖煤姬以淡粉白显示详情已核验进货价" in html
         # new task form + accounts + logs + settings sections
         assert "newTaskForm" in html
         assert "登录资料只保存在采集电脑" in html

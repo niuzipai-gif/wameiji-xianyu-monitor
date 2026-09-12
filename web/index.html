@@ -6,10 +6,11 @@
   <title>AI 闲鱼猎手 · Kuro Atelier Edition · WAMEIJI-XIANYU</title>
   <link rel="stylesheet" href="styles/themes.css" />
   <link rel="stylesheet" href="styles/app.css" />
-  <link rel="stylesheet" href="styles/kuro.css?v=20260908-detail-first" />
+  <link rel="stylesheet" href="styles/kuro.css?v=20260909-strict-net-v1" />
   <script src="runtime-config.js"></script>
-  <script src="app.js?v=20260908-kuro-flow" defer></script>
-  <script src="discovery-ui.js?v=20260908-detail-first" defer></script>
+  <script src="app.js?v=20260909-strict-net-v1" defer></script>
+  <script src="dual-market-data.js?v=20260909-strict-net-v1" defer></script>
+  <script src="discovery-ui.js?v=20260909-strict-net-v1" defer></script>
 </head>
 <body class="kuro" data-kuro-theme="rose">
     <button class="feed-new-pill" data-feed-new-pill type="button"></button>
@@ -61,12 +62,12 @@
         <div class="hero selection-stream-overview">
           <div class="hero-copy">
             <div class="eyebrow">Selection board · evidence-first</div>
-            <h2>选品广场</h2>
-            <p class="lead">优先展示已核验的商品机会；正样本、登录与采集状态在信息流之后按需展开。</p>
+            <h2>选品广场 · CD 与 GalGame 实体</h2>
+            <p class="lead">优先展示已核验的商品机会：左侧闲鱼以淡黄色显示搜索挂牌价样本，右侧挖煤姬以淡粉白显示详情已核验进货价；只计算“挖煤姬进货 → 闲鱼国内销售”的到手净利，净利率至少 25%。正样本、登录与采集状态在信息流之后按需展开。</p>
             <div class="stats">
-              <div class="stat"><small>今日机会</small><strong id="kpiToday">--</strong></div>
-              <div class="stat"><small>预计利润</small><strong id="kpiProfit">--</strong></div>
-              <div class="stat"><small>最高利润</small><strong id="kpiMax">--</strong></div>
+              <div class="stat"><small>达标机会</small><strong id="kpiToday">--</strong></div>
+              <div class="stat"><small>闲鱼预计净利</small><strong id="kpiProfit">--</strong></div>
+              <div class="stat"><small>闲鱼最高净利</small><strong id="kpiMax">--</strong></div>
               <div class="stat"><small>命中率</small><strong id="kpiHitRate">--</strong></div>
             </div>
           </div>
@@ -74,7 +75,7 @@
         <div class="section-head">
           <div>
             <h3>首页机会流 · 图片优先信息流</h3>
-            <p>左侧是闲鱼可售参考，中间是利润分析，右侧是已核验的挖煤姬商品详情。</p>
+            <p>一行两条机会；每条卡内左侧闲鱼、中间净利与成本、右侧挖煤姬，只保留净利率至少 25% 的同款机会。</p>
           </div>
           <div class="filters">
             <button class="pill active" data-discovery-filter="all">全部机会</button>
@@ -84,7 +85,16 @@
             <span class="scraper-status idle" id="discoveryStatus" title="本机采集状态"><span class="dot"></span><span id="discoveryStatusText">等待本机采集</span></span>
           </div>
         </div>
-        <div class="feed" id="homeFeed" data-empty="暂时没有通过门槛的机会。点击左侧「立即全量扫描」即可开始自动发现。">
+        <div class="profit-funnel" id="profitFunnel" aria-label="利润筛选漏斗">
+          <div><small>已评估同款</small><strong id="funnelEvaluated">--</strong></div>
+          <span aria-hidden="true">→</span>
+          <div><small>成本待补</small><strong id="funnelCostPending">--</strong></div>
+          <span aria-hidden="true">→</span>
+          <div><small>低于 25%</small><strong id="funnelBelowMargin">--</strong></div>
+          <span aria-hidden="true">→</span>
+          <div class="eligible"><small>达标机会</small><strong id="funnelEligible">--</strong></div>
+        </div>
+        <div class="feed" id="homeFeed" data-empty="当前没有成本证据完整且净利率至少 25% 的同款机会；采集保持暂停。">
           <div class="empty-state">正在加载机会数据…</div>
         </div>
         <details class="secondary-evidence">

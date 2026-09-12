@@ -10,21 +10,37 @@ $EnvFile = Join-Path $ProjectRoot ".env"
 $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 $LogFile = Join-Path $ProjectRoot "data\local\discovery-worker.log"
 
+function Test-DualMarketCollectionPaused {
+    $value = [Environment]::GetEnvironmentVariable("DUAL_MARKET_COLLECTION_PAUSED", "Process")
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $true
+    }
+    return $value.Trim().ToLowerInvariant() -notin @("0", "false", "no", "off")
+}
+
+# Load simple KEY=VALUE lines from the ignored local env file.  Browser login
+# profiles remain on this collector computer and never go to GitHub or Render.
+if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
+    foreach ($line in Get-Content -LiteralPath $EnvFile) {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith("#")) { continue }
+        $parts = $line.Split("=", 2)
+        if ($parts.Count -eq 2 -and $parts[0].Trim()) {
+            [Environment]::SetEnvironmentVariable($parts[0].Trim(), $parts[1], "Process")
+        }
+    }
+}
+
+if (Test-DualMarketCollectionPaused) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogFile) | Out-Null
+    "$(Get-Date -Format s) discovery worker not started; dual-market collection is paused." | Add-Content -LiteralPath $LogFile
+    exit 0
+}
+
 if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
     throw "Missing .env. Complete the Render deployment configuration first."
 }
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
     throw "Missing project virtual environment: $Python"
-}
-
-# Load simple KEY=VALUE lines from the ignored local env file.  Browser login
-# profiles remain on this collector computer and never go to GitHub or Render.
-foreach ($line in Get-Content -LiteralPath $EnvFile) {
-    if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith("#")) { continue }
-    $parts = $line.Split("=", 2)
-    if ($parts.Count -eq 2 -and $parts[0].Trim()) {
-        [Environment]::SetEnvironmentVariable($parts[0].Trim(), $parts[1], "Process")
-    }
 }
 
 if (-not [Environment]::GetEnvironmentVariable("WAMEIJI_PROFILE_DIR", "Process")) {

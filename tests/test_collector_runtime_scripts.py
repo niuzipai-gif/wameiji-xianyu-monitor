@@ -19,4 +19,5 @@ def test_primary_and_autostart_launchers_pass_one_database_to_every_service() ->
     assert f'[string]$Database = "{DATABASE}"' in start_all
     assert start_all.count('"-Database", $Database') == 3
     autostart = script("install-collector-autostart.ps1")
-    assert autostart.count(f'"-Database", "{DATABASE}"') == 3
+    assert f'[string]$Database = "{DATABASE}"' in autostart
+    assert autostart.count('"-Database", $Database') == 3
