@@ -36,9 +36,26 @@ def test_selectable_candidate_pool_uses_compact_cards_not_opportunity_columns() 
     assert "暂缺价格不降级" not in card_renderer
     assert "body.kuro .research-candidate-grid {" in stylesheet
     assert "grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));" in stylesheet
+    assert "body.kuro #homeFeed > .research-queue { grid-column: 1 / -1; }" in stylesheet
     assert "body.kuro .research-candidate-card {" in stylesheet
     assert "display: flex;" in stylesheet
+    assert "research-compact-status" in card_renderer
+    assert "research-candidate-actions" in card_renderer
+    assert "candidateDirectionMarkup(candidateId, true)" in card_renderer
+    assert "selectionFeedbackMarkup(candidateId" not in card_renderer
     assert "grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr) auto;" not in stylesheet
+
+
+def test_live_kpis_do_not_show_an_empty_snapshot_when_the_live_board_has_results() -> None:
+    script = Path("web/discovery-ui.js").read_text(encoding="utf-8")
+    start = script.index("function renderKpis")
+    end = script.index("function referenceStateLabel", start)
+    renderer = script[start:end]
+
+    assert "const hasEvaluatedDualSummary = evaluatedCount > 0;" in renderer
+    assert "if (dualSummary && hasEvaluatedDualSummary)" in renderer
+    assert 'profitFunnel.hidden = false;' in renderer
+    assert 'profitFunnel.hidden = true;' in renderer
 
 
 def test_home_feed_promotes_verified_positive_candidates_when_live_comparisons_are_empty() -> None:

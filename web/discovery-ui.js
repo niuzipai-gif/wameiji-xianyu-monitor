@@ -220,9 +220,11 @@
 
   function renderKpis(summary) {
     const dualSummary = view.dualMarketBoard && view.dualMarketBoard.summary;
-    if (dualSummary) {
+    const evaluatedCount = Number(dualSummary && dualSummary.evaluated_count) || 0;
+    const hasEvaluatedDualSummary = evaluatedCount > 0;
+    const profitFunnel = document.getElementById("profitFunnel");
+    if (dualSummary && hasEvaluatedDualSummary) {
       const eligibleItems = Array.isArray(view.dualMarketBoard.eligible) ? view.dualMarketBoard.eligible : [];
-      const evaluatedCount = Number(dualSummary.evaluated_count) || 0;
       const eligibleCount = Number(dualSummary.eligible_count) || 0;
       const belowMarginCount = Number(dualSummary.below_margin_count) || 0;
       const costPendingCount = Number(dualSummary.cost_pending_count) || 0;
@@ -235,6 +237,7 @@
       setText("funnelCostPending", String(costPendingCount));
       setText("funnelBelowMargin", String(belowMarginCount));
       setText("funnelEligible", String(eligibleCount));
+      if (profitFunnel) profitFunnel.hidden = false;
       renderDiscoveryStatus(summary);
       return;
     }
@@ -259,6 +262,7 @@
     setText("kpiProfit", cny(expectedProfit));
     setText("kpiMax", cny(highestProfit));
     setText("kpiHitRate", hitRate + "%");
+    if (profitFunnel) profitFunnel.hidden = true;
     renderDiscoveryStatus(summary);
   }
 
@@ -490,7 +494,7 @@
     return '<a class="side-product ' + kind + ' side-link" href="' + esc(safeHref) + '" target="_blank" rel="noopener" title="' + esc(title) + '">' + body + '</a>';
   }
 
-  function candidateDirectionMarkup(candidateId) {
+  function candidateDirectionMarkup(candidateId, compact) {
     if (!Number.isSafeInteger(candidateId) || candidateId <= 0) return "";
     const item = (Array.isArray(view.candidateDirections) ? view.candidateDirections : []).find(
       (candidate) => Number(candidate && candidate.candidate_id) === candidateId
@@ -501,6 +505,9 @@
       .map((direction) => direction && direction.label ? String(direction.label) : "")
       .filter(Boolean);
     if (!labels.length) return "";
+    if (compact) {
+      return '<span class="research-direction-chip" title="正样本方向证据，仍需详情核验">正样本：' + esc(labels.join("、")) + '</span>';
+    }
     return '<div class="reason reference-direction-evidence">正样本方向证据，仍需详情核验：' + esc(labels.join("、")) + '</div>';
   }
 
@@ -539,8 +546,8 @@
     const title = candidate.candidate_title || "未命名候选";
     const identity = candidate.catalog_no || candidate.jan || "待补品番 / JAN";
     const sourceUrl = safeHttpUrl(candidate.source_url);
-    const directionMarkup = candidateDirectionMarkup(candidateId);
-    const feedbackMarkup = selectionFeedbackMarkup(candidateId, currentFeedbackOutcome(candidateId));
+    const directionMarkup = candidateDirectionMarkup(candidateId, true);
+    const feedbackMarkup = compactSelectionFeedbackMarkup(candidateId, currentFeedbackOutcome(candidateId));
     return [
       '<article class="research-candidate-card" data-selectable-candidate-id="' + esc(candidateId || "") + '">',
         '<div class="research-candidate-product">',
@@ -554,17 +561,32 @@
             '<div class="desc">品番 / JAN：' + esc(identity) + '</div>',
           '</div>',
         '</div>',
-        '<div class="analysis research-analysis">',
-          '<div class="metric"><small>利润状态</small><strong>' + esc(profitReadinessLabel(candidate.profit_readiness)) + '</strong></div>',
+        '<div class="research-candidate-meta">',
+          '<div class="research-compact-status"><span>利润证据</span><strong>' + esc(profitReadinessLabel(candidate.profit_readiness)) + '</strong></div>',
           directionMarkup,
-          feedbackMarkup,
         '</div>',
         '<div class="research-card-footer">',
           sourceUrl
             ? '<a class="research-source-link" href="' + esc(sourceUrl) + '" target="_blank" rel="noopener">查看来源详情</a>'
             : '<span class="research-source-pending">来源详情入口待补</span>',
+          feedbackMarkup,
         '</div>',
       '</article>',
+    ].join("");
+  }
+
+  function compactSelectionFeedbackMarkup(candidateId, currentOutcome) {
+    if (!Number.isSafeInteger(candidateId) || candidateId <= 0) return "";
+    const outcomeLabel = { keep: "保留", source_pending: "供应待找", not_fit: "手动排除" }[currentOutcome] || "未标注";
+    return [
+      '<details class="research-candidate-actions" data-selection-feedback-candidate="' + esc(candidateId) + '">',
+        '<summary>标记：' + esc(outcomeLabel) + '</summary>',
+        '<div class="selection-feedback-actions">',
+          '<button type="button" data-selection-feedback="keep" data-candidate-id="' + esc(candidateId) + '">保留</button>',
+          '<button type="button" data-selection-feedback="source_pending" data-candidate-id="' + esc(candidateId) + '">供应待找</button>',
+          '<button type="button" data-selection-feedback="not_fit" data-candidate-id="' + esc(candidateId) + '">手动排除</button>',
+        '</div>',
+      '</details>',
     ].join("");
   }
 

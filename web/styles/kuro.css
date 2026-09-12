@@ -429,27 +429,35 @@ body.kuro .op-card {
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 body.kuro .research-candidate-card {
-  display: flex; flex-direction: column; gap: 12px; min-width: 0;
+  display: flex; flex-direction: column; gap: 10px; min-width: 0;
   border: 1px solid var(--kuro-line); border-radius: 20px;
   background: rgba(255, 255, 255, 0.78);
   box-shadow: 0 14px 34px rgba(80, 105, 150, 0.07);
-  padding: 16px; color: inherit; cursor: default;
+  padding: 14px; color: inherit; cursor: default;
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 body.kuro .research-candidate-card:hover { transform: translateY(-2px); border-color: var(--kuro-rose, #d36a8a); box-shadow: 0 20px 44px rgba(80, 105, 150, 0.13); }
-body.kuro .research-candidate-product { display: flex; align-items: center; gap: 14px; min-width: 0; }
-body.kuro .research-thumb { width: 92px; height: 92px; border-radius: 14px; }
+body.kuro .research-candidate-product { display: flex; align-items: center; gap: 12px; min-width: 0; }
+body.kuro .research-thumb { width: 76px; height: 76px; border-radius: 12px; flex: 0 0 auto; }
 body.kuro .research-tag { background: rgba(94, 157, 255, 0.16); color: #2d5fa8; }
-body.kuro .research-candidate-card .product h4 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-body.kuro .research-analysis { display: grid; gap: 9px; padding: 13px; }
-body.kuro .research-analysis .metric { width: 100%; min-width: 0; }
-body.kuro .research-analysis .reason { margin-top: 0; padding: 9px 10px; font-size: 12px; }
-body.kuro .research-analysis .selection-feedback-actions { margin-top: 0; }
-body.kuro .research-card-footer { margin-top: auto; display: flex; align-items: center; min-height: 20px; }
+body.kuro .research-candidate-card .product h4 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+body.kuro .research-candidate-meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-height: 28px; }
+body.kuro .research-compact-status,
+body.kuro .research-direction-chip {
+  display: inline-flex; align-items: center; gap: 5px; min-width: 0;
+  padding: 6px 8px; border-radius: 999px; font-size: 11px; line-height: 1.25;
+}
+body.kuro .research-compact-status { background: rgba(238, 243, 254, .88); color: var(--kuro-muted); }
+body.kuro .research-compact-status strong { color: var(--kuro-ink); font-size: 11px; }
+body.kuro .research-direction-chip { max-width: 100%; background: rgba(224, 246, 235, .78); color: #47705a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.kuro .research-card-footer { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 24px; }
 body.kuro .research-source-link, body.kuro .research-source-pending { font-size: 13px; font-weight: 700; }
 body.kuro .research-source-link { color: var(--kuro-blue); text-decoration: none; }
 body.kuro .research-source-link:hover { text-decoration: underline; }
 body.kuro .research-source-pending { color: var(--kuro-muted); }
+body.kuro .research-candidate-actions { margin-left: auto; position: relative; }
+body.kuro .research-candidate-actions summary { color: var(--kuro-muted); cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
+body.kuro .research-candidate-actions .selection-feedback-actions { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 4; width: max-content; max-width: 260px; margin: 0; padding: 8px; border: 1px solid var(--kuro-line); border-radius: 12px; background: #fff; box-shadow: 0 12px 30px rgba(50, 70, 110, .16); }
 .op-card:hover {
   transform: translateY(-2px);
   border-color: var(--kuro-rose, #d36a8a);
@@ -888,6 +896,7 @@ body.kuro #homeFeed {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 15px;
 }
+body.kuro #homeFeed > .research-queue { grid-column: 1 / -1; }
 body.kuro #homeFeed > .empty-state,
 body.kuro #homeFeed > .feed-sentinel { grid-column: 1 / -1; }
 body.kuro #homeFeed .discovery-op-card {
