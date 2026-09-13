@@ -102,6 +102,37 @@ class WameijiBrowserAdapter(BrowserHarnessAdapter):
             )
         parser = _WameijiDetailParser()
         parser.feed(html)
+        if not parser._scope_seen and _is_generic_listing_fallback_page(html):
+            return AdapterStatus(
+                status="ok",
+                items=[
+                    replace(
+                        search_item,
+                        availability="sold_out",
+                        detail_verified=True,
+                        price_cny_display=None,
+                        raw_text=(
+                            "Wameiji detail URL resolved to a generic listings page; "
+                            "the source listing is no longer purchasable."
+                        ),
+                    )
+                ],
+            )
+        title = " ".join(parser._title_parts).strip()
+        if title and parser.availability() == "sold_out":
+            return AdapterStatus(
+                status="ok",
+                items=[
+                    replace(
+                        search_item,
+                        title=title,
+                        availability="sold_out",
+                        detail_verified=True,
+                        price_cny_display=None,
+                        raw_text=" ".join(parser.text_parts),
+                    )
+                ],
+            )
         item = _detail_item_from_parser(
             parser,
             search_item,
@@ -244,6 +275,7 @@ class _WameijiDetailParser(HTMLParser):
         "market-detail",
         "street-detail",
         "paypay",
+        "goods",
     }
     _EXCLUDED_CLASSES = {
         "other-item",
@@ -440,6 +472,9 @@ class _WameijiDetailParser(HTMLParser):
         if explicit_availability != "unknown_but_visible":
             return explicit_availability
         scoped_text = " ".join(self.text_parts).lower()
+        scoped_availability = _detect_availability(scoped_text)
+        if scoped_availability != "unknown_but_visible":
+            return scoped_availability
         if self._has_purchase_action or any(
             token in scoped_text for token in self._AVAILABLE_TEXT_TOKENS
         ):
@@ -1056,6 +1091,22 @@ def _is_removed_listing_page(html: str) -> bool:
     return (
         any(marker in lowered for marker in _REMOVED_LISTING_MARKERS)
         and any(class_name in lowered for class_name in _REMOVED_LISTING_CLASSES)
+    )
+
+
+def _is_generic_listing_fallback_page(html: str) -> bool:
+    """Detect a stale detail route rendered as a marketplace-wide result grid.
+
+    A real product detail is parsed only after a known primary component has
+    been found.  When no such component exists and the page is entirely the
+    generic ``goods-list`` shell, the original listing cannot be bought; do
+    not mistake one of the unrelated cards for the requested product.
+    """
+
+    lowered = html.casefold()
+    return all(
+        marker in lowered
+        for marker in ("goods-list-wrap", "goods-list", "goods-item", "goods-name")
     )
 
 """Wameiji 真实 Playwright 读取执行器。

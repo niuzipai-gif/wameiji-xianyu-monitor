@@ -455,6 +455,68 @@ def test_parse_detail_html_marks_a_deleted_listing_sold_out_without_using_relate
     assert item.detail_verified is True
 
 
+def test_parse_detail_html_marks_a_sold_goods_component_unavailable() -> None:
+    """A resolved but sold listing is terminal evidence, not a parser outage."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="Search card title",
+        price=1200,
+        currency="JPY",
+        external_item_id="z680925838",
+        url="/mall/paypay/detail/z680925838",
+        availability="unknown_but_visible",
+    )
+    detail_html = """
+    <div class="main"><div class="goods">
+      <div class="name-box"><h1 class="name">初回限定盤 ３CD+DVD｜日本の恋と、ユーミンと。</h1></div>
+      <div class="tag-box">二手 有些许损伤或污渍</div>
+      <div class="sku-item"><span class="item-name">价格</span>
+        <div class="price-box price-box-total"><span class="num">已售出</span></div>
+      </div>
+    </div></div>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert len(status.items) == 1
+    item = status.items[0]
+    assert item.title == "初回限定盤 ３CD+DVD｜日本の恋と、ユーミンと。"
+    assert item.availability == "sold_out"
+    assert item.detail_verified is True
+
+
+def test_parse_detail_html_marks_a_generic_listing_fallback_unavailable() -> None:
+    """A dead detail link can render a generic search grid instead of its item."""
+    search_item = MarketItem(
+        source="wameiji",
+        title="Mrs. GREEN APPLE 10周年ベストアルバム 初回限定盤",
+        price=1900,
+        currency="JPY",
+        external_item_id="stale-mercari-listing",
+        url="/mall/mercari/detail/stale-mercari-listing",
+        availability="unknown_but_visible",
+    )
+    detail_html = """
+    <div class="goods-list-wrap"><div class="goods-list">
+      <article class="goods-item">
+        <span class="goods-name">Unrelated recommendation CD</span>
+        <span class="price-com">300 日元</span>
+      </article>
+    </div></div>
+    """
+
+    status = WameijiBrowserAdapter(enabled=True).parse_detail_html(detail_html, search_item)
+
+    assert status.status == "ok"
+    assert len(status.items) == 1
+    item = status.items[0]
+    assert item.title == search_item.title
+    assert item.price == search_item.price
+    assert item.availability == "sold_out"
+    assert item.detail_verified is True
+
+
 def test_parse_detail_html_recognizes_street_detail_primary_container() -> None:
     search_item = MarketItem(
         source="wameiji",
